@@ -273,9 +273,7 @@ function selectState(state) {
   // El estado Personalizado usa su propia portadora (el slider de base).
   if (state.custom && carrier !== 'personalizado') {
     carrier = 'personalizado';
-    carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
-      b.classList.toggle('active', b.dataset.carrier === carrier),
-    );
+    syncCarrierChips();
   }
   cards.forEach((c) => c.classList.toggle('selected', c.dataset.id === state.id));
   accentColor = state.color;
@@ -357,6 +355,7 @@ function start() {
   updateStatus();
   armTimer();
   saveSession();
+  updateRotControls();
 }
 
 function stop() {
@@ -369,6 +368,7 @@ function stop() {
   disarmTimer();
   recordHistory();
   saveSession();
+  updateRotControls();
 }
 
 // ---------------------------------------------------------------- Historial
@@ -653,9 +653,7 @@ customWave.addEventListener('change', () => {
 function applyCarrier(c) {
   if (!(c in CARRIER_BASE)) return;
   carrier = c;
-  carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
-    b.classList.toggle('active', b.dataset.carrier === carrier),
-  );
+  syncCarrierChips();
   updateCustomPanel();
   if (playing) {
     engine.retune(currentParams());
@@ -729,7 +727,10 @@ function showToast(msg) {
 // (/?state=…) y fallback a copiar el enlace.
 const shareBtn = document.getElementById('share-btn');
 shareBtn.innerHTML = ICONS.share;
-shareBtn.addEventListener('click', async () => {
+
+// Compartir: Web Share API con deep link al estado + portadora seleccionados
+// y fallback a copiar el enlace. Lo usan el botón principal y el del modo girado.
+async function shareLink() {
   const url = `${location.origin}/?${currentUrlParams()}`;
   const data = {
     title: 'Vyneural',
@@ -755,7 +756,8 @@ shareBtn.addEventListener('click', async () => {
     /* portapapeles bloqueado: sigue al fallback */
   }
   window.prompt('Copia el enlace:', url);
-});
+}
+shareBtn.addEventListener('click', shareLink);
 
 // Pantalla completa / modo inmersivo: el visualizador y los controles
 // ocupan toda la pantalla. En teléfono se intenta bloquear la orientación
@@ -766,12 +768,63 @@ const rotateOverlay = document.getElementById('rotate-overlay');
 const isTouchDevice = () =>
   (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) && window.innerWidth < 900;
 const isLandscape = () => window.matchMedia('(orientation: landscape)').matches;
+// Modo girado: pantalla completa en un teléfono en vertical. El contenido se
+// gira 90° con CSS y las gotas se dibujan a lo largo del eje Y del canvas
+// para que aparezcan en horizontal sobre la pantalla (portraitImmersive).
+let portraitImmersive = false;
+const portraitQuery = window.matchMedia('(max-width: 900px) and (orientation: portrait)');
 
 function updateRotateOverlay() {
+  portraitImmersive = document.body.classList.contains('immersive') && portraitQuery.matches;
+  updateRotControls();
   if (!rotateOverlay) return;
-  const show =
-    document.body.classList.contains('immersive') && isTouchDevice() && !isLandscape();
+  const show = portraitImmersive && isTouchDevice() && !isLandscape();
   rotateOverlay.classList.toggle('hidden', !show);
+}
+
+// ---------------------------------------------------------------- Controles del modo girado
+// En un teléfono en vertical a pantalla completa, junto a las gotas en
+// horizontal se muestra una barra compacta (fuera del contenedor girado, así
+// queda legible) con play, compartir y las portadoras.
+const rotControls = document.getElementById('rot-controls');
+const rotCarrierGroup = document.getElementById('rot-carriers');
+const rotPlayBtn = document.getElementById('rot-play');
+const rotShareBtn = document.getElementById('rot-share');
+
+// Marca la portadora activa tanto en la fila principal como en la del modo girado.
+function syncCarrierChips() {
+  const groups = [carrierOptions, rotCarrierGroup].filter(Boolean);
+  groups.forEach((g) =>
+    g.querySelectorAll('.carrier-btn').forEach((b) =>
+      b.classList.toggle('active', b.dataset.carrier === carrier),
+    ),
+  );
+}
+
+function updateRotControls() {
+  if (!rotControls) return;
+  rotControls.classList.toggle('hidden', !portraitImmersive);
+  if (rotPlayBtn) {
+    rotPlayBtn.querySelector('.play-text').textContent = playing ? 'Pausar' : 'Comenzar';
+    rotPlayBtn.querySelector('.play-icon').innerHTML = playing ? ICONS.pause : ICONS.play;
+  }
+}
+
+if (rotPlayBtn) {
+  rotPlayBtn.addEventListener('click', () => {
+    if (playing) stop();
+    else start();
+  });
+}
+if (rotShareBtn) {
+  rotShareBtn.innerHTML = ICONS.share;
+  rotShareBtn.addEventListener('click', shareLink);
+}
+if (rotCarrierGroup) {
+  rotCarrierGroup.addEventListener('click', (e) => {
+    const btn = e.target.closest('.carrier-btn');
+    if (btn) applyCarrier(btn.dataset.carrier);
+  });
 }
 
 fullscreenBtn.innerHTML = ICONS.expand;
@@ -805,6 +858,8 @@ document.addEventListener('fullscreenchange', () => {
   fullscreenBtn.innerHTML = on ? ICONS.compress : ICONS.expand;
   fullscreenBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
   updateRotateOverlay();
+  // El canvas se re-mide al entrar/salir del modo (el layout cambia).
+  resizeCanvas();
 });
 // Si el usuario rota el teléfono o cambia el tamaño, el aviso se actualiza solo.
 window.addEventListener('resize', updateRotateOverlay);
@@ -1002,10 +1057,15 @@ function drawVisual() {
   const p = currentParams();
   const beat = Math.max(0.5, p.beat);
 
-  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2.
-  const poolR = Math.min(h, w / 3) * 0.4;
+  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2. En el modo
+  // girado (pantalla completa en un teléfono vertical) la fila se dibuja a lo
+  // largo del eje Y: al girar el lienzo 90° las gotas quedan horizontales en
+  // pantalla, invitando a girar el celular.
+  const rotated = portraitImmersive;
+  const poolR = rotated ? Math.min(w, h / 3) * 0.45 : Math.min(h, w / 3) * 0.4;
+  const cxs = rotated ? [w / 2, w / 2, w / 2] : [w / 6, w / 2, (5 * w) / 6];
+  const cys = rotated ? [(5 * h) / 6, h / 2, h / 6] : [h / 2, h / 2, h / 2];
   const cy = h / 2;
-  const cxs = [w / 6, w / 2, (5 * w) / 6];
 
   // Fase del latido real, tomada del reloj del AudioContext para que las
   // ondas brillen exactamente cuando suena el latido (fase 0 = pulso).
@@ -1093,27 +1153,27 @@ function drawVisual() {
   const rgbR = LANE_RIGHT_COLOR_RGB;
   const rgbA = ACCENT_RGB;
 
-  drawField(waveLeft, rgbL, cxs[0], cy, poolR, null, 1);
-  drawField(waveRight, rgbR, cxs[2], cy, poolR, null, 1);
+  drawField(waveLeft, rgbL, cxs[0], cys[0], poolR, null, 1);
+  drawField(waveRight, rgbR, cxs[2], cys[2], poolR, null, 1);
   // La gota del cerebro combina las tres frecuencias por dominancia local.
   renderBrain();
-  drawField({ render: () => brainCanvas }, null, cxs[1], cy, poolR, null, 1);
+  drawField({ render: () => brainCanvas }, null, cxs[1], cys[1], poolR, null, 1);
 
   const pools = [
-    { cx: cxs[0], color: LANE_LEFT_COLOR },
-    { cx: cxs[1], color: accentColor },
-    { cx: cxs[2], color: LANE_RIGHT_COLOR },
+    { x: cxs[0], y: cys[0], color: LANE_LEFT_COLOR },
+    { x: cxs[1], y: cys[1], color: accentColor },
+    { x: cxs[2], y: cys[2], color: LANE_RIGHT_COLOR },
   ];
 
   pools.forEach((pool) => {
     // Sombreado esférico: los bordes se oscurecen para que se lea como
     // una gota esférica de agua con luz.
     const shade = ctx2d.createRadialGradient(
-      pool.cx - poolR * 0.25,
-      cy - poolR * 0.25,
+      pool.x - poolR * 0.25,
+      pool.y - poolR * 0.25,
       poolR * 0.15,
-      pool.cx,
-      cy,
+      pool.x,
+      pool.y,
       poolR,
     );
     shade.addColorStop(0, 'rgba(0,0,0,0)');
@@ -1121,19 +1181,19 @@ function drawVisual() {
     shade.addColorStop(1, 'rgba(0,0,0,0.3)');
     ctx2d.fillStyle = shade;
     ctx2d.beginPath();
-    ctx2d.arc(pool.cx, cy, poolR, 0, Math.PI * 2);
+    ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
     ctx2d.fill();
 
     // Luz entrando en la gota: brillo suave y destello especular arriba a la izquierda.
-    const hx = pool.cx - poolR * 0.32;
-    const hy = cy - poolR * 0.38;
+    const hx = pool.x - poolR * 0.32;
+    const hy = pool.y - poolR * 0.38;
     const hg = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.45);
     hg.addColorStop(0, 'rgba(255,255,255,0.3)');
     hg.addColorStop(0.3, 'rgba(255,255,255,0.07)');
     hg.addColorStop(1, 'rgba(255,255,255,0)');
     ctx2d.fillStyle = hg;
     ctx2d.beginPath();
-    ctx2d.arc(pool.cx, cy, poolR, 0, Math.PI * 2);
+    ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
     ctx2d.fill();
 
     const gl = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.13);
@@ -1148,15 +1208,15 @@ function drawVisual() {
   // Núcleo de la gota central: el cerebro, pulsa suave con el latido real.
   const brain = pools[1];
   const coreR = poolR * 0.17 * (0.85 + eased * 0.4);
-  const glow = ctx2d.createRadialGradient(brain.cx, cy, 0, brain.cx, cy, coreR * 3.2);
+  const glow = ctx2d.createRadialGradient(brain.x, brain.y, 0, brain.x, brain.y, coreR * 3.2);
   glow.addColorStop(0, hexToRgba(accentColor, 0.5 + eased * 0.3));
   glow.addColorStop(1, hexToRgba(accentColor, 0));
   ctx2d.fillStyle = glow;
   ctx2d.beginPath();
-  ctx2d.arc(brain.cx, cy, coreR * 3.2, 0, Math.PI * 2);
+  ctx2d.arc(brain.x, brain.y, coreR * 3.2, 0, Math.PI * 2);
   ctx2d.fill();
   ctx2d.beginPath();
-  ctx2d.arc(brain.cx, cy, coreR, 0, Math.PI * 2);
+  ctx2d.arc(brain.x, brain.y, coreR, 0, Math.PI * 2);
   ctx2d.fillStyle = hexToRgba('#ffffff', 0.4 + eased * 0.4);
   ctx2d.fill();
 
@@ -1236,10 +1296,8 @@ const initial = STATES.find((s) => s.id === wantId) || STATES[0];
 restoreSession(savedSession);
 selectState(initial);
 updateCustomLabels();
-// Marca la portadora activa y muestra el panel si corresponde.
-carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
-  b.classList.toggle('active', b.dataset.carrier === carrier),
-);
+// Marca la portadora activa (fila principal y modo girado) y muestra el panel.
+syncCarrierChips();
 updateCustomPanel();
 updateCarrierWarning();
 updateAmbientButtons();

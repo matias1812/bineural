@@ -363,12 +363,26 @@
         conduces o manejas maquinaria.
       </p>
     </footer>
-    <!-- En teléfono, el modo inmersivo obliga a girar el dispositivo a horizontal. -->
-    <div id="rotate-overlay" class="rotate-overlay hidden" role="alertdialog" aria-label="Gira tu teléfono">
-      <div class="ro-card">
-        <div class="ro-phone" aria-hidden="true">📱</div>
-        <p class="ro-title">Gira tu teléfono</p>
-        <p class="ro-sub">El modo inmersivo se ve mejor en horizontal.</p>
+    <!-- En teléfono, el modo inmersivo se muestra en horizontal (contenido girado)
+         y un aviso compacto invita a girar el dispositivo. -->
+    <div id="rotate-overlay" class="rotate-overlay hidden" role="status" aria-label="Gira tu teléfono">
+      <span class="ro-phone" aria-hidden="true">📱</span>
+      <span>Gira tu teléfono</span>
+    </div>
+    <!-- Barra compacta del modo girado: play, compartir y portadoras. -->
+    <div id="rot-controls" class="rot-controls hidden">
+      <button id="rot-share" class="icon-btn" aria-label="Compartir esta frecuencia" title="Compartir enlace"></button>
+      <button id="rot-play" class="play-btn rot-play">
+        <span class="play-icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>
+        <span class="play-text">Comenzar</span>
+      </button>
+      <div id="rot-carriers" class="rot-carriers">
+        <button class="carrier-btn active" data-carrier="estandar">432</button>
+        <button class="carrier-btn" data-carrier="estandar220">220</button>
+        <button class="carrier-btn" data-carrier="solfeggio">528</button>
+        <button class="carrier-btn" data-carrier="ancestral">136</button>
+        <button class="carrier-btn" data-carrier="schumann">194.7</button>
+        <button class="carrier-btn" data-carrier="personalizado">✎</button>
       </div>
     </div>
     <script type="module" src="/src/site.js"></script>
