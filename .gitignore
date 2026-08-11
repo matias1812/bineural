@@ -4,3 +4,7 @@ dist
 
 .vercel
 .env*
+
+.freebuff/*.db
+.freebuff/*.db-shm
+.freebuff/*.db-wal
