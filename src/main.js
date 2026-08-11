@@ -1,8 +1,12 @@
 import './style.css';
+import { inject } from '@vercel/analytics';
 import { BinauralEngine } from './audio.js';
 import { AmbientEngine } from './ambient.js';
 import { WaveField } from './wavefield.js';
 import { initStarfield } from './starfield.js';
+
+// Initialize Vercel Analytics (no-op in development)
+inject();
 
 initStarfield();
 
