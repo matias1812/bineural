@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ondas-binaurales.vercel.app/sitemap.xml

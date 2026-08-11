@@ -6,16 +6,6 @@ import { initStarfield } from './starfield.js';
 
 initStarfield();
 
-// Enrutado mínimo: cualquier ruta que no exista → página 404.
-// (Funciona en servidores con SPA-fallback; para hosts con 404.html propio
-// ya existe public/404.html.)
-{
-  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
-  if (pathname !== '/' && pathname !== '/index.html' && pathname !== '/404.html') {
-    window.location.replace('/404.html');
-  }
-}
-
 const engine = new BinauralEngine();
 const ambient = new AmbientEngine();
 

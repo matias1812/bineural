@@ -3,17 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ondas Binaurales — Encuentra tu estado</title>
+    <title>Ondas Binaurales — Generador online gratis de meditación, sueño y concentración</title>
     <meta
       name="description"
-      content="Genera ondas binaurales para meditación, sueño, relajación y concentración. Usa audífonos."
+      content="Genera ondas binaurales gratis en tu navegador: meditación, sueño profundo, relajación, concentración y estudio. Frecuencias theta, delta, alfa, beta y gamma con sonidos de ambiente en tiempo real. Usa audífonos."
     />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a78bfa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 18v-6a9 9 0 0 1 18 0v6'/><path d='M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z'/></svg>"
+    <meta
+      name="keywords"
+      content="ondas binaurales, binaural beats, generador de ondas binaurales, meditación, sueño profundo, relajación, concentración, estudio, theta, delta, alfa, beta, gamma, resonancia schumann"
     />
-    <script type="module" crossorigin src="/assets/index-CUYi3DTj.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DUL8GkzH.css">
+    <meta name="author" content="Ondas Binaurales" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="canonical" href="https://ondas-binaurales.vercel.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Ondas Binaurales" />
+    <meta property="og:title" content="Ondas Binaurales — Generador online gratis" />
+    <meta
+      property="og:description"
+      content="Genera ondas binaurales gratis en tu navegador: meditación, sueño, relajación y concentración. Todo en tiempo real con la Web Audio API."
+    />
+    <meta property="og:url" content="https://ondas-binaurales.vercel.app/" />
+    <meta property="og:image" content="https://ondas-binaurales.vercel.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Ondas Binaurales — Generador online gratis" />
+    <meta
+      name="twitter:description"
+      content="Genera ondas binaurales gratis en tu navegador: meditación, sueño, relajación y concentración."
+    />
+    <meta name="twitter:image" content="https://ondas-binaurales.vercel.app/og.png" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- Datos estructurados: aplicación web -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Ondas Binaurales",
+        "url": "https://ondas-binaurales.vercel.app/",
+        "description": "Generador gratuito de ondas binaurales para meditación, sueño, relajación y concentración, con sonidos de ambiente generados en tiempo real en el navegador.",
+        "applicationCategory": "HealthApplication",
+        "operatingSystem": "Any",
+        "inLanguage": "es",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "publisher": { "@type": "Organization", "name": "Ondas Binaurales" }
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/main-B0OB_n8g.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/site-B_bIjVE5.js">
+    <link rel="stylesheet" crossorigin href="/assets/site-DLlyvcjx.css">
+    <link rel="stylesheet" crossorigin href="/assets/main-DUL8GkzH.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -45,6 +94,22 @@
     </div>
 
     <canvas id="starfield" aria-hidden="true"></canvas>
+
+    <header class="site-nav">
+      <a class="site-brand" href="/">
+        <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+        Ondas Binaurales
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+      <nav class="site-links" id="site-links" aria-label="Navegación principal">
+        <a href="/">Generador</a>
+        <a href="/que-son-las-ondas-binaurales">Qué son</a>
+        <a href="/beneficios">Beneficios</a>
+        <a href="/como-usar">Cómo usar</a>
+        <a href="/sobre-nosotros">Nosotros</a>
+        <a class="nav-cta" href="/#states-grid">Probar ahora</a>
+      </nav>
+    </header>
 
     <div class="wrap">
       <header class="hero">
@@ -193,7 +258,50 @@
         </p>
       </section>
 
-      <footer class="footer">Hecho con <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> · Web Audio API · Vite · <a href="#sobre">Sobre nosotros</a></footer>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="site-brand" href="/">
+            <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+            Ondas Binaurales
+          </a>
+          <p>
+            Frecuencias binaurales generadas en tiempo real en tu navegador con la
+            Web Audio API. Sin cuentas, sin grabaciones, sin servidores.
+          </p>
+        </div>
+        <div class="footer-col">
+          <h4>Explora</h4>
+          <a href="/">Generador</a>
+          <a href="/que-son-las-ondas-binaurales">Qué son las ondas binaurales</a>
+          <a href="/beneficios">Beneficios</a>
+          <a href="/como-usar">Cómo usar</a>
+        </div>
+        <div class="footer-col">
+          <h4>Estados</h4>
+          <a href="/#states-grid">Meditación</a>
+          <a href="/#states-grid">Sueño profundo</a>
+          <a href="/#states-grid">Concentración</a>
+          <a href="/#states-grid">Resonancia Schumann</a>
+        </div>
+        <div class="footer-col">
+          <h4>Sitio</h4>
+          <a href="/sobre-nosotros">Sobre nosotros</a>
+          <a href="/privacidad">Privacidad</a>
+          <a href="/sobre-nosotros#contacto">Contacto</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span data-year>2026</span> Ondas Binaurales · Hecho con <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> · Web Audio API · Vite</span>
+        <span>Desplegado con Vercel</span>
+      </div>
+      <p class="footer-disclaimer">
+        Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+        médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
+        conduces o manejas maquinaria.
+      </p>
+    </footer>
   </body>
 </html>
