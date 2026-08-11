@@ -1,5 +1,5 @@
 /* ================================================================
-   Ondas Binaurales — Estilos compartidos del sitio
+   Vyneural — Estilos compartidos del sitio
    Nav, footer y páginas de contenido. Aesthetic cósmica igual que
    la app (src/style.css).
    ================================================================ */
@@ -480,6 +480,14 @@ a:hover {
   .footer-grid {
     grid-template-columns: 1fr;
   }
+
+  .page-hero {
+    padding: 48px 16px 28px;
+  }
+
+  .page-body {
+    padding: 0 16px 48px;
+  }
 }
 
 .footer-brand .site-brand {
@@ -577,6 +585,29 @@ a:hover {
 
 .page-hero {
   animation-delay: 0.05s;
+}
+
+/* ---------------------------------------------------------------- Redes sociales */
+.social-link,
+.footer-social {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.footer-social {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.footer-social:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.footer-social .ico {
+  color: #f472b6;
 }
 
 .page-body > * {

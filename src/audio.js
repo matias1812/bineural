@@ -100,6 +100,35 @@ export class BinauralEngine {
     this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
   }
 
+  // Reajusta las frecuencias en marcha con una transición suave (ramp),
+  // sin reiniciar los osciladores ni cortar el sonido: al cambiar de estado
+  // la portadora y el latido se deslizan hasta los valores nuevos.
+  retune({ base, beat }) {
+    if (!this.ctx || !this.leftOsc) return;
+    const now = this.ctx.currentTime;
+    this.leftOsc.frequency.setTargetAtTime(base, now, 0.4);
+    this.rightOsc.frequency.setTargetAtTime(base + beat, now, 0.4);
+    this._base = base;
+    this.beat = beat;
+  }
+
+  // Desvanece el volumen maestro a cero (fade-out) durante `duration` ms y
+  // avisa al terminar, para que el final del temporizador no corte en seco.
+  fadeAndStop(duration = 2000, done) {
+    const ctx = this.ctx;
+    if (!ctx || !this.leftOsc) {
+      if (done) done();
+      return;
+    }
+    const now = ctx.currentTime;
+    this.masterGain.gain.cancelScheduledValues(now);
+    this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
+    this.masterGain.gain.linearRampToValueAtTime(0.0001, now + duration / 1000);
+    setTimeout(() => {
+      if (done) done();
+    }, duration + 80);
+  }
+
   // Dispara onBeatPulse cada latido binaural (para la animación visual).
   // El timer se auto-corrige con el reloj del AudioContext para no acumular
   // deriva y quedar siempre alineado con la fase real del latido.

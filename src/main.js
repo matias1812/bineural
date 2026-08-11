@@ -55,6 +55,7 @@ const ICONS = {
   grid: icon('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
   volume: icon('<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>'),
   clock: icon('<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>'),
+  history: icon('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>'),
   leaf: icon('<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>'),
   droplet: icon('<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>'),
   tree: icon('<path d="M12 2l-4.5 8h3L6 18h12l-4.5-8h3z"/><path d="M12 18v3"/>'),
@@ -64,6 +65,10 @@ const ICONS = {
   heart: icon('<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>'),
   play: icon('<polygon points="6 3 20 12 6 21 6 3"/>'),
   pause: icon('<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>'),
+  star: icon('<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>'),
+  share: icon('<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/>'),
+  expand: icon('<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>'),
+  compress: icon('<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>'),
 };
 
 // ---------------------------------------------------------------- Estados
@@ -130,22 +135,125 @@ let timerEnd = 0;
 let timerInterval = null;
 let lastPulse = 0;
 let accentColor = STATES[0].color;
+let sessionStartTime = 0;
+let fading = false;
+// Colores del visualizador (se inicializan aquí para que estén disponibles
+// desde el arranque; selectState los actualiza al elegir estado).
+let LANE_LEFT_COLOR = '#60a5fa';
+let LANE_RIGHT_COLOR = '#f472b6';
+let LANE_LEFT_COLOR_RGB = [96, 165, 250];
+let LANE_RIGHT_COLOR_RGB = [244, 114, 182];
+let ACCENT_RGB = [167, 139, 250];
+
+// ---------------------------------------------------------------- Persistencia local
+// Todo queda en localStorage (sin servidores ni cuentas): la sesión (último
+// estado, volumen, ambientes y temporizador), los favoritos y el historial
+// de sesiones.
+const LS_SESSION = 'ob-session-v1';
+const LS_FAVS = 'ob-favs-v1';
+const LS_HISTORY = 'ob-history-v1';
+
+function lsGet(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v == null ? fallback : v;
+  } catch (_) {
+    return fallback;
+  }
+}
+function lsSet(key, val) {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch (_) {
+    /* almacenamiento no disponible */
+  }
+}
+
+// ---------------------------------------------------------------- Portadora
+// La portadora (f1) es ortogonal al estado: el estado define el Δf (latido)
+// y la portadora define la frecuencia base. Así cualquier combinación es
+// posible (p. ej. Beta + 136,1 Hz) sin multiplicar los presets fijos.
+const LS_CARRIER = 'ob-carrier-v1';
+const CARRIER_BASE = { estandar: null, estandar220: 220, solfeggio: 528, ancestral: 136.1, schumann: 194.7, personalizado: 'custom' };
+// Referencia estándar sobre la que se escala: la afinación de referencia es
+// A=432 Hz (Verdi) en lugar de la base canónica de 220 Hz.
+const STANDARD_BASE = 432;
+// Escalado proporcional (opción B): cada preset conserva su identidad relativa
+// al elegir una familia de portadora (528 Solfeggio, 136,1 Ancestral). En vez
+// de fijar la misma base para todos, se multiplica la base propia del estado
+// por la razón familia/estándar: un preset de 432 Hz → 528 Hz exacto en la
+// familia Solfeggio, y los presets más graves que el estándar siguen sonando
+// más graves que los agudos, todos "afinados" a la misma referencia.
+function scaleCarrier(originalF1, targetBase) {
+  return +(originalF1 * (targetBase / STANDARD_BASE)).toFixed(1);
+}
+let carrier = lsGet(LS_CARRIER, 'estandar');
+if (!(carrier in CARRIER_BASE)) carrier = 'estandar';
+const carrierOptions = document.getElementById('carrier-options');
+const carrierWarning = document.getElementById('carrier-warning');
+
+let favorites = new Set(lsGet(LS_FAVS, []));
 
 // ---------------------------------------------------------------- Tarjetas
 const cards = STATES.map((s) => {
   const card = document.createElement('button');
   card.className = 'card';
   card.dataset.id = s.id;
+  const fav = favorites.has(s.id);
   card.innerHTML = `
+    <span class="card-star${fav ? ' fav' : ''}" role="button" tabindex="0" aria-label="Marcar ${s.name} como favorito" aria-pressed="${fav}">${ICONS.star}</span>
     <span class="card-icon" style="color:${s.color}">${s.icon}</span>
     <span class="card-name">${s.name}</span>
     <span class="card-band">${s.band}</span>
     <span class="card-desc">${s.desc}</span>
   `;
   card.addEventListener('click', () => selectState(s));
+  const star = card.querySelector('.card-star');
+  star.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleFav(s, star);
+  });
+  star.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFav(s, star);
+    }
+  });
   grid.appendChild(card);
   return card;
 });
+
+// Marca o desmarca un estado como favorito (persistente en localStorage).
+function toggleFav(state, starEl) {
+  if (favorites.has(state.id)) favorites.delete(state.id);
+  else favorites.add(state.id);
+  lsSet(LS_FAVS, [...favorites]);
+  if (starEl) {
+    starEl.classList.toggle('fav', favorites.has(state.id));
+    starEl.setAttribute('aria-pressed', String(favorites.has(state.id)));
+  }
+  // Si estamos filtrando por favoritos, actualizar la rejilla al momento.
+  const activeChip = bandFilter.querySelector('.band-chip.active');
+  if (activeChip && activeChip.dataset.band === 'favs') applyBandFilter('favs');
+}
+
+// Guarda la sesión actual (último estado, volumen, ambientes y temporizador)
+// para recuperarla al volver a la página.
+function saveSession() {
+  const layerVolumes = {};
+  document.querySelectorAll('#ambient-volumes input').forEach((i) => {
+    layerVolumes[i.dataset.type] = parseFloat(i.value);
+  });
+  lsSet(LS_SESSION, {
+    state: selected.id,
+    volume: volumeLevel,
+    ambient: [...ambientTypes],
+    ambientVolume: ambientVolumeLevel,
+    layerVolumes,
+    timer: timerMinutes,
+  });
+}
 
 function hexToRgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -162,6 +270,13 @@ function mixHex(hexA, hexB, t) {
 
 function selectState(state) {
   selected = state;
+  // El estado Personalizado usa su propia portadora (el slider de base).
+  if (state.custom && carrier !== 'personalizado') {
+    carrier = 'personalizado';
+    carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
+      b.classList.toggle('active', b.dataset.carrier === carrier),
+    );
+  }
   cards.forEach((c) => c.classList.toggle('selected', c.dataset.id === state.id));
   accentColor = state.color;
   ACCENT_RGB = hexToRgb(state.color);
@@ -174,22 +289,43 @@ function selectState(state) {
   LANE_RIGHT_COLOR = mixHex(state.color, '#f472b6', 0.5);
   LANE_LEFT_COLOR_RGB = hexToRgb(LANE_LEFT_COLOR);
   LANE_RIGHT_COLOR_RGB = hexToRgb(LANE_RIGHT_COLOR);
-  customPanel.classList.toggle('hidden', !state.custom);
+  updateCustomPanel();
   updateStatus();
-  if (playing) applyAudio();
+  updateCarrierWarning();
+  if (playing) {
+    // Transición suave: las frecuencias se deslizan sin cortar el sonido.
+    engine.retune(currentParams());
+    applyAmbient();
+  }
+  saveSession();
+  updateUrl();
 }
 
 // ---------------------------------------------------------------- Audio
 function currentParams() {
+  let base;
   if (selected.custom) {
-    return {
-      base: parseFloat(customBase.value),
-      beat: parseFloat(customBeat.value),
-      wave: customWave.value,
-      volume: volumeLevel,
-    };
+    base = parseFloat(customBase.value);
+  } else if (carrier === 'solfeggio' || carrier === 'ancestral') {
+    // Escalado proporcional: el estado conserva su identidad relativa dentro
+    // de la familia elegida (p. ej. en 528: Paz → 528 Hz, Gateway → 480 Hz).
+    base = scaleCarrier(selected.base, CARRIER_BASE[carrier]);
+  } else if (carrier === 'schumann') {
+    // La portadora Schumann usa 194,7 Hz literal como f1 (la base tonal);
+    // el latido lo sigue dando el estado. No es una familia escalada.
+    base = 194.7;
+  } else if (carrier === 'estandar220') {
+    // Estándar impuesto: 220 Hz fijo como f1 (la base tonal), para todos
+    // los estados; el latido lo sigue dando cada estado.
+    base = 220;
+  } else if (carrier === 'personalizado') {
+    base = parseFloat(customBase.value);
+  } else {
+    base = selected.base; // estándar: la base propia del estado
   }
-  return { base: selected.base, beat: selected.beat, wave: 'sine', volume: volumeLevel };
+  const beat = selected.custom ? parseFloat(customBeat.value) : selected.beat;
+  const wave = selected.custom ? customWave.value : 'sine';
+  return { base, beat, wave, volume: volumeLevel };
 }
 
 function applyAudio() {
@@ -211,12 +347,16 @@ function start() {
   engine.onBeatPulse = () => {
     lastPulse = performance.now();
   };
-  applyAudio();
+  // `playing` se marca antes de applyAudio(): applyAmbient() depende de él
+  // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
+  sessionStartTime = Date.now();
+  applyAudio();
   playBtn.classList.add('playing');
   playBtn.innerHTML = `<span class="play-icon">${ICONS.pause}</span><span class="play-text">Pausar</span>`;
   updateStatus();
   armTimer();
+  saveSession();
 }
 
 function stop() {
@@ -227,7 +367,112 @@ function stop() {
   playBtn.innerHTML = `<span class="play-icon">${ICONS.play}</span><span class="play-text">Comenzar</span>`;
   updateStatus();
   disarmTimer();
+  recordHistory();
+  saveSession();
 }
+
+// ---------------------------------------------------------------- Historial
+// Registra la sesión terminada (estado, duración real y fecha) en
+// localStorage y refresca el resumen del día.
+function recordHistory() {
+  if (!sessionStartTime) return;
+  const durMin = Math.max(1, Math.round((Date.now() - sessionStartTime) / 60000));
+  const rec = {
+    id: selected.id,
+    name: selected.name,
+    band: selected.band,
+    min: durMin,
+    ts: Date.now(),
+  };
+  const h = lsGet(LS_HISTORY, []);
+  h.push(rec);
+  lsSet(LS_HISTORY, h.slice(-50));
+  sessionStartTime = 0;
+  updateHistory();
+}
+
+// El historial vive en el botón con forma de reloj (esquina superior
+// izquierda del visualizador): solo el icono, y el resumen del día se
+// muestra como tooltip. La lista completa está en el modal.
+function updateHistory() {
+  const btn = document.getElementById('history-btn');
+  if (!btn) return;
+  btn.innerHTML = ICONS.history;
+  const h = lsGet(LS_HISTORY, []);
+  const today = h.filter((r) => new Date(r.ts).toDateString() === new Date().toDateString());
+  if (today.length) {
+    const mins = today.reduce((a, r) => a + r.min, 0);
+    const hm = mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`;
+    btn.setAttribute('aria-label', `Historial de sesiones · ${hm} hoy`);
+    btn.title = `Historial de sesiones · ${hm} hoy`;
+  } else {
+    btn.setAttribute('aria-label', 'Historial de sesiones');
+    btn.title = 'Historial de sesiones';
+  }
+}
+
+function openHistory() {
+  renderHistory();
+  document.getElementById('history-modal').classList.remove('hidden');
+}
+
+function closeHistory() {
+  document.getElementById('history-modal').classList.add('hidden');
+}
+
+function renderHistory() {
+  const h = lsGet(LS_HISTORY, []);
+  const todayEl = document.getElementById('history-today');
+  const list = document.getElementById('history-list');
+  const empty = document.getElementById('history-empty');
+  const today = h.filter((r) => new Date(r.ts).toDateString() === new Date().toDateString());
+  if (today.length) {
+    const mins = today.reduce((a, r) => a + r.min, 0);
+    const hm = mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`;
+    todayEl.classList.remove('hidden');
+    todayEl.innerHTML = `${ICONS.clock} Hoy: <b>${hm}</b> de práctica · ${today.length} ${today.length === 1 ? 'sesión' : 'sesiones'}`;
+  } else {
+    todayEl.classList.add('hidden');
+  }
+  list.innerHTML = '';
+  if (!h.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  [...h].reverse().forEach((r) => {
+    const li = document.createElement('li');
+    const d = new Date(r.ts);
+    const state = STATES.find((s) => s.id === r.id);
+    const when =
+      d.toLocaleDateString('es', { day: 'numeric', month: 'short' }) +
+      ' · ' +
+      d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    li.innerHTML = `
+      <span class="hl-icon" style="color:${state ? state.color : 'var(--accent)'}">${state ? state.icon : ICONS.history}</span>
+      <span class="hl-main"><b>${r.name}</b><small>${r.band} · ${when}</small></span>
+      <span class="hl-min">${r.min} min</span>
+    `;
+    li.addEventListener('click', () => {
+      const st = STATES.find((s) => s.id === r.id);
+      if (st) selectState(st);
+      closeHistory();
+    });
+    list.appendChild(li);
+  });
+}
+
+// Abrir/cerrar el panel de historial.
+document.getElementById('history-btn').addEventListener('click', openHistory);
+document.getElementById('history-close').addEventListener('click', closeHistory);
+document.getElementById('history-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('history-modal')) closeHistory();
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('history-modal').classList.contains('hidden')) {
+    closeHistory();
+  }
+});
 
 playBtn.addEventListener('click', () => {
   if (playing) stop();
@@ -239,6 +484,7 @@ volume.addEventListener('input', () => {
   volumeLevel = parseFloat(volume.value);
   volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
   engine.setVolume(volumeLevel);
+  saveSession();
 });
 
 // ---------------------------------------------------------------- Temporizador
@@ -252,6 +498,11 @@ function armTimer() {
   timerDisplay.classList.remove('hidden');
   timerInterval = setInterval(tickTimer, 250);
   tickTimer();
+  // Pedir permiso de notificación dentro del gesto del usuario, para poder
+  // avisar cuando la sesión termine aunque cambies de pestaña.
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
 }
 
 function tickTimer() {
@@ -259,7 +510,31 @@ function tickTimer() {
   const m = Math.floor(remain / 60);
   const s = remain % 60;
   timerDisplay.innerHTML = `${ICONS.clock} ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  if (remain <= 0) stop();
+  if (remain <= 0) endSession();
+}
+
+// Fin del temporizador: el audio se desvanece suavemente en vez de cortar,
+// se avisa con una notificación (si la pestaña no está visible) y la sesión
+// queda registrada en el historial.
+function endSession() {
+  if (fading) return;
+  fading = true;
+  disarmTimer();
+  timerDisplay.innerHTML = `${ICONS.clock} Desvaneciendo…`;
+  if (document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      new Notification('Vyneural', {
+        body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
+      });
+    } catch (_) {
+      /* el navegador rechazó la notificación */
+    }
+  }
+  engine.fadeAndStop(1800, () => {
+    fading = false;
+    timerDisplay.classList.add('hidden');
+    stop();
+  });
 }
 
 function disarmTimer() {
@@ -276,6 +551,7 @@ timerOptions.addEventListener('click', (e) => {
   timerOptions.querySelectorAll('.timer-btn').forEach((b) => b.classList.toggle('active', b === btn));
   if (playing) armTimer();
   else timerDisplay.classList.add('hidden');
+  saveSession();
 });
 
 // ---------------------------------------------------------------- Ambiente
@@ -289,6 +565,7 @@ ambientVolume.addEventListener('input', () => {
   ambientVolumeLevel = parseFloat(ambientVolume.value);
   ambientVolumeLabel.textContent = `${Math.round(ambientVolumeLevel * 100)}%`;
   ambient.setVolume(ambientVolumeLevel);
+  saveSession();
 });
 
 // Volumen individual por sonido de ambiente.
@@ -298,6 +575,7 @@ document.querySelectorAll('#ambient-volumes input').forEach((inp) => {
     const label = inp.closest('.av').querySelector('b');
     label.textContent = `${Math.round(v * 100)}%`;
     ambient.setLayerVolume(inp.dataset.type, v);
+    saveSession();
   });
 });
 
@@ -329,6 +607,7 @@ ambientOptions.addEventListener('click', (e) => {
     ambientTypes.add(type);
   }
   updateAmbientButtons();
+  saveSession();
   if (playing) {
     applyAmbient();
   } else if (ambientTypes.size > 0) {
@@ -344,14 +623,174 @@ function updateCustomLabels() {
 
 customBase.addEventListener('input', () => {
   updateCustomLabels();
-  if (selected.custom && playing) applyAudio();
+  if ((selected.custom || carrier === 'personalizado') && playing) {
+    engine.retune(currentParams());
+    applyAmbient();
+  }
+  // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
+  updateStatus();
+  updateCarrierWarning();
+  saveSession();
+  updateUrl();
 });
 customBeat.addEventListener('input', () => {
   updateCustomLabels();
-  if (selected.custom && playing) applyAudio();
+  if (selected.custom && playing) {
+    engine.retune(currentParams());
+    applyAmbient();
+  }
+  // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
+  updateStatus();
+  saveSession();
 });
 customWave.addEventListener('change', () => {
   if (selected.custom && playing) applyAudio();
+  updateStatus();
+});
+
+// ---------------------------------------------------------------- Portadora
+// Cambia la portadora activa y reajusta todo (audio, estado, URL, sesión).
+function applyCarrier(c) {
+  if (!(c in CARRIER_BASE)) return;
+  carrier = c;
+  carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
+    b.classList.toggle('active', b.dataset.carrier === carrier),
+  );
+  updateCustomPanel();
+  if (playing) {
+    engine.retune(currentParams());
+    applyAmbient();
+  }
+  updateStatus();
+  updateCarrierWarning();
+  lsSet(LS_CARRIER, carrier);
+  saveSession();
+  updateUrl();
+}
+
+// El panel personalizado se muestra con el estado Personalizado o con la
+// portadora Personalizado; en ese último caso solo aplica la base (el Δf
+// lo sigue dando el estado).
+function updateCustomPanel() {
+  const show = selected.custom || carrier === 'personalizado';
+  customPanel.classList.toggle('hidden', !show);
+  customPanel.querySelectorAll('.custom-beat-only').forEach((el) =>
+    el.classList.toggle('hidden', !selected.custom),
+  );
+}
+
+// Aviso sutil si la portadora es tan grave que el latido se percibe mal.
+function updateCarrierWarning() {
+  if (!carrierWarning) return;
+  const base = currentParams().base;
+  carrierWarning.classList.toggle('hidden', !(typeof base === 'number' && base < 80));
+}
+
+// La URL refleja estado + portadora para compartir y enlazar directo. Lleva la
+// familia de portadora (?carrier=…) porque la base efectiva de las familias
+// fijas se deriva del estado al cargar; solo en Personalizado se fija f1.
+function currentUrlParams() {
+  const p = new URLSearchParams();
+  p.set('state', selected.id);
+  if (carrier !== 'estandar') p.set('carrier', carrier);
+  if (carrier === 'personalizado') {
+    const base = currentParams().base;
+    if (typeof base === 'number') p.set('f1', String(Math.round(base * 10) / 10));
+  }
+  return p;
+}
+function updateUrl() {
+  history.replaceState(null, '', `${location.pathname}?${currentUrlParams()}`);
+}
+
+carrierOptions.addEventListener('click', (e) => {
+  const btn = e.target.closest('.carrier-btn');
+  if (btn) applyCarrier(btn.dataset.carrier);
+});
+
+// ---------------------------------------------------------------- Extras
+// Toast efímero para confirmaciones (enlace copiado, etc.).
+let toastTimer = null;
+function showToast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// Compartir: Web Share API con deep link al estado seleccionado
+// (/?state=…) y fallback a copiar el enlace.
+const shareBtn = document.getElementById('share-btn');
+shareBtn.innerHTML = ICONS.share;
+shareBtn.addEventListener('click', async () => {
+  const url = `${location.origin}/?${currentUrlParams()}`;
+  const data = {
+    title: 'Vyneural',
+    text: `Escucha "${selected.name}" (${selected.band}) y viaja por el sonido.`,
+    url,
+  };
+  try {
+    if (navigator.share) {
+      await navigator.share(data);
+      return; // el usuario compartió (o canceló): no hacemos nada más
+    }
+  } catch (_) {
+    return; // canceló el compartir nativo
+  }
+  // Sin Web Share: copiar al portapapeles, con último recurso de texto.
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      showToast('Enlace copiado 🔗');
+      return;
+    }
+  } catch (_) {
+    /* portapapeles bloqueado: sigue al fallback */
+  }
+  window.prompt('Copia el enlace:', url);
+});
+
+// Pantalla completa / modo inmersivo: el visualizador y los controles
+// ocupan toda la pantalla.
+const fullscreenBtn = document.getElementById('fullscreen-btn');
+fullscreenBtn.innerHTML = ICONS.expand;
+fullscreenBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  } else {
+    document.exitFullscreen?.();
+  }
+});
+document.addEventListener('fullscreenchange', () => {
+  const on = !!document.fullscreenElement;
+  document.body.classList.toggle('immersive', on);
+  fullscreenBtn.innerHTML = on ? ICONS.compress : ICONS.expand;
+  fullscreenBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
+});
+
+// Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
+window.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && typeof t.matches === 'function' && t.matches('input, select, textarea, [contenteditable="true"]')) return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (playing) stop();
+    else start();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const visible = cards.filter((c) => !c.classList.contains('filtered-out'));
+    if (!visible.length) return;
+    const idx = visible.findIndex((c) => c.dataset.id === selected.id);
+    const next = visible[(idx + (e.key === 'ArrowRight' ? 1 : -1) + visible.length) % visible.length];
+    selectState(STATES.find((st) => st.id === next.dataset.id));
+    next.scrollIntoView({ block: 'nearest' });
+  }
 });
 
 // ---------------------------------------------------------------- Estado
@@ -376,8 +815,6 @@ function updateStatus() {
 // de interferencia reales. En la gota del cerebro conviven tres fuentes
 // (azul = frecuencia 1, rosa = frecuencia 2, acento = latido) que chocan
 // entre sí, y el latido inyecta un impulso exacto en cada pulso real.
-let LANE_LEFT_COLOR = '#60a5fa';
-let LANE_RIGHT_COLOR = '#f472b6';
 
 function resizeCanvas() {
   canvas.width = canvas.clientWidth * devicePixelRatio;
@@ -405,9 +842,8 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-let LANE_LEFT_COLOR_RGB = hexToRgb(LANE_LEFT_COLOR);
-let LANE_RIGHT_COLOR_RGB = hexToRgb(LANE_RIGHT_COLOR);
-let ACCENT_RGB = hexToRgb(accentColor);
+// (LANE_LEFT_COLOR_RGB, LANE_RIGHT_COLOR_RGB y ACCENT_RGB se declaran arriba,
+// junto al estado de la app, para que el arranque las use.)
 
 // Crea (o recrea si cambió el tamaño) las cuencas de agua.
 function ensureFields(poolR) {
@@ -692,9 +1128,87 @@ function drawVisual() {
 }
 drawVisual();
 
+// Restaura la sesión guardada: volumen, ambientes, volúmenes por capa y
+// temporizador (el estado lo elige el deep link o el guardado).
+function restoreSession(saved) {
+  if (!saved) return;
+  if (typeof saved.volume === 'number') {
+    volumeLevel = saved.volume;
+    volume.value = String(saved.volume);
+    volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
+    engine.setVolume(volumeLevel);
+  }
+  if (Array.isArray(saved.ambient)) {
+    ambientTypes = new Set(
+      saved.ambient.filter((t) => ['lluvia', 'rio', 'bosque', 'pajaros', 'oceano', 'fuego'].includes(t)),
+    );
+  }
+  if (typeof saved.ambientVolume === 'number') {
+    ambientVolumeLevel = saved.ambientVolume;
+    ambientVolume.value = String(saved.ambientVolume);
+    ambientVolumeLabel.textContent = `${Math.round(saved.ambientVolume * 100)}%`;
+    ambient.setVolume(ambientVolumeLevel);
+  }
+  if (saved.layerVolumes) {
+    document.querySelectorAll('#ambient-volumes input').forEach((inp) => {
+      const v = saved.layerVolumes[inp.dataset.type];
+      if (typeof v === 'number') {
+        inp.value = String(v);
+        const label = inp.closest('.av').querySelector('b');
+        label.textContent = `${Math.round(v * 100)}%`;
+        ambient.setLayerVolume(inp.dataset.type, v);
+      }
+    });
+  }
+  if (typeof saved.timer === 'number') {
+    timerMinutes = saved.timer;
+    timerOptions.querySelectorAll('.timer-btn').forEach((b) =>
+      b.classList.toggle('active', parseInt(b.dataset.minutes, 10) === saved.timer),
+    );
+  }
+}
+
 // ---------------------------------------------------------------- Arranque
-selectState(STATES[0]);
+// Deep link: ?state=meditacion abre directamente ese estado (tiene prioridad
+// sobre la sesión guardada para que compartir funcione).
+const deepParams = new URLSearchParams(location.search);
+const deepState = deepParams.get('state');
+// Deep link de portadora: ?carrier=solfeggio/ancestral/schumann/personalizado
+// marca la familia directamente. Por compatibilidad con enlaces antiguos,
+// ?f1=528 / ?f1=136.1 / ?f1=194.7 se interpretan como esas familias, y
+// cualquier otro f1 como portadora personalizada.
+const deepCarrier = deepParams.get('carrier');
+const deepF1 = parseFloat(deepParams.get('f1'));
+if (deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar') {
+  carrier = deepCarrier;
+  // En la portadora personalizada el f1 viaja en la URL; las familias
+  // fijas (Solfeggio/Ancestral) derivan la base del estado al cargar.
+  if (deepCarrier === 'personalizado' && isFinite(deepF1) && deepF1 > 0) {
+    customBase.value = String(Math.round(deepF1));
+    customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
+  }
+} else if (deepF1 === 528) carrier = 'solfeggio';
+else if (deepF1 === 136.1) carrier = 'ancestral';
+else if (deepF1 === 194.7) carrier = 'schumann';
+else if (isFinite(deepF1) && deepF1 > 0) {
+  carrier = 'personalizado';
+  customBase.value = String(Math.round(deepF1));
+  customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
+}
+const savedSession = lsGet(LS_SESSION, null);
+const wantId = deepState || (savedSession && savedSession.state);
+const initial = STATES.find((s) => s.id === wantId) || STATES[0];
+restoreSession(savedSession);
+selectState(initial);
 updateCustomLabels();
+// Marca la portadora activa y muestra el panel si corresponde.
+carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
+  b.classList.toggle('active', b.dataset.carrier === carrier),
+);
+updateCustomPanel();
+updateCarrierWarning();
+updateAmbientButtons();
+updateHistory();
 
 // Loader animado: se desvanece cuando la página terminó de cargar, con un
 // mínimo de 2.2 s para que se disfruten las animaciones.
@@ -824,11 +1338,15 @@ function bandKeyOf(state) {
 function applyBandFilter(band) {
   cards.forEach((card) => {
     const s = STATES.find((st) => st.id === card.dataset.id);
-    const show = !band || bandKeyOf(s) === band;
+    let show;
+    if (band === 'favs') show = favorites.has(s.id);
+    else show = !band || bandKeyOf(s) === band;
     card.classList.toggle('filtered-out', !show);
   });
   // Si el estado elegido quedó oculto, elegir el primero visible.
-  if (band && bandKeyOf(selected) !== band) {
+  const hidden =
+    band === 'favs' ? !favorites.has(selected.id) : band && bandKeyOf(selected) !== band;
+  if (hidden) {
     const firstVisible = cards.find((c) => !c.classList.contains('filtered-out'));
     if (firstVisible) {
       selectState(STATES.find((st) => st.id === firstVisible.dataset.id));

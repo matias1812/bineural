@@ -17,6 +17,7 @@ export function initStarfield() {
   let speed = 0.35;
   let scrollBoost = 0;
   let lastY = window.scrollY;
+  let resizeT = null;
 
   // Nebulosas místicas: nubes de color que respiran y giran; el scroll las
   // hace rotar (el viaje gira a tu alrededor).
@@ -50,13 +51,15 @@ export function initStarfield() {
     }
   }
 
-  // El desplazamiento del usuario impulsa el viaje.
+  // El desplazamiento del usuario impulsa un viaje suave y sutil: antes el
+  // impulso era tan fuerte que al hacer scroll las estrellas hacían estelas
+  // por todas partes (se veía como un glitch). Ahora es un leve desplazamiento.
   function onScroll() {
     const delta = window.scrollY - lastY;
     lastY = window.scrollY;
-    scrollBoost = delta * 0.14;
+    scrollBoost = Math.max(-0.9, Math.min(0.9, delta * 0.012));
     clearTimeout(onScroll._t);
-    onScroll._t = setTimeout(() => (scrollBoost = 0), 350);
+    onScroll._t = setTimeout(() => (scrollBoost = 0), 250);
   }
   window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -92,7 +95,7 @@ export function initStarfield() {
       ctx.fill();
     }
 
-    // Estrellas 3D: viajan hacia el espectador; al deslizar rápido dejan
+    // Estrellas 3D: viajan hacia el espectador; al deslizar muy rápido dejan
     // estelas luminosas (sensación de atravesar el espacio).
     for (const s of stars) {
       const prevPx = s._px;
@@ -114,7 +117,7 @@ export function initStarfield() {
       const size = Math.min(2.6, 1.4 * scale) * twinkle;
       ctx.globalAlpha = Math.min(1, twinkle * (1.05 - s.z));
       ctx.fillStyle = s.color;
-      if (sp > 0.95 && prevPx != null) {
+      if (sp > 1.1 && prevPx != null) {
         ctx.globalAlpha *= 0.45;
         ctx.strokeStyle = s.color;
         ctx.lineWidth = Math.max(0.6, size * 0.7);
@@ -164,6 +167,16 @@ export function initStarfield() {
   }
 
   resize();
-  window.addEventListener('resize', resize, { passive: true });
+  // Con retardo: en móvil la barra del navegador redimensiona la ventana
+  // varias veces seguidas al hacer scroll y repoblar las estrellas a cada
+  // frame las hace "saltar" (glitch).
+  window.addEventListener(
+    'resize',
+    () => {
+      clearTimeout(resizeT);
+      resizeT = setTimeout(resize, 120);
+    },
+    { passive: true },
+  );
   frame();
 }

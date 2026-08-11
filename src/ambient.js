@@ -1,5 +1,5 @@
 // Motor de sonidos de ambiente generados por procedimiento (lluvia, río,
-// bosque, pájaros). Admite varios sonidos a la vez: cada tipo es una capa
+// bosque, pájaros, océano, fuego). Admite varios sonidos a la vez: cada tipo es una capa
 // independiente con su propio grafo de nodos y su propia respiración.
 // Todas las capas respiran sincronizadas con el latido binaural: el LFO de
 // cada capa se crea con la fase alineada al latido (pico justo en el latido,
@@ -341,6 +341,168 @@ export class AmbientEngine {
     this._scheduleBirds(layer);
   }
 
+  // ------------------------------------------------------------ Océano
+  // Olas: lecho de ruido marrón que "hincha" con un LFO muy lento (oleaje),
+  // un siseo de espuma filtrado agudo con su propia respiración y choques
+  // de ola programados que barren la frecuencia de agudo a grave, como una
+  // ola que sube, rompe y se retira por la arena.
+  _buildOceano() {
+    const layer = this.layers.get('oceano');
+    const ctx = this.ctx;
+    // Lecho: ruido marrón (profundo) filtrado bajo. Es el cuerpo de la ola.
+    const src = ctx.createBufferSource();
+    src.buffer = makeNoise(ctx, 'brown', 8);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 420;
+    const g = ctx.createGain();
+    g.gain.value = 0.5;
+    // Oleaje: LFO muy lento que hincha y encoge el lecho (0.5 ± 0.3), con
+    // el periodo de una ola real. Fase libre: no compite con el latido.
+    const swell = ctx.createOscillator();
+    swell.frequency.value = 0.08;
+    const swellG = ctx.createGain();
+    swellG.gain.value = 0.3;
+    swell.connect(swellG).connect(g.gain);
+    src.connect(lp).connect(g).connect(layer.syncGain);
+    src.start();
+    swell.start();
+    layer.nodes.push(src, lp, g, swell, swellG);
+
+    // Espuma: ruido rosa filtrado agudo, con LFO un poco más rápido que el
+    // oleaje: suena como el agua subiendo por la arena entre olas.
+    const hiss = ctx.createBufferSource();
+    hiss.buffer = makeNoise(ctx, 'pink', 8);
+    hiss.loop = true;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 1600;
+    const hg = ctx.createGain();
+    hg.gain.value = 0.05;
+    const hlfo = ctx.createOscillator();
+    hlfo.frequency.value = 0.13;
+    const hlfoG = ctx.createGain();
+    hlfoG.gain.value = 0.03;
+    hlfo.connect(hlfoG).connect(hg.gain);
+    hiss.connect(hp).connect(hg).connect(layer.syncGain);
+    hiss.start();
+    hlfo.start();
+    layer.nodes.push(hiss, hp, hg, hlfo, hlfoG);
+
+    // Choques de ola: ráfaga de ruido que sube despacio, rompe y decae.
+    const crash = () => {
+      if (this.layers.get('oceano') !== layer) return;
+      const t = ctx.currentTime;
+      const csrc = ctx.createBufferSource();
+      csrc.buffer = makeNoise(ctx, 'pink', 1.5);
+      csrc.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(900, t);
+      bp.frequency.exponentialRampToValueAtTime(300, t + 2.2);
+      bp.Q.value = 0.7;
+      const cg = ctx.createGain();
+      const peak = 0.16 + Math.random() * 0.12;
+      cg.gain.setValueAtTime(0.0001, t);
+      cg.gain.linearRampToValueAtTime(peak, t + 0.7 + Math.random() * 0.4);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+      csrc.connect(bp).connect(cg).connect(layer.syncGain);
+      csrc.start(t);
+      csrc.stop(t + 3.2);
+      layer.timers.push(
+        setTimeout(() => {
+          [csrc, bp, cg].forEach((n) => {
+            try {
+              n.disconnect();
+            } catch (_) {
+              /* ya desconectado */
+            }
+          });
+        }, 3400),
+      );
+      layer.timers.push(setTimeout(crash, 3200 + Math.random() * 3800));
+    };
+    crash();
+  }
+
+  // ------------------------------------------------------------ Fuego
+  // Fogata: lecho de ruido marrón con la llama parpadeando (LFO sobre el
+  // volumen y otro, más lento, sobre el filtro: el fuego respira) y un
+  // crepitar programado: chasquidos secos y cortos, a veces en racimos,
+  // como leña quemándose.
+  _buildFuego() {
+    const layer = this.layers.get('fuego');
+    const ctx = this.ctx;
+    // Lecho: ruido marrón filtrado bajo, la base grave del fuego.
+    const src = ctx.createBufferSource();
+    src.buffer = makeNoise(ctx, 'brown', 6);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 620;
+    const g = ctx.createGain();
+    g.gain.value = 0.3;
+    // Parpadeo: LFO medio sobre el volumen (0.3 ± 0.15) y LFO lento sobre
+    // la frecuencia del filtro, como una hoguera viva.
+    const flick = ctx.createOscillator();
+    flick.frequency.value = 0.45;
+    const flickG = ctx.createGain();
+    flickG.gain.value = 0.15;
+    flick.connect(flickG).connect(g.gain);
+    const roar = ctx.createOscillator();
+    roar.frequency.value = 0.09;
+    const roarG = ctx.createGain();
+    roarG.gain.value = 90;
+    roar.connect(roarG).connect(lp.frequency);
+    src.connect(lp).connect(g).connect(layer.syncGain);
+    src.start();
+    flick.start();
+    roar.start();
+    layer.nodes.push(src, lp, g, flick, flickG, roar, roarG);
+
+    // Crepitar: chasquido seco de ruido blanco, muy corto y filtrado agudo.
+    const crackle = (t) => {
+      const csrc = ctx.createBufferSource();
+      csrc.buffer = this._dropBuf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1800 + Math.random() * 3400;
+      bp.Q.value = 2.5;
+      const cg = ctx.createGain();
+      const peak = 0.02 + Math.random() * 0.12;
+      cg.gain.setValueAtTime(0.0001, t);
+      cg.gain.linearRampToValueAtTime(peak, t + 0.002);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.012 + Math.random() * 0.04);
+      csrc.connect(bp).connect(cg).connect(layer.syncGain);
+      csrc.start(t);
+      csrc.stop(t + 0.12);
+      layer.timers.push(
+        setTimeout(() => {
+          [csrc, bp, cg].forEach((n) => {
+            try {
+              n.disconnect();
+            } catch (_) {
+              /* ya desconectado */
+            }
+          });
+        }, 200),
+      );
+    };
+
+    const timer = () => {
+      if (this.layers.get('fuego') !== layer) return;
+      const now = ctx.currentTime;
+      // Racimos: a veces varios chasquidos casi seguidos (leña que cruje).
+      const n = Math.random() < 0.35 ? 2 + Math.floor(Math.random() * 3) : 1;
+      for (let i = 0; i < n; i++) {
+        crackle(now + i * (0.03 + Math.random() * 0.06));
+      }
+      layer.timers.push(setTimeout(timer, 80 + Math.random() * 320));
+    };
+    timer();
+  }
+
   // ------------------------------------------------------------ Pájaros
   _buildBirds() {
     const layer = this.layers.get('pajaros');
@@ -416,5 +578,7 @@ export class AmbientEngine {
     else if (type === 'rio') this._buildRio(layer);
     else if (type === 'bosque') this._buildForest(layer);
     else if (type === 'pajaros') this._buildBirds(layer);
+    else if (type === 'oceano') this._buildOceano(layer);
+    else if (type === 'fuego') this._buildFuego(layer);
   }
 }
