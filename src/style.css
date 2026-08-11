@@ -1643,3 +1643,49 @@ body.immersive .controls {
   overflow-y: auto;
 }
 
+/* ---------------------------------------------------------------- Aviso de rotación */
+.rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 15, 0.94);
+  backdrop-filter: blur(6px);
+}
+.rotate-overlay.hidden {
+  display: none;
+}
+.ro-card {
+  text-align: center;
+  color: var(--text);
+  max-width: 300px;
+  padding: 20px;
+}
+.ro-phone {
+  font-size: 64px;
+  line-height: 1;
+  animation: ro-tilt 2.6s ease-in-out infinite;
+}
+.ro-title {
+  margin: 14px 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.ro-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+@keyframes ro-tilt {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  40%,
+  60% {
+    transform: rotate(90deg);
+  }
+}
+

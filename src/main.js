@@ -758,13 +758,44 @@ shareBtn.addEventListener('click', async () => {
 });
 
 // Pantalla completa / modo inmersivo: el visualizador y los controles
-// ocupan toda la pantalla.
+// ocupan toda la pantalla. En teléfono se intenta bloquear la orientación
+// a horizontal y, si el bloqueo no es posible, un aviso obliga a girar el
+// dispositivo antes de poder usar el modo.
 const fullscreenBtn = document.getElementById('fullscreen-btn');
+const rotateOverlay = document.getElementById('rotate-overlay');
+const isTouchDevice = () =>
+  (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) && window.innerWidth < 900;
+const isLandscape = () => window.matchMedia('(orientation: landscape)').matches;
+
+function updateRotateOverlay() {
+  if (!rotateOverlay) return;
+  const show =
+    document.body.classList.contains('immersive') && isTouchDevice() && !isLandscape();
+  rotateOverlay.classList.toggle('hidden', !show);
+}
+
 fullscreenBtn.innerHTML = ICONS.expand;
-fullscreenBtn.addEventListener('click', () => {
+fullscreenBtn.addEventListener('click', async () => {
   if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen?.().catch(() => {});
+    try {
+      await document.documentElement.requestFullscreen?.();
+    } catch (_) {
+      /* pantalla completa no soportada */
+    }
+    // En teléfono, forzar horizontal (el lock requiere fullscreen activo).
+    if (isTouchDevice()) {
+      try {
+        await screen.orientation.lock('landscape');
+      } catch (_) {
+        /* lock no disponible: el aviso de rotación se encarga */
+      }
+    }
   } else {
+    try {
+      screen.orientation.unlock?.();
+    } catch (_) {
+      /* no había lock activo */
+    }
     document.exitFullscreen?.();
   }
 });
@@ -773,7 +804,11 @@ document.addEventListener('fullscreenchange', () => {
   document.body.classList.toggle('immersive', on);
   fullscreenBtn.innerHTML = on ? ICONS.compress : ICONS.expand;
   fullscreenBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
+  updateRotateOverlay();
 });
+// Si el usuario rota el teléfono o cambia el tamaño, el aviso se actualiza solo.
+window.addEventListener('resize', updateRotateOverlay);
+window.addEventListener('orientationchange', updateRotateOverlay);
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {
