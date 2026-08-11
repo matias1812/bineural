@@ -15,6 +15,13 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Vyneural" />
     <link rel="canonical" href="https://ondas-binaurales.vercel.app/" />
 
     <!-- Open Graph -->
@@ -59,10 +66,10 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" crossorigin src="/assets/main-NAikIhDz.js"></script>
+    <script type="module" crossorigin src="/assets/main-CntTRdjG.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/site-Dg5AOLE6.js">
     <link rel="stylesheet" crossorigin href="/assets/site-DnvDIy-s.css">
-    <link rel="stylesheet" crossorigin href="/assets/main-DaWl8EXM.css">
+    <link rel="stylesheet" crossorigin href="/assets/main-2bDh4yq3.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -217,6 +224,8 @@
           <div id="timer-options">
             <button class="timer-btn active" data-minutes="0">∞</button>
             <button class="timer-btn" data-minutes="15">15 min</button>
+            <button class="timer-btn" data-minutes="20">20 min</button>
+            <button class="timer-btn" data-minutes="25">25 min</button>
             <button class="timer-btn" data-minutes="30">30 min</button>
             <button class="timer-btn" data-minutes="60">60 min</button>
           </div>
@@ -253,7 +262,16 @@
       </section>
 
       <section class="info">
-        <h3>¿Cómo funciona?</h3>
+        <h3>¿Cómo funciona Vyneural?</h3>
+        <ol class="how-steps">
+          <li><span class="hs-num">1</span><p><b>Cada oído recibe una frecuencia</b> ligeramente diferente.</p></li>
+          <li><span class="hs-num">2</span><p><b>El cerebro percibe la diferencia</b> entre ambas como un latido suave.</p></li>
+          <li><span class="hs-num">3</span><p><b>Vyneural combina ese sonido</b> con ambientes y visuales inmersivos.</p></li>
+        </ol>
+        <p class="how-disclaimer">
+          Diseñado para acompañar momentos de calma, foco o descanso. No promete curar y no
+          sustituye el consejo médico.
+        </p>
         <p>
           Las ondas binaurales reproducen dos frecuencias ligeramente distintas, una en cada oído.
           Tu cerebro percibe la diferencia entre ambas como un latido que lo induce a un estado
@@ -301,13 +319,60 @@
             limitada y con resultados mixtos. Estas frecuencias no sustituyen el consejo médico.
           </p>
         </details>
-        <p class="warning">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-          Usa audífonos: sin ellos no se produce el efecto binaural. No lo uses mientras conduces
-          o manejas maquinaria.
-        </p>
+        <div class="how-safety">
+          <h4>Úsalo con cabeza</h4>
+          <ul>
+            <li>🎧 Usa auriculares: sin ellos no se produce el efecto binaural.</li>
+            <li>🔉 Mantén un volumen seguro y cómodo.</li>
+            <li>🚫 No lo uses mientras conduces o manejas maquinaria.</li>
+            <li>🩺 No sustituye atención médica ni tratamiento profesional.</li>
+            <li>📚 Fuentes: <a href="/que-son-las-ondas-binaurales">qué son las ondas binaurales</a> · <a href="https://en.wikipedia.org/wiki/Binaural_beats" target="_blank" rel="noopener noreferrer">binaural beats (Wikipedia)</a></li>
+          </ul>
+        </div>
       </section>
 
+    </div>
+
+    <div id="summary-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Resumen de sesión">
+      <div class="modal-card summary-card">
+        <div class="modal-head">
+          <h3>✅ Sesión terminada</h3>
+          <button id="summary-close" class="modal-close" aria-label="Cerrar resumen">✕</button>
+        </div>
+        <ul class="summary-list">
+          <li><span class="sum-ico">⏱️</span><span class="sum-txt"><b>Duración</b><small id="summary-duration"></small></span></li>
+          <li><span class="sum-ico">🎵</span><span class="sum-txt"><b>Frecuencia</b><small id="summary-freq"></small></span></li>
+          <li><span class="sum-ico">🌿</span><span class="sum-txt"><b>Ambiente</b><small id="summary-ambient"></small></span></li>
+        </ul>
+        <button id="summary-history" class="quick-start">Ver historial</button>
+      </div>
+    </div>
+
+    <div id="quickstart" class="modal hidden" role="dialog" aria-modal="true" aria-label="Qué necesitas ahora">
+      <div class="modal-card quick-card">
+        <div id="quick-options" class="quick-options">
+          <h3 class="quick-title">¿Qué necesitas ahora?</h3>
+          <p class="quick-sub">Elige y Vyneural te prepara una sesión lista en un clic.</p>
+          <button class="quick-opt" data-intent="dormir"><span class="qo-emoji">😴</span><span class="qo-txt"><b>Dormir</b><small>Ondas delta para un descanso profundo</small></span></button>
+          <button class="quick-opt" data-intent="relajarme"><span class="qo-emoji">😌</span><span class="qo-txt"><b>Relajarme</b><small>Alfa para soltar el día con calma</small></span></button>
+          <button class="quick-opt" data-intent="concentrarme"><span class="qo-emoji">🎯</span><span class="qo-txt"><b>Concentrarme</b><small>Beta para estudiar, leer o trabajar</small></span></button>
+          <button class="quick-opt" data-intent="meditar"><span class="qo-emoji">🧘</span><span class="qo-txt"><b>Meditar</b><small>Theta para calma y claridad interior</small></span></button>
+          <button class="quick-opt" data-intent="explorar"><span class="qo-emoji">🚀</span><span class="qo-txt"><b>Explorar</b><small>Navega por todos los estados a tu gusto</small></span></button>
+        </div>
+        <div id="quick-reco" class="quick-reco hidden">
+          <h3 class="quick-title">Recomendado para ti</h3>
+          <p id="quick-reco-main" class="quick-reco-main"></p>
+          <p id="quick-reco-state" class="quick-reco-state"></p>
+          <button id="quick-start" class="quick-start">Comenzar sesión ▶</button>
+          <button id="quick-back" class="quick-back">Elegir otro</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="install-banner" class="install-banner hidden" role="region" aria-label="Instalar aplicación">
+      <span class="ib-txt">📲 Instala Vyneural para tenerla siempre a mano.</span>
+      <button id="install-btn" class="ib-btn">Instalar</button>
+      <button id="install-close" class="ib-close" aria-label="Cerrar aviso">✕</button>
     </div>
 
     <div id="history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Historial de sesiones">
@@ -366,6 +431,6 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
   </body>
 </html>

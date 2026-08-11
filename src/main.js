@@ -75,11 +75,11 @@ const ICONS = {
 const STATES = [
   { id: 'meditacion', icon: ICONS.meditacion, name: 'Meditación', desc: 'Calma mental profunda y claridad interior', band: 'Theta · 6 Hz', color: '#a78bfa', base: 210, beat: 6 },
   { id: 'sueno', icon: ICONS.sueno, name: 'Sueño profundo', desc: 'Relajación total para un descanso profundo', band: 'Delta · 2 Hz', color: '#60a5fa', base: 170, beat: 2 },
-  { id: 'relajacion', icon: ICONS.relajacion, name: 'Relajación', desc: 'Reduce el estrés y la ansiedad del día', band: 'Alpha · 10 Hz', color: '#34d399', base: 200, beat: 10 },
+  { id: 'relajacion', icon: ICONS.relajacion, name: 'Relajación', desc: 'Diseñado para acompañar momentos de calma', band: 'Alpha · 10 Hz', color: '#34d399', base: 200, beat: 10 },
   { id: 'concentracion', icon: ICONS.concentracion, name: 'Concentración', desc: 'Atención sostenida y mayor productividad', band: 'Beta · 16 Hz', color: '#fbbf24', base: 240, beat: 16 },
   { id: 'energia', icon: ICONS.energia, name: 'Energía', desc: 'Estado de alerta, vitalidad y motivación', band: 'Beta · 25 Hz', color: '#fb7185', base: 260, beat: 25 },
   { id: 'creatividad', icon: ICONS.creatividad, name: 'Creatividad', desc: 'Flujo creativo e inspiración', band: 'Theta · 8 Hz', color: '#f0abfc', base: 220, beat: 8 },
-  { id: 'aprendizaje', icon: ICONS.aprendizaje, name: 'Aprendizaje', desc: 'Memoria y procesamiento profundo', band: 'Gamma · 40 Hz', color: '#f97316', base: 280, beat: 40 },
+  { id: 'aprendizaje', icon: ICONS.aprendizaje, name: 'Aprendizaje', desc: 'Ambiente sonoro para estudiar y aprender', band: 'Gamma · 40 Hz', color: '#f97316', base: 280, beat: 40 },
   { id: 'schumann', icon: ICONS.schumann, name: 'Resonancia Schumann', desc: 'La frecuencia de la Tierra: calma y conexión', band: 'Schumann · 7.83 Hz', color: '#4ade80', base: 190, beat: 7.83 },
   { id: 'sueno-ligero', icon: ICONS['sueno-ligero'], name: 'Sueño ligero', desc: 'Transición suave hacia el descanso', band: 'Delta · 3 Hz', color: '#818cf8', base: 180, beat: 3 },
   { id: 'profundidad', icon: ICONS.profundidad, name: 'Profundidad', desc: 'Inmersión total en el descanso', band: 'Delta · 1 Hz', color: '#6d6ee8', base: 160, beat: 1 },
@@ -87,7 +87,7 @@ const STATES = [
   { id: 'intuicion', icon: ICONS.intuicion, name: 'Intuición', desc: 'Conexión interior y claridad sutil', band: 'Theta · 4.5 Hz', color: '#a78bfa', base: 205, beat: 4.5 },
   { id: 'lucidez', icon: ICONS.lucidez, name: 'Lucidez', desc: 'Mente despejada y foco agudo', band: 'Beta · 18 Hz', color: '#f59e0b', base: 250, beat: 18 },
   { id: 'alerta', icon: ICONS.alerta, name: 'Alerta', desc: 'Energía y disposición inmediata', band: 'Beta · 22 Hz', color: '#f87171', base: 270, beat: 22 },
-  { id: 'memoria', icon: ICONS.memoria, name: 'Memoria', desc: 'Fijar recuerdos y consolidar estudio', band: 'Gamma · 32 Hz', color: '#fb923c', base: 300, beat: 32 },
+  { id: 'memoria', icon: ICONS.memoria, name: 'Memoria', desc: 'Para acompañar el estudio y el repaso', band: 'Gamma · 32 Hz', color: '#fb923c', base: 300, beat: 32 },
   { id: 'armonia', icon: ICONS.armonia, name: 'Armonía', desc: 'Equilibrio emocional y bienestar', band: 'Alfa · 9 Hz', color: '#38bdf8', base: 215, beat: 9 },
   { id: 'despertar', icon: ICONS.despertar, name: 'Despertar', desc: 'Saliendo del sueño con suavidad', band: 'Alfa · 12 Hz', color: '#fbbf24', base: 230, beat: 12 },
   { id: 'foco', icon: ICONS.foco, name: 'Foco profundo', desc: 'Atención sostenida sin distraerte', band: 'Beta · 14 Hz', color: '#34d399', base: 260, beat: 14 },
@@ -136,6 +136,7 @@ let timerInterval = null;
 let lastPulse = 0;
 let accentColor = STATES[0].color;
 let sessionStartTime = 0;
+let sessionAmbient = []; // ambientes activos al iniciar la sesión (para el resumen)
 let fading = false;
 // Colores del visualizador (se inicializan aquí para que estén disponibles
 // desde el arranque; selectState los actualiza al elegir estado).
@@ -351,6 +352,7 @@ function start() {
   // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
   sessionStartTime = Date.now();
+  sessionAmbient = [...ambientTypes];
   applyAudio();
   playBtn.classList.add('playing');
   playBtn.innerHTML = `<span class="play-icon">${ICONS.pause}</span><span class="play-text">Pausar</span>`;
@@ -359,7 +361,9 @@ function start() {
   saveSession();
 }
 
-function stop() {
+// stop(withSummary): el resumen se muestra cuando la sesión termina por el
+// temporizador (endSession), no al pausar manualmente.
+function stop(withSummary) {
   engine.stop(true);
   ambient.stopAll();
   playing = false;
@@ -367,8 +371,10 @@ function stop() {
   playBtn.innerHTML = `<span class="play-icon">${ICONS.play}</span><span class="play-text">Comenzar</span>`;
   updateStatus();
   disarmTimer();
+  const summary = withSummary ? captureSessionSummary() : null;
   recordHistory();
   saveSession();
+  if (summary) showSessionSummary(summary);
 }
 
 // ---------------------------------------------------------------- Historial
@@ -471,8 +477,51 @@ document.getElementById('history-modal').addEventListener('click', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !document.getElementById('history-modal').classList.contains('hidden')) {
     closeHistory();
+  } else if (e.key === 'Escape' && !document.getElementById('summary-modal').classList.contains('hidden')) {
+    closeSessionSummary();
   }
 });
+
+// ---------------------------------------------------------------- Resumen de sesión
+// Al terminar una sesión por el temporizador se muestra un resumen con la
+// duración real, la frecuencia usada y el ambiente que sonó.
+const summaryModal = document.getElementById('summary-modal');
+const AMBIENT_NAMES = { lluvia: 'Lluvia', rio: 'Río', bosque: 'Bosque', pajaros: 'Pájaros', oceano: 'Océano', fuego: 'Fuego' };
+
+function captureSessionSummary() {
+  const elapsed = Math.max(0, Math.round((Date.now() - sessionStartTime) / 1000));
+  const p = currentParams();
+  const amb = sessionAmbient.map((t) => AMBIENT_NAMES[t] || t);
+  return {
+    elapsed,
+    freq: `${selected.name} · ${p.base} / ${+(p.base + p.beat).toFixed(1)} Hz · latido ${p.beat} Hz`,
+    ambient: amb.length ? amb.join(' + ') : 'Ninguno',
+  };
+}
+
+function showSessionSummary(s) {
+  if (!summaryModal) return;
+  document.getElementById('summary-duration').textContent =
+    s.elapsed >= 60 ? `${Math.floor(s.elapsed / 60)} min ${s.elapsed % 60} s` : `${s.elapsed} s`;
+  document.getElementById('summary-freq').textContent = s.freq;
+  document.getElementById('summary-ambient').textContent = s.ambient;
+  summaryModal.classList.remove('hidden');
+}
+
+function closeSessionSummary() {
+  if (summaryModal) summaryModal.classList.add('hidden');
+}
+
+if (summaryModal) {
+  document.getElementById('summary-close').addEventListener('click', closeSessionSummary);
+  summaryModal.addEventListener('click', (e) => {
+    if (e.target === summaryModal) closeSessionSummary();
+  });
+  document.getElementById('summary-history').addEventListener('click', () => {
+    closeSessionSummary();
+    openHistory();
+  });
+}
 
 playBtn.addEventListener('click', () => {
   if (playing) stop();
@@ -533,7 +582,7 @@ function endSession() {
   engine.fadeAndStop(1800, () => {
     fading = false;
     timerDisplay.classList.add('hidden');
-    stop();
+    stop(true);
   });
 }
 
@@ -706,6 +755,133 @@ function updateUrl() {
 carrierOptions.addEventListener('click', (e) => {
   const btn = e.target.closest('.carrier-btn');
   if (btn) applyCarrier(btn.dataset.carrier);
+});
+
+// ---------------------------------------------------------------- Inicio rápido
+// "¿Qué necesitas ahora?": en la primera visita se ofrece elegir una intención
+// y arrancar una sesión recomendada con un solo clic (estado + ambiente +
+// temporizador). El usuario siempre puede saltarlo con "Explorar".
+const LS_QUICK = 'ob-quickstart-v1';
+const QUICK_RECOS = {
+  dormir:       { state: 'sueno',         ambient: 'lluvia',  minutes: 30, ambientLabel: 'Lluvia suave' },
+  relajarme:    { state: 'relajacion',    ambient: 'lluvia',  minutes: 25, ambientLabel: 'Lluvia suave' },
+  concentrarme: { state: 'concentracion', ambient: 'rio',     minutes: 25, ambientLabel: 'Río' },
+  meditar:      { state: 'meditacion',    ambient: 'bosque',  minutes: 20, ambientLabel: 'Bosque' },
+};
+let quickIntent = null;
+const quickModal = document.getElementById('quickstart');
+const quickOptions = document.getElementById('quick-options');
+const quickReco = document.getElementById('quick-reco');
+
+function showQuickstart() {
+  if (!quickModal) return;
+  quickModal.classList.remove('hidden');
+  const first = quickOptions.querySelector('.quick-opt');
+  if (first) first.focus();
+}
+function closeQuickstart(persist) {
+  if (!quickModal) return;
+  quickModal.classList.add('hidden');
+  quickOptions.classList.remove('hidden');
+  quickReco.classList.add('hidden');
+  if (persist) lsSet(LS_QUICK, '1');
+}
+
+function pickQuickIntent(intent) {
+  const reco = QUICK_RECOS[intent];
+  const st = STATES.find((s) => s.id === reco.state);
+  if (!st) return;
+  quickIntent = intent;
+  document.getElementById('quick-reco-main').textContent =
+    `${st.beat} Hz · ${reco.ambientLabel} · ${reco.minutes} min`;
+  document.getElementById('quick-reco-state').textContent =
+    `${st.name} · ${st.band}`;
+  quickOptions.classList.add('hidden');
+  quickReco.classList.remove('hidden');
+}
+
+function quickExplore() {
+  closeQuickstart(true);
+  document.getElementById('states-grid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Arranque en un solo clic: aplica la recomendación (estado + ambiente +
+// temporizador) y empieza a sonar sin más configuración.
+function quickStartSession() {
+  const reco = QUICK_RECOS[quickIntent];
+  if (!reco) return;
+  const st = STATES.find((s) => s.id === reco.state);
+  if (!st) return;
+  selectState(st);
+  // Solo el ambiente recomendado.
+  ambientTypes.clear();
+  if (reco.ambient) ambientTypes.add(reco.ambient);
+  updateAmbientButtons();
+  saveSession();
+  // Temporizador recomendado.
+  const tb = timerOptions.querySelector(`.timer-btn[data-minutes="${reco.minutes}"]`);
+  if (tb) tb.click();
+  start();
+  closeQuickstart(true);
+  const panel = document.querySelector('.visual-panel');
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+if (quickModal && quickOptions && quickReco) {
+  quickOptions.addEventListener('click', (e) => {
+    const btn = e.target.closest('.quick-opt');
+    if (!btn) return;
+    const intent = btn.dataset.intent;
+    if (intent === 'explorar') quickExplore();
+    else pickQuickIntent(intent);
+  });
+  document.getElementById('quick-start').addEventListener('click', quickStartSession);
+  document.getElementById('quick-back').addEventListener('click', () => {
+    quickOptions.classList.remove('hidden');
+    quickReco.classList.add('hidden');
+  });
+  // Cerrar tocando fuera o con Escape (equivale a "saltar por ahora").
+  quickModal.addEventListener('click', (e) => {
+    if (e.target === quickModal) closeQuickstart(true);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !quickModal.classList.contains('hidden')) closeQuickstart(true);
+  });
+}
+
+// ---------------------------------------------------------------- PWA
+// Instalación: el banner aparece cuando el navegador permite instalar
+// (beforeinstallprompt) y no se haya cerrado antes.
+const installBanner = document.getElementById('install-banner');
+const installBtn = document.getElementById('install-btn');
+const installClose = document.getElementById('install-close');
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (installBanner && !lsGet('ob-install-v1', null)) installBanner.classList.remove('hidden');
+});
+if (installBtn) {
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try {
+      await deferredPrompt.userChoice;
+    } catch (_) {
+      /* el usuario cerró el diálogo nativo */
+    }
+    deferredPrompt = null;
+    installBanner.classList.add('hidden');
+  });
+  installClose.addEventListener('click', () => {
+    installBanner.classList.add('hidden');
+    lsSet('ob-install-v1', '1');
+  });
+}
+window.addEventListener('appinstalled', () => {
+  if (installBanner) installBanner.classList.add('hidden');
+  deferredPrompt = null;
 });
 
 // ---------------------------------------------------------------- Extras
@@ -1209,6 +1385,19 @@ updateCustomPanel();
 updateCarrierWarning();
 updateAmbientButtons();
 updateHistory();
+
+// Inicio rápido: solo en la primera visita, sin deep link ni sesión guardada.
+// (savedSession se leyó antes de selectState(), que sí guarda una sesión).
+if (!(deepState || deepF1 || deepCarrier) && !savedSession && !lsGet(LS_QUICK, null)) {
+  showQuickstart();
+}
+
+// Registro del service worker para la PWA (solo en producción).
+if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
 
 // Loader animado: se desvanece cuando la página terminó de cargar, con un
 // mínimo de 2.2 s para que se disfruten las animaciones.

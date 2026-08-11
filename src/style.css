@@ -1643,3 +1643,276 @@ body.immersive .controls {
   overflow-y: auto;
 }
 
+/* ---------------------------------------------------------------- Inicio rápido */
+.quick-card {
+  max-width: 420px;
+  padding: 22px;
+}
+.quick-title {
+  margin: 0 0 4px;
+  font-size: 19px;
+  text-align: center;
+}
+.quick-sub {
+  margin: 0 0 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+.quick-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quick-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.quick-opt:hover,
+.quick-opt:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.qo-emoji {
+  font-size: 20px;
+  flex: none;
+}
+.qo-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.qo-txt b {
+  font-size: 14px;
+}
+.qo-txt small {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.quick-reco {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quick-reco-main {
+  margin: 8px 0 0;
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--text);
+}
+.quick-reco-state {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.quick-start {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+.quick-start:hover {
+  filter: brightness(1.1);
+}
+.quick-start:active {
+  transform: scale(0.98);
+}
+.quick-back {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.quick-back:hover {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- Cómo funciona Vyneural */
+.how-steps {
+  list-style: none;
+  margin: 14px 0 10px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.how-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.hs-num {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+.how-steps p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.how-steps b {
+  color: var(--text);
+}
+.how-disclaimer {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-dim);
+}
+.how-safety {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(252, 211, 77, 0.28);
+  background: rgba(252, 211, 77, 0.06);
+  border-radius: 12px;
+}
+.how-safety h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #fcd34d;
+}
+.how-safety ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.how-safety li {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.how-safety a {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- Banner de instalación (PWA) */
+.install-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: #14162b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  font-size: 13px;
+}
+.ib-txt {
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.ib-btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  flex: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: filter 0.15s ease;
+}
+.ib-btn:hover {
+  filter: brightness(1.1);
+}
+.ib-close {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+}
+.ib-close:hover {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- Resumen de sesión */
+.summary-card {
+  max-width: 380px;
+}
+.summary-list {
+  list-style: none;
+  margin: 4px 0 18px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.summary-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.sum-ico {
+  font-size: 18px;
+  flex: none;
+}
+.sum-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sum-txt b {
+  font-size: 13px;
+  color: var(--text);
+}
+.sum-txt small {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+#summary-history {
+  width: 100%;
+}
+
