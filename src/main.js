@@ -1528,8 +1528,10 @@ const alarmGcal = document.getElementById('alarm-gcal');
 const alarmIcs = document.getElementById('alarm-ics');
 const alarmListWrap = document.getElementById('alarm-list-wrap');
 const alarmList = document.getElementById('alarm-list');
-
-if (alarmBtn) alarmBtn.innerHTML = ICONS.alarm;
+const alarmView = document.getElementById('alarms-view');
+const alarmViewList = document.getElementById('alarms-view-list');
+const alarmViewAdd = document.getElementById('alarms-view-add');
+const alarmBadge = document.getElementById('alarm-badge');
 
 // Selector de estados: presets + personalizado.
 STATES.forEach((s) => {
@@ -1654,7 +1656,40 @@ function renderAlarms() {
     li.append(info, del);
     alarmList.appendChild(li);
   });
+  // Vista en la página: lista visible + botón para agregar + badge de la campana.
+  if (alarmView && alarmViewList) {
+    alarmView.classList.toggle('hidden', alarms.length === 0);
+    alarmViewList.innerHTML = '';
+    alarms.forEach((a) => {
+      const li = document.createElement('li');
+      li.className = 'alarm-view-item';
+      const info = document.createElement('span');
+      info.className = 'alarm-view-info';
+      const b = document.createElement('b');
+      b.textContent = a.name;
+      const small = document.createElement('small');
+      small.textContent = `${a.time} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
+      info.append(b, small);
+      const del = document.createElement('button');
+      del.className = 'alarm-del';
+      del.setAttribute('aria-label', 'Eliminar recordatorio');
+      del.textContent = '✕';
+      del.addEventListener('click', () => {
+        removeAlarm(a.id);
+        renderAlarms();
+      });
+      li.append(info, del);
+      alarmViewList.appendChild(li);
+    });
+  }
+  if (alarmBadge) {
+    alarmBadge.textContent = String(alarms.length);
+    alarmBadge.classList.toggle('hidden', alarms.length === 0);
+  }
 }
+
+// La vista en la página abre el modal para agregar o editar recordatorios.
+if (alarmViewAdd) alarmViewAdd.addEventListener('click', openAlarmModal);
 
 // Respaldo de calendario: aplican a la configuración actual del modal.
 alarmGcal.addEventListener('click', (e) => {
@@ -1669,29 +1704,36 @@ alarmIcs.addEventListener('click', () => {
 });
 
 // Watcher de alarmas: al llegar la hora, notificación si la pestaña está
-// oculta o sonido + arranque de la sesión si está en primer plano.
-startAlarmWatcher((alarm) => {
-  if (fireAlarm(alarm) === 'foreground') {
-    showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
-    // Configura la frecuencia exacta del recordatorio y arranca.
-    const custom = STATES.find((s) => s.custom);
-    customBase.value = String(Math.round(alarm.freq * 10) / 10);
-    customBeat.value = String(alarm.beat);
-    customWave.value = alarm.wave || 'sine';
-    selectState(custom);
-    updateCustomLabels();
-    updateCustomPanel();
-    updateCarrierWarning();
-    updateStatus();
-    if (alarm.minutes > 0) {
-      timerMinutes = alarm.minutes;
-      timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
-        btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
-      );
+// oculta o sonido + arranque de la sesión si está en primer plano. Al
+// disparar o descartar una alarma, re-renderiza la vista y el badge.
+startAlarmWatcher(
+  (alarm) => {
+    if (fireAlarm(alarm) === 'foreground') {
+      showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
+      // Configura la frecuencia exacta del recordatorio y arranca.
+      const custom = STATES.find((s) => s.custom);
+      customBase.value = String(Math.round(alarm.freq * 10) / 10);
+      customBeat.value = String(alarm.beat);
+      customWave.value = alarm.wave || 'sine';
+      selectState(custom);
+      updateCustomLabels();
+      updateCustomPanel();
+      updateCarrierWarning();
+      updateStatus();
+      if (alarm.minutes > 0) {
+        timerMinutes = alarm.minutes;
+        timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
+          btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
+        );
+      }
+      if (!playing) start();
     }
-    if (!playing) start();
-  }
-});
+  },
+  renderAlarms,
+);
+// Vista inicial: sincroniza la lista y el badge con las alarmas guardadas
+// (después del primer tick del watcher, que descarta las vencidas).
+renderAlarms();
 
 // ---------------------------------------------------------------- Arranque
 // Deep link: ?state=meditacion abre directamente ese estado (tiene prioridad

@@ -199,3 +199,32 @@ if (experienceForm) {
     }
   });
 }
+
+// ---------------------------------------------------------------- Aviso de cookies
+// La app no usa cookies de seguimiento: solo almacenamiento local del
+// navegador (preferencias, sesiones, historial y recordatorios). Igual se
+// muestra un aviso en la primera visita y se guarda la elección.
+const COOKIE_CONSENT_KEY = 'vyneural-cookie-consent';
+const cookieBanner = document.getElementById('cookie-banner');
+if (cookieBanner) {
+  const hideCookieBanner = (choice) => {
+    try {
+      localStorage.setItem(COOKIE_CONSENT_KEY, choice);
+    } catch {
+      /* sin almacenamiento disponible */
+    }
+    cookieBanner.classList.add('hidden');
+  };
+  try {
+    if (!localStorage.getItem(COOKIE_CONSENT_KEY)) {
+      // Pequeña espera para no interrumpir el arranque de la app.
+      window.setTimeout(() => cookieBanner.classList.remove('hidden'), 900);
+    }
+  } catch {
+    /* sin almacenamiento: no mostrar el aviso */
+  }
+  const cookieAccept = document.getElementById('cookie-accept');
+  const cookieReject = document.getElementById('cookie-reject');
+  if (cookieAccept) cookieAccept.addEventListener('click', () => hideCookieBanner('accepted'));
+  if (cookieReject) cookieReject.addEventListener('click', () => hideCookieBanner('rejected'));
+}

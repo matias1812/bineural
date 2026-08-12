@@ -211,8 +211,9 @@ export function downloadIcs(alarm) {
 // ---------------------------------------------------------------- Watcher
 // Revisa las alarmas guardadas y dispara las vencidas (con tolerancia de 5
 // minutos si la app se abrió tarde). Las alarmas son de un solo disparo:
-// se eliminan al dispararse o al quedar obsoletas.
-export function startAlarmWatcher(onFire) {
+// se eliminan al dispararse o al quedar obsoletas. Cada vez que el watcher
+// cambia el almacenamiento llama a onSync para que la UI se mantenga al día.
+export function startAlarmWatcher(onFire, onSync) {
   let running = true;
   function tick() {
     if (!running) return;
@@ -230,7 +231,16 @@ export function startAlarmWatcher(onFire) {
         }
       }
     }
-    if (changed) saveAlarms(getAlarms().filter((a) => a.nextAt > now));
+    if (changed) {
+      saveAlarms(getAlarms().filter((a) => a.nextAt > now));
+      if (typeof onSync === 'function') {
+        try {
+          onSync();
+        } catch {
+          /* no romper el ciclo */
+        }
+      }
+    }
   }
   tick();
   const iv = setInterval(tick, CHECK_INTERVAL_MS);

@@ -66,10 +66,10 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" crossorigin src="/assets/main-BtaBjiPb.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/site-FD-LlGS1.js">
+    <script type="module" crossorigin src="/assets/main-DEVoH9aQ.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/site-Bn_Mmw_f.js">
     <link rel="stylesheet" crossorigin href="/assets/site-DtLr7erG.css">
-    <link rel="stylesheet" crossorigin href="/assets/main-CKHPALp7.css">
+    <link rel="stylesheet" crossorigin href="/assets/main-CldqmmRN.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -191,7 +191,10 @@
       <section class="panel visual-panel">
         <button id="fullscreen-btn" class="icon-btn fs-btn" aria-label="Pantalla completa" title="Modo inmersivo"></button>
         <button id="history-btn" class="icon-btn hist-btn" aria-label="Historial de sesiones" title="Historial de sesiones"></button>
-        <button id="alarm-btn" class="icon-btn alarm-btn" aria-label="Recordatorio de sesión" title="Recordatorio de sesión"></button>
+        <button id="alarm-btn" class="icon-btn alarm-btn" aria-label="Recordatorio de sesión" title="Recordatorio de sesión">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          <span id="alarm-badge" class="alarm-badge hidden"></span>
+        </button>
         <div class="visualizer-wrap">
           <canvas id="visualizer"></canvas>
           <!-- Controles individuales sobre las gotas: play abajo a la derecha,
@@ -268,6 +271,13 @@
           </div>
           <p id="carrier-warning" class="carrier-warning hidden">Portadora muy grave: con audífonos de gama baja el latido puede ser difícil de percibir.</p>
         </div>
+      </section>
+
+      <section class="panel alarms-view hidden" id="alarms-view" aria-label="Recordatorios programados">
+        <h2 class="section-title">Recordatorios programados</h2>
+        <p class="section-hint">Tus alarmas de sesión. Tocá la campana para agregar o editar una.</p>
+        <ul id="alarms-view-list" class="alarms-view-list"></ul>
+        <button id="alarms-view-add" class="alarms-view-add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Agregar recordatorio</button>
       </section>
 
       <section class="info" id="como-funciona">
@@ -536,6 +546,17 @@
         </div>
       </div>
     </section>
+
+    <div id="cookie-banner" class="cookie-banner hidden" role="region" aria-label="Aviso de privacidad">
+      <p class="cookie-text">
+        🍪 Usamos el almacenamiento local de tu navegador para guardar tus preferencias, sesiones y
+        recordatorios. No usamos cookies de seguimiento ni vendemos tus datos.
+      </p>
+      <div class="cookie-actions">
+        <button id="cookie-accept" class="cookie-btn cookie-btn-primary">Aceptar</button>
+        <button id="cookie-reject" class="cookie-btn">Rechazar</button>
+      </div>
+    </div>
 
     <footer class="site-footer">
       <div class="footer-grid">
