@@ -2734,3 +2734,80 @@ body.immersive .controls {
     flex: 1;
   }
 }
+
+/* ---------------------------------------------------------------- Forma de onda */
+.wave-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.wave-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  flex-basis: 100%;
+  justify-content: center;
+}
+
+.wave-hint {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+.wave-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.wave-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.wave-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--text);
+}
+
+.wave-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wave-icon {
+  width: 26px;
+  height: 11px;
+  flex: none;
+}
+
+/* Grupo de ondas dentro del panel personalizado (bajo la etiqueta). */
+.custom-beat-only .wave-options {
+  margin-top: 8px;
+  justify-content: flex-start;
+}

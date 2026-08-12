@@ -132,7 +132,8 @@ const customBase = document.getElementById('custom-base');
 const customBaseLabel = document.getElementById('custom-base-label');
 const customBeat = document.getElementById('custom-beat');
 const customBeatLabel = document.getElementById('custom-beat-label');
-const customWave = document.getElementById('custom-wave');
+const waveOptions = document.getElementById('wave-options');
+const customWaveOptions = document.getElementById('custom-wave-options');
 const statusName = document.getElementById('status-name');
 const statusFreqs = document.getElementById('status-freqs');
 const statusState = document.getElementById('status-state');
@@ -298,6 +299,7 @@ function saveSession() {
     ambientVolume: ambientVolumeLevel,
     layerVolumes,
     timer: timerMinutes,
+    wave: selectedWave,
   });
 }
 
@@ -368,7 +370,7 @@ function currentParams() {
     base = selected.base; // estándar: la base propia del estado
   }
   const beat = selected.custom ? parseFloat(customBeat.value) : selected.beat;
-  const wave = selected.custom ? customWave.value : 'sine';
+  const wave = selectedWave;
   return { base, beat, wave, volume: volumeLevel };
 }
 
@@ -744,9 +746,65 @@ customBeat.addEventListener('input', () => {
   updateStatus();
   saveSession();
 });
-customWave.addEventListener('change', () => {
-  if (selected.custom && playing) applyAudio();
+// ---------------------------------------------------------------- Forma de onda
+// Las cuatro formas del motor (Web Audio: sine, triangle, sawtooth, square),
+// con su mini-icono para que se vea cómo es cada onda. Aplica a la frecuencia
+// seleccionada (preset o personalizada) y se comparte entre el selector de
+// los ajustes y el del panel personalizado.
+const WAVES = [
+  { id: 'sine', label: 'Senoidal', path: 'M0 8 C 2.5 0 7.5 0 10 8 S 17.5 16 20 8 S 27.5 0 30 8 S 37.5 16 40 8' },
+  { id: 'triangle', label: 'Triangular', path: 'M0 8 L 10 0 L 20 16 L 30 0 L 40 8' },
+  { id: 'sawtooth', label: 'Diente de sierra', path: 'M0 0 L 20 16 L 20 0 L 40 16' },
+  { id: 'square', label: 'Cuadrada', path: 'M0 8 L 0 0 L 10 0 L 10 16 L 20 16 L 20 0 L 30 0 L 30 16 L 40 16 L 40 8' },
+];
+let selectedWave = 'sine';
+
+function waveIcon(path) {
+  return `<svg class="wave-icon" viewBox="0 0 40 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+}
+
+function initWaveGroup(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  WAVES.forEach((w) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wave-btn';
+    btn.dataset.wave = w.id;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-checked', 'false');
+    btn.setAttribute('aria-label', `Onda ${w.label}`);
+    btn.innerHTML = `${waveIcon(w.path)}<span>${w.label}</span>`;
+    container.appendChild(btn);
+  });
+}
+
+function syncWaveButtons() {
+  document.querySelectorAll('.wave-btn').forEach((btn) => {
+    const on = btn.dataset.wave === selectedWave;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', String(on));
+  });
+}
+
+function applyWave(wave) {
+  if (!WAVES.some((w) => w.id === wave)) wave = 'sine';
+  selectedWave = wave;
+  syncWaveButtons();
+  // El tipo del oscilador es mutable: se cambia en vivo sin cortar el sonido.
+  if (playing) engine.setWave(selectedWave);
   updateStatus();
+  saveSession();
+}
+
+// Los dos grupos visuales (ajustes y personalizado) comparten el estado.
+[waveOptions, customWaveOptions].forEach((container) => {
+  if (!container) return;
+  initWaveGroup(container);
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('.wave-btn');
+    if (btn) applyWave(btn.dataset.wave);
+  });
 });
 
 // ---------------------------------------------------------------- Portadora
@@ -1510,6 +1568,9 @@ function restoreSession(saved) {
       b.classList.toggle('active', parseInt(b.dataset.minutes, 10) === saved.timer),
     );
   }
+  if (WAVES.some((w) => w.id === saved.wave)) {
+    selectedWave = saved.wave;
+  }
 }
 
 // ---------------------------------------------------------------- Recordatorio de sesión
@@ -1714,9 +1775,10 @@ startAlarmWatcher(
       const custom = STATES.find((s) => s.custom);
       customBase.value = String(Math.round(alarm.freq * 10) / 10);
       customBeat.value = String(alarm.beat);
-      customWave.value = alarm.wave || 'sine';
+      selectedWave = alarm.wave || 'sine';
       selectState(custom);
       updateCustomLabels();
+      syncWaveButtons();
       updateCustomPanel();
       updateCarrierWarning();
       updateStatus();
@@ -1774,7 +1836,7 @@ let wantId = deepState || (savedSession && savedSession.state);
 if (isFinite(deepFreq) && deepFreq > 0) {
   customBase.value = String(Math.round(deepFreq * 10) / 10);
   customBeat.value = String(deepBeat > 0 ? Math.round(deepBeat * 10) / 10 : 10);
-  customWave.value = deepWave || 'sine';
+  selectedWave = deepWave || 'sine';
   wantId = customState ? customState.id : wantId;
 }
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
@@ -1787,6 +1849,7 @@ const goalChips = [...goalFilter.querySelectorAll('.band-chip')];
 goalChips.forEach((c) => c.classList.toggle('active', c.dataset.goal === initialGoal));
 applyGoalFilter(initialGoal);
 updateCustomLabels();
+syncWaveButtons();
 // Marca la portadora activa (fila principal y modo girado) y muestra el panel.
 syncCarrierChips();
 updateCustomPanel();

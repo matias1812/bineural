@@ -136,6 +136,13 @@ export class BinauralEngine {
     this.beat = beat;
   }
 
+  // Cambia la forma de onda en vivo: el tipo del oscilador es mutable, así
+  // que se puede cambiar sobre la marcha sin cortar ni reiniciar el sonido.
+  setWave(wave) {
+    if (this.leftOsc) this.leftOsc.type = wave;
+    if (this.rightOsc) this.rightOsc.type = wave;
+  }
+
   // Desvanece el volumen maestro a cero (fade-out) durante `duration` ms y
   // avisa al terminar, para que el final del temporizador no corte en seco.
   fadeAndStop(duration = 2000, done) {

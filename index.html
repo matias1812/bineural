@@ -168,18 +168,11 @@
           </label>
           </div>
           <div class="custom-beat-only">
-          <label class="select-row">
-            <span class="ctrl-label">
-              <span>Forma de onda</span>
-              <span class="info-dot" tabindex="0" role="tooltip" aria-label="Qué es la forma de onda" data-tip="El timbre del sonido: senoidal es suave y pura; triangular es más cálida, y diente de sierra o cuadrada suenan más ricas y ásperas.">?</span>
-            </span>
-            <select id="custom-wave">
-              <option value="sine" selected>Senoidal (suave)</option>
-              <option value="triangle">Triangular</option>
-              <option value="sawtooth">Diente de sierra</option>
-              <option value="square">Cuadrada</option>
-            </select>
-          </label>
+          <span class="ctrl-label">
+            <span>Forma de onda</span>
+            <span class="info-dot" tabindex="0" role="tooltip" aria-label="Qué es la forma de onda" data-tip="El timbre del sonido: senoidal es suave y pura; triangular es más cálida, y diente de sierra o cuadrada suenan más ricas y ásperas.">?</span>
+          </span>
+          <div id="custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
           </div>
         </div>
       </section>
@@ -266,6 +259,10 @@
             <button class="carrier-btn" data-carrier="personalizado">Personalizado</button>
           </div>
           <p id="carrier-warning" class="carrier-warning hidden">Portadora muy grave: con audífonos de gama baja el latido puede ser difícil de percibir.</p>
+        </div>
+        <div class="wave-row">
+          <span class="wave-label"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h3l3-7 4 14 3-10 2 3h5"/></svg> Forma de onda <span class="wave-hint">se aplica a la frecuencia elegida</span></span>
+          <div id="wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
         </div>
       </section>
 
