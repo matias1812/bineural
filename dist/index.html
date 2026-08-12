@@ -66,10 +66,10 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" crossorigin src="/assets/main-CGJynOu6.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/site-DcdUkCyJ.js">
+    <script type="module" crossorigin src="/assets/main-BiPHWavr.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/site-DXMEn8fN.js">
     <link rel="stylesheet" crossorigin href="/assets/site-DtLr7erG.css">
-    <link rel="stylesheet" crossorigin href="/assets/main-ur7kiQ12.css">
+    <link rel="stylesheet" crossorigin href="/assets/main-CczJhbZZ.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -483,6 +483,45 @@
             <div class="ts-skel-card"></div>
             <div class="ts-skel-card"></div>
             <div class="ts-skel-card"></div>
+          </div>
+        </div>
+
+        <div class="testimonials-form-wrap">
+          <h3 class="testimonials-form-title">Compartí tu experiencia</h3>
+          <p class="testimonials-form-sub">Contanos cómo te ayudó Vyneural y aparecé en esta sección con tu usuario de Instagram.</p>
+          <form id="experience-form" class="experience-form" novalidate>
+            <label class="alarm-field">
+              <span class="alarm-label">Usuario de Instagram <em>obligatorio</em></span>
+              <input id="exp-ig" class="alarm-input" type="text" inputmode="url" autocomplete="off" placeholder="@tu_usuario" maxlength="30" required />
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Tu nombre <em>opcional</em></span>
+              <input id="exp-name" class="alarm-input" type="text" maxlength="60" placeholder="Tu nombre" />
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Frecuencia que usás <em>opcional</em></span>
+              <select id="exp-freq" class="alarm-input">
+                <option value="">Elegí una opción</option>
+                <option value="Meditación">Meditación</option>
+                <option value="Sueño profundo">Sueño profundo</option>
+                <option value="Relajación">Relajación</option>
+                <option value="Concentración">Concentración</option>
+                <option value="Otra">Otra</option>
+              </select>
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Tu experiencia <em>obligatorio</em></span>
+              <textarea id="exp-text" class="alarm-input exp-text" rows="4" maxlength="600" placeholder="¿Cómo te sentiste? ¿Qué notaste?" required></textarea>
+            </label>
+            <p id="exp-error" class="exp-error hidden" role="alert"></p>
+            <button type="submit" id="exp-submit" class="quick-start">Enviar mi experiencia</button>
+          </form>
+          <div id="exp-done" class="exp-done hidden">
+            <p class="exp-done-title">¡Gracias por compartir! 💜</p>
+            <p class="exp-done-text">Tu mensaje quedó listo y copiado. Tocá el botón para abrir Instagram y pegalo en nuestro DM:</p>
+            <a id="exp-dm" class="quick-start exp-dm" href="#" target="_blank" rel="noopener noreferrer">Abrir Instagram</a>
+            <p class="exp-done-note">Si no se copió solo, copiá el texto de abajo:</p>
+            <textarea id="exp-message" class="alarm-input exp-message" rows="5" readonly></textarea>
           </div>
         </div>
       </div>

@@ -108,3 +108,65 @@ if (testimonialsRoot && KUDOSWALL_WIDGET_ID && KUDOSWALL_WIDGET_ID.startsWith('R
   p.textContent = 'Próximamente: experiencias de quienes usan Vyneural.';
   testimonialsRoot.appendChild(p);
 }
+
+// ---------------------------------------------------------------- Formulario de experiencias
+// Los enlaces ig.me no admiten mensaje prellenado, así que el formulario
+// compone el mensaje, lo copia al portapapeles y abre el DM de la cuenta
+// configurada para que la persona lo pegue y lo envíe.
+const IG_ACCOUNT = 'vyneural.cl';
+const experienceForm = document.getElementById('experience-form');
+if (experienceForm) {
+  const expIg = document.getElementById('exp-ig');
+  const expName = document.getElementById('exp-name');
+  const expFreq = document.getElementById('exp-freq');
+  const expText = document.getElementById('exp-text');
+  const expError = document.getElementById('exp-error');
+  const expDone = document.getElementById('exp-done');
+  const expDm = document.getElementById('exp-dm');
+  const expMessage = document.getElementById('exp-message');
+
+  function showExpError(msg) {
+    expError.textContent = msg;
+    expError.classList.remove('hidden');
+    expError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  experienceForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    expError.classList.add('hidden');
+    // Solo se tolera la arroba inicial: el resto debe ser un usuario válido.
+    const igUser = expIg.value.trim().replace(/^@+/, '');
+    if (!igUser) {
+      showExpError('Poné tu usuario de Instagram para poder enviar tu experiencia.');
+      return;
+    }
+    if (!/^[a-zA-Z0-9._]{1,30}$/.test(igUser)) {
+      showExpError('Ese usuario de Instagram no parece válido (solo letras, números, punto y guión bajo).');
+      return;
+    }
+    const exp = expText.value.trim();
+    if (exp.length < 10) {
+      showExpError('Contanos un poco más: tu experiencia necesita al menos 10 caracteres.');
+      return;
+    }
+    const who = ['@' + igUser, expName.value.trim()].filter(Boolean).join(' · ');
+    const freq = expFreq.value;
+    const message = [
+      '¡Hola Vyneural! 👋 Quiero compartir mi experiencia:',
+      '',
+      `“${exp}”`,
+      freq ? `Frecuencia: ${freq}` : '',
+      freq ? `— ${who}` : `— ${who}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    expMessage.value = message;
+    expDm.href = `https://ig.me/m/${IG_ACCOUNT}`;
+    expDm.textContent = `Abrir Instagram (@${IG_ACCOUNT})`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(message).catch(() => {});
+    }
+    experienceForm.classList.add('hidden');
+    expDone.classList.remove('hidden');
+  });
+}

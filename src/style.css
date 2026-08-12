@@ -2461,3 +2461,96 @@ body.immersive .controls {
     min-height: 180px;
   }
 }
+
+/* ---------------------------------------------------------------- Formulario de experiencias */
+.testimonials-form-wrap {
+  margin-top: 40px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+
+.testimonials-form-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  color: var(--text);
+}
+
+.testimonials-form-sub {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.alarm-label em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+  margin-left: 4px;
+}
+
+.exp-text {
+  resize: vertical;
+  min-height: 96px;
+  line-height: 1.5;
+}
+
+.exp-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 10px;
+}
+
+.experience-form .quick-start {
+  width: 100%;
+}
+
+.exp-done {
+  text-align: center;
+}
+
+.exp-done-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.exp-done-text {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.exp-dm {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.exp-done-note {
+  margin: 18px 0 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.exp-message {
+  text-align: left;
+  white-space: pre-wrap;
+  font-size: 13px;
+  resize: none;
+}
+
+@media (max-width: 560px) {
+  .testimonials-form-wrap {
+    margin-top: 28px;
+    padding: 18px;
+  }
+}
