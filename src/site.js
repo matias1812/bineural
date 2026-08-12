@@ -124,6 +124,22 @@ if (experienceForm) {
   const expDone = document.getElementById('exp-done');
   const expDm = document.getElementById('exp-dm');
   const expMessage = document.getElementById('exp-message');
+  const expStars = document.getElementById('exp-stars');
+
+  // Selector de valoración: 1 a 5 estrellas (opcional).
+  let expRating = 0;
+  if (expStars) {
+    expStars.addEventListener('click', (e) => {
+      const star = e.target.closest('.exp-star');
+      if (!star) return;
+      expRating = parseInt(star.dataset.value, 10);
+      expStars.querySelectorAll('.exp-star').forEach((s, i) => {
+        const on = i < expRating;
+        s.classList.toggle('active', on);
+        s.setAttribute('aria-checked', String(on));
+      });
+    });
+  }
 
   function showExpError(msg) {
     expError.textContent = msg;
@@ -151,12 +167,14 @@ if (experienceForm) {
     }
     const who = ['@' + igUser, expName.value.trim()].filter(Boolean).join(' · ');
     const freq = expFreq.value;
+    const rating = expRating > 0 ? `${expRating}/5 ⭐` : '';
     const message = [
       '¡Hola Vyneural! 👋 Quiero compartir mi experiencia:',
       '',
       `“${exp}”`,
+      rating ? `Valoración: ${rating}` : '',
       freq ? `Frecuencia: ${freq}` : '',
-      freq ? `— ${who}` : `— ${who}`,
+      `— ${who}`,
     ]
       .filter(Boolean)
       .join('\n');

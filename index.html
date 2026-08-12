@@ -509,6 +509,16 @@
               <span class="alarm-label">Tu experiencia <em>obligatorio</em></span>
               <textarea id="exp-text" class="alarm-input exp-text" rows="4" maxlength="600" placeholder="¿Cómo te sentiste? ¿Qué notaste?" required></textarea>
             </label>
+            <fieldset class="exp-rating-field">
+              <legend class="alarm-label">Tu valoración <em>opcional</em></legend>
+              <div class="exp-stars" id="exp-stars" role="radiogroup" aria-label="Tu valoración (opcional)">
+                <button type="button" class="exp-star" role="radio" aria-checked="false" data-value="1" aria-label="1 estrella de 5">★</button>
+                <button type="button" class="exp-star" role="radio" aria-checked="false" data-value="2" aria-label="2 estrellas de 5">★</button>
+                <button type="button" class="exp-star" role="radio" aria-checked="false" data-value="3" aria-label="3 estrellas de 5">★</button>
+                <button type="button" class="exp-star" role="radio" aria-checked="false" data-value="4" aria-label="4 estrellas de 5">★</button>
+                <button type="button" class="exp-star" role="radio" aria-checked="false" data-value="5" aria-label="5 estrellas de 5">★</button>
+              </div>
+            </fieldset>
             <p id="exp-error" class="exp-error hidden" role="alert"></p>
             <button type="submit" id="exp-submit" class="quick-start">Enviar mi experiencia</button>
           </form>
