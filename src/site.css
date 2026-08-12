@@ -125,20 +125,10 @@ a:hover {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.site-links a[aria-current='page'] {
+.site-links a[aria-current='page'],
+.site-links a.active {
   color: var(--text);
   background: var(--accent-soft);
-}
-
-.nav-cta {
-  margin-left: 4px;
-  color: #fff !important;
-  background: linear-gradient(135deg, #a78bfa, #6366f1);
-  box-shadow: 0 8px 22px -8px rgba(167, 139, 250, 0.6);
-}
-
-.nav-cta:hover {
-  background: linear-gradient(135deg, #b79cfb, #7772f2);
 }
 
 .nav-toggle {

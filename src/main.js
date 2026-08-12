@@ -73,15 +73,15 @@ const ICONS = {
 
 // ---------------------------------------------------------------- Estados
 const STATES = [
-  { id: 'meditacion', icon: ICONS.meditacion, name: 'Meditación', desc: 'Calma mental profunda y claridad interior', band: 'Theta · 6 Hz', color: '#a78bfa', base: 210, beat: 6 },
-  { id: 'sueno', icon: ICONS.sueno, name: 'Sueño profundo', desc: 'Relajación total para un descanso profundo', band: 'Delta · 2 Hz', color: '#60a5fa', base: 170, beat: 2 },
-  { id: 'relajacion', icon: ICONS.relajacion, name: 'Relajación', desc: 'Reduce el estrés y la ansiedad del día', band: 'Alpha · 10 Hz', color: '#34d399', base: 200, beat: 10 },
-  { id: 'concentracion', icon: ICONS.concentracion, name: 'Concentración', desc: 'Atención sostenida y mayor productividad', band: 'Beta · 16 Hz', color: '#fbbf24', base: 240, beat: 16 },
+  { id: 'meditacion', icon: ICONS.meditacion, name: 'Meditación', desc: 'Calma mental profunda y claridad interior', band: 'Theta · 6 Hz', color: '#a78bfa', base: 210, beat: 6, featured: true },
+  { id: 'sueno', icon: ICONS.sueno, name: 'Sueño profundo', desc: 'Relajación total para un descanso profundo', band: 'Delta · 2 Hz', color: '#60a5fa', base: 170, beat: 2, featured: true },
+  { id: 'relajacion', icon: ICONS.relajacion, name: 'Relajación', desc: 'Reduce el estrés y la ansiedad del día', band: 'Alpha · 10 Hz', color: '#34d399', base: 200, beat: 10, featured: true },
+  { id: 'concentracion', icon: ICONS.concentracion, name: 'Concentración', desc: 'Atención sostenida y mayor productividad', band: 'Beta · 16 Hz', color: '#fbbf24', base: 240, beat: 16, featured: true },
   { id: 'energia', icon: ICONS.energia, name: 'Energía', desc: 'Estado de alerta, vitalidad y motivación', band: 'Beta · 25 Hz', color: '#fb7185', base: 260, beat: 25 },
-  { id: 'creatividad', icon: ICONS.creatividad, name: 'Creatividad', desc: 'Flujo creativo e inspiración', band: 'Theta · 8 Hz', color: '#f0abfc', base: 220, beat: 8 },
-  { id: 'aprendizaje', icon: ICONS.aprendizaje, name: 'Aprendizaje', desc: 'Memoria y procesamiento profundo', band: 'Gamma · 40 Hz', color: '#f97316', base: 280, beat: 40 },
-  { id: 'schumann', icon: ICONS.schumann, name: 'Resonancia Schumann', desc: 'La frecuencia de la Tierra: calma y conexión', band: 'Schumann · 7.83 Hz', color: '#4ade80', base: 190, beat: 7.83 },
-  { id: 'sueno-ligero', icon: ICONS['sueno-ligero'], name: 'Sueño ligero', desc: 'Transición suave hacia el descanso', band: 'Delta · 3 Hz', color: '#818cf8', base: 180, beat: 3 },
+  { id: 'creatividad', icon: ICONS.creatividad, name: 'Creatividad', desc: 'Flujo creativo e inspiración', band: 'Theta · 8 Hz', color: '#f0abfc', base: 220, beat: 8, featured: true },
+  { id: 'aprendizaje', icon: ICONS.aprendizaje, name: 'Aprendizaje', desc: 'Memoria y procesamiento profundo', band: 'Gamma · 40 Hz', color: '#f97316', base: 280, beat: 40, featured: true },
+  { id: 'schumann', icon: ICONS.schumann, name: 'Resonancia Schumann', desc: 'La frecuencia de la Tierra: calma y conexión', band: 'Schumann · 7.83 Hz', color: '#4ade80', base: 190, beat: 7.83, featured: true },
+  { id: 'sueno-ligero', icon: ICONS['sueno-ligero'], name: 'Sueño ligero', desc: 'Transición suave hacia el descanso', band: 'Delta · 3 Hz', color: '#818cf8', base: 180, beat: 3, featured: true },
   { id: 'profundidad', icon: ICONS.profundidad, name: 'Profundidad', desc: 'Inmersión total en el descanso', band: 'Delta · 1 Hz', color: '#6d6ee8', base: 160, beat: 1 },
   { id: 'calma', icon: ICONS.calma, name: 'Calma', desc: 'Serenidad ligera para el día a día', band: 'Theta · 5 Hz', color: '#2dd4bf', base: 195, beat: 5 },
   { id: 'intuicion', icon: ICONS.intuicion, name: 'Intuición', desc: 'Conexión interior y claridad sutil', band: 'Theta · 4.5 Hz', color: '#a78bfa', base: 205, beat: 4.5 },
@@ -105,9 +105,11 @@ const STATES = [
 
 // ---------------------------------------------------------------- DOM
 const grid = document.getElementById('states-grid');
+const goalFilter = document.getElementById('goal-filter');
 const playBtn = document.getElementById('play-btn');
 const volume = document.getElementById('volume');
 const volumeLabel = document.getElementById('volume-label');
+const rotVolume = document.getElementById('rot-volume');
 const timerOptions = document.getElementById('timer-options');
 const timerDisplay = document.getElementById('timer-display');
 const ambientOptions = document.getElementById('ambient-options');
@@ -195,16 +197,45 @@ const carrierWarning = document.getElementById('carrier-warning');
 let favorites = new Set(lsGet(LS_FAVS, []));
 
 // ---------------------------------------------------------------- Tarjetas
+// Los estados se organizan por objetivo (Dormir, Meditar, Relajarse…):
+// enfoque de usuario en vez de bandas técnicas, con encabezado por grupo.
+const GOALS = [
+  { id: 'dormir', label: 'Dormir', emoji: '😴', bands: ['delta'], tagline: 'Descanso profundo' },
+  { id: 'meditar', label: 'Meditar', emoji: '🧘', bands: ['theta'], tagline: 'Calma y creatividad' },
+  { id: 'relajarse', label: 'Relajarse', emoji: '🌿', bands: ['alfa'], tagline: 'Suelta el estrés' },
+  { id: 'concentrarse', label: 'Concentrarse', emoji: '🧠', bands: ['beta'], tagline: 'Foco y productividad' },
+  { id: 'aprender', label: 'Aprender', emoji: '📚', bands: ['gamma'], tagline: 'Memoria y aprendizaje' },
+  { id: 'especiales', label: 'Especiales', emoji: '✨', bands: ['schumann', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
+];
+const goalOf = (s) => GOALS.find((g) => g.bands.includes(bandKeyOf(s)));
+
+// Construye la rejilla en grupos (sección con encabezado + sub-rejilla).
+const groups = GOALS.map((goal) => {
+  const section = document.createElement('section');
+  section.className = 'state-group';
+  section.dataset.goal = goal.id;
+  section.innerHTML = `<h3 class="state-group-title"><span class="sgt-emoji">${goal.emoji}</span><span class="sgt-name">${goal.label}</span><span class="sgt-tagline">${goal.tagline}</span></h3>`;
+  const sub = document.createElement('div');
+  sub.className = 'grid';
+  section.appendChild(sub);
+  grid.appendChild(section);
+  return { goal, section, sub };
+});
+
 const cards = STATES.map((s) => {
   const card = document.createElement('button');
   card.className = 'card';
   card.dataset.id = s.id;
   const fav = favorites.has(s.id);
+  // Las dos frecuencias del estado: una por oído (base y base + latido).
+  const f1 = Math.round(s.base * 10) / 10;
+  const f2 = Math.round((s.base + s.beat) * 10) / 10;
   card.innerHTML = `
     <span class="card-star${fav ? ' fav' : ''}" role="button" tabindex="0" aria-label="Marcar ${s.name} como favorito" aria-pressed="${fav}">${ICONS.star}</span>
     <span class="card-icon" style="color:${s.color}">${s.icon}</span>
     <span class="card-name">${s.name}</span>
     <span class="card-band">${s.band}</span>
+    <span class="card-freqs">${f1} Hz · ${f2} Hz</span>
     <span class="card-desc">${s.desc}</span>
   `;
   card.addEventListener('click', () => selectState(s));
@@ -220,7 +251,7 @@ const cards = STATES.map((s) => {
       toggleFav(s, star);
     }
   });
-  grid.appendChild(card);
+  groups.find((g) => g.goal.id === goalOf(s).id).sub.appendChild(card);
   return card;
 });
 
@@ -234,8 +265,8 @@ function toggleFav(state, starEl) {
     starEl.setAttribute('aria-pressed', String(favorites.has(state.id)));
   }
   // Si estamos filtrando por favoritos, actualizar la rejilla al momento.
-  const activeChip = bandFilter.querySelector('.band-chip.active');
-  if (activeChip && activeChip.dataset.band === 'favs') applyBandFilter('favs');
+  const activeChip = goalFilter.querySelector('.band-chip.active');
+  if (activeChip && activeChip.dataset.goal === 'favs') applyGoalFilter('favs');
 }
 
 // Guarda la sesión actual (último estado, volumen, ambientes y temporizador)
@@ -351,7 +382,8 @@ function start() {
   sessionStartTime = Date.now();
   applyAudio();
   playBtn.classList.add('playing');
-  playBtn.innerHTML = `<span class="play-icon">${ICONS.pause}</span><span class="play-text">Pausar</span>`;
+  playBtn.innerHTML = ICONS.pause;
+  playBtn.setAttribute('aria-label', 'Pausar sesión');
   updateStatus();
   armTimer();
   saveSession();
@@ -363,7 +395,8 @@ function stop() {
   ambient.stopAll();
   playing = false;
   playBtn.classList.remove('playing');
-  playBtn.innerHTML = `<span class="play-icon">${ICONS.play}</span><span class="play-text">Comenzar</span>`;
+  playBtn.innerHTML = ICONS.play;
+  playBtn.setAttribute('aria-label', 'Comenzar sesión');
   updateStatus();
   disarmTimer();
   recordHistory();
@@ -478,14 +511,23 @@ playBtn.addEventListener('click', () => {
   if (playing) stop();
   else start();
 });
+// Estado inicial del play sobre las gotas (solo icono).
+playBtn.innerHTML = ICONS.play;
+playBtn.setAttribute('aria-label', 'Comenzar sesión');
 
 // ---------------------------------------------------------------- Volumen
-volume.addEventListener('input', () => {
-  volumeLevel = parseFloat(volume.value);
-  volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
+// Aplica un nivel de volumen compartido por el slider de las gotas y el del
+// modo girado.
+function setVolume(v) {
+  volumeLevel = parseFloat(v);
+  volume.value = String(volumeLevel);
+  if (rotVolume) rotVolume.value = String(volumeLevel);
+  if (volumeLabel) volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
   engine.setVolume(volumeLevel);
   saveSession();
-});
+}
+volume.addEventListener('input', () => setVolume(volume.value));
+if (rotVolume) rotVolume.addEventListener('input', () => setVolume(rotVolume.value));
 
 // ---------------------------------------------------------------- Temporizador
 function armTimer() {
@@ -805,9 +847,11 @@ function updateRotControls() {
   if (!rotControls) return;
   rotControls.classList.toggle('hidden', !portraitImmersive);
   if (rotPlayBtn) {
-    rotPlayBtn.querySelector('.play-text').textContent = playing ? 'Pausar' : 'Comenzar';
-    rotPlayBtn.querySelector('.play-icon').innerHTML = playing ? ICONS.pause : ICONS.play;
+    // Solo el icono, sin texto, para que la barra compacta quede limpia.
+    rotPlayBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
+    rotPlayBtn.setAttribute('aria-label', playing ? 'Pausar sesión' : 'Comenzar sesión');
   }
+  if (rotVolume) rotVolume.value = String(volumeLevel);
 }
 
 if (rotPlayBtn) {
@@ -920,8 +964,8 @@ let waveBrainP = null;
 let waveBrainA = null;
 let wavePoolR = 0;
 let lastBeatPhase = 0;
-// Momento del último impacto de cada fuente (gotas discretas que caen).
-let impactTimes = { L: 0, R: 0, B: 0, P: 0, A: 0 };
+// Momento del último impulso de cada cuenca (índice: 0=L, 1=R, 2=B, 3=P).
+let impactTimes = [0, 0, 0, 0];
 let brainCanvas = null;
 let brainCtx = null;
 let brainImg = null;
@@ -935,7 +979,33 @@ function hexToRgb(hex) {
 // (LANE_LEFT_COLOR_RGB, LANE_RIGHT_COLOR_RGB y ACCENT_RGB se declaran arriba,
 // junto al estado de la app, para que el arranque las use.)
 
-// Crea (o recrea si cambió el tamaño) las cuencas de agua.
+// Crea (o recrea si cambió el tamaño) las cuencas de agua. Si ya existían
+// campos con ondas en marcha, redimensiona transfiriendo el estado (u y
+// prev) en vez de reiniciar: al cambiar de tamaño (p. ej. al entrar en
+// pantalla completa) el agua continúa exactamente donde estaba, solo que
+// a otra resolución.
+function transferField(oldField, newSize, opts) {
+  const nf = new WaveField(newSize, opts);
+  nf.setCircle(newSize / 2, newSize / 2, newSize / 2 - 1.5);
+  if (oldField) {
+    const os = oldField.size;
+    const ns = newSize;
+    const scale = os / ns;
+    for (let y = 0; y < ns; y++) {
+      for (let x = 0; x < ns; x++) {
+        const ox = Math.round((x - ns / 2) * scale + os / 2);
+        const oy = Math.round((y - ns / 2) * scale + os / 2);
+        if (ox < 0 || oy < 0 || ox >= os || oy >= os) continue;
+        const oi = oy * os + ox;
+        const ni = y * ns + x;
+        nf.u[ni] = oldField.u[oi];
+        nf.prev[ni] = oldField.prev[oi];
+      }
+    }
+  }
+  return nf;
+}
+
 function ensureFields(poolR) {
   if (wavePoolR && Math.abs(wavePoolR - poolR) < 2) return;
   wavePoolR = poolR;
@@ -943,15 +1013,11 @@ function ensureFields(poolR) {
   // c más lento y más amortiguación: anillos limpios y definidos que se
   // expanden y se apagan, sin acumularse en un revoltijo caótico.
   const opts = { c: 0.45, damp: 0.992 };
-  waveLeft = new WaveField(size, opts);
-  waveRight = new WaveField(size, opts);
-  waveBrainB = new WaveField(size, opts);
-  waveBrainP = new WaveField(size, opts);
-  waveBrainA = new WaveField(size, opts);
-  const s = size / 2;
-  for (const f of [waveLeft, waveRight, waveBrainB, waveBrainP, waveBrainA]) {
-    f.setCircle(s, s, s - 1.5);
-  }
+  waveLeft = transferField(waveLeft, size, opts);
+  waveRight = transferField(waveRight, size, opts);
+  waveBrainB = transferField(waveBrainB, size, opts);
+  waveBrainP = transferField(waveBrainP, size, opts);
+  waveBrainA = transferField(waveBrainA, size, opts);
   if (brainSize !== size) {
     brainSize = size;
     brainCanvas = document.createElement('canvas');
@@ -972,6 +1038,7 @@ function renderBrain() {
   const size = waveBrainB.size;
   const n = waveBrainB.n;
   const mask = waveBrainB.mask;
+  const soft = waveBrainB.soft;
   const ub = waveBrainB.u;
   const up = waveBrainP.u;
   const ua = waveBrainA.u;
@@ -1028,7 +1095,7 @@ function renderBrain() {
     d[o] = cr > 255 ? 255 : cr;
     d[o + 1] = cg > 255 ? 255 : cg;
     d[o + 2] = cb > 255 ? 255 : cb;
-    d[o + 3] = 255;
+    d[o + 3] = soft ? Math.round(255 * soft[i]) : 255;
   }
   brainCtx.putImageData(brainImg, 0, 0);
 }
@@ -1083,65 +1150,61 @@ function drawVisual() {
   const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
   const beatBright = 0.62 + 0.38 * eased; // las tres gotas brillan al unísono
 
-  // ----- Física: excitar fuentes y avanzar la simulación -------------------
-  // Las portadoras se excitan a escala visual (la frecuencia real de audio
-  // no cabe en 60 fps; lo que sí es real y exacto es el latido: su impulso
-  // cae en la fase 0 del reloj del AudioContext, como el sonido).
+  // ----- Física: las fuentes excitan directamente el agua ------------------
+  // No hay gotas que caigan: las tres frecuencias inyectan su impulso en la
+  // cuenca (ondas que se propagan, rebotan en el borde y chocan entre sí) y
+  // el latido añade su pulso exacto en la fase 0 del reloj del AudioContext.
   ensureFields(poolR);
   const size = waveLeft.size;
   const s = size / 2;
   const off = size * 0.1; // separación de las fuentes en la unión
 
   if (playing) {
-    // Gotas discretas que caen a intervalos: cada impacto genera un anillo
-    // limpio que se expande y se apaga. En la unión, las gotas azul y rosa
-    // caen de fuentes desfasadas y sus anillos chocan al cruzarse.
-    if (t - impactTimes.L >= 1.5) {
+    // Las tres frecuencias: una fuente por cuenca (los laterales en el
+    // centro, la unión con azul y rosa desfasadas que chocan al cruzarse).
+    if (t - impactTimes[0] >= 1.5) {
       waveLeft.pokeDisc(s, s, 1.5);
-      impactTimes.L = t;
+      impactTimes[0] = t;
     }
-    if (t - impactTimes.R >= 1.8) {
+    if (t - impactTimes[1] >= 1.8) {
       waveRight.pokeDisc(s, s, 1.5);
-      impactTimes.R = t;
+      impactTimes[1] = t;
     }
-    if (t - impactTimes.B >= 1.3) {
+    if (t - impactTimes[2] >= 1.3) {
       waveBrainB.pokeDisc(s - off, s, 1.3);
-      impactTimes.B = t;
+      impactTimes[2] = t;
     }
-    if (t - impactTimes.P >= 1.6) {
+    if (t - impactTimes[3] >= 1.6) {
       waveBrainP.pokeDisc(s + off, s, 1.3);
-      impactTimes.P = t;
-    }
-    // Latido: una gota de luz exacta en cada pulso real (fase 0).
-    if (phase != null) {
-      const wrapped = lastBeatPhase > phase && lastBeatPhase - phase > 0.5;
-      if (wrapped) waveBrainA.pokeDisc(s, s, 1.8);
-      lastBeatPhase = phase;
+      impactTimes[3] = t;
     }
   } else {
-    // En pausa: gotas espaciadas y suaves, el agua sigue viva pero tranquila.
-    if (t - impactTimes.L >= 3.2) {
+    // En pausa: impulsos espaciados y suaves, el agua sigue viva pero
+    // tranquila.
+    if (t - impactTimes[0] >= 3.4) {
       waveLeft.pokeDisc(s, s, 0.6);
-      impactTimes.L = t;
+      impactTimes[0] = t;
     }
-    if (t - impactTimes.R >= 3.2) {
+    if (t - impactTimes[1] >= 3.4) {
       waveRight.pokeDisc(s, s, 0.6);
-      impactTimes.R = t;
+      impactTimes[1] = t;
     }
-    if (t - impactTimes.B >= 3.2) {
+    if (t - impactTimes[2] >= 3.4) {
       waveBrainB.pokeDisc(s - off, s, 0.5);
-      impactTimes.B = t;
+      impactTimes[2] = t;
     }
-    if (t - impactTimes.P >= 3.2) {
+    if (t - impactTimes[3] >= 3.4) {
       waveBrainP.pokeDisc(s + off, s, 0.5);
-      impactTimes.P = t;
+      impactTimes[3] = t;
     }
-    if (t - impactTimes.A >= 3.2) {
-      waveBrainA.pokeDisc(s, s, 0.5);
-      impactTimes.A = t;
-    }
-    lastBeatPhase = phase;
   }
+  // Latido: una gota de luz exacta en cada pulso real (fase 0).
+  if (playing && phase != null) {
+    const wrapped = lastBeatPhase > phase && lastBeatPhase - phase > 0.5;
+    if (wrapped) waveBrainA.pokeDisc(s, s, 1.8);
+  }
+  lastBeatPhase = phase;
+
   waveLeft.step();
   waveRight.step();
   waveBrainB.step();
@@ -1219,7 +1282,6 @@ function drawVisual() {
   ctx2d.arc(brain.x, brain.y, coreR, 0, Math.PI * 2);
   ctx2d.fillStyle = hexToRgba('#ffffff', 0.4 + eased * 0.4);
   ctx2d.fill();
-
 }
 drawVisual();
 
@@ -1230,7 +1292,8 @@ function restoreSession(saved) {
   if (typeof saved.volume === 'number') {
     volumeLevel = saved.volume;
     volume.value = String(saved.volume);
-    volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
+    if (rotVolume) rotVolume.value = String(saved.volume);
+    if (volumeLabel) volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
     engine.setVolume(volumeLevel);
   }
   if (Array.isArray(saved.ambient)) {
@@ -1295,6 +1358,12 @@ const wantId = deepState || (savedSession && savedSession.state);
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
 restoreSession(savedSession);
 selectState(initial);
+// El filtro arranca en la vista curada 'Destacados' (los más populares);
+// si el enlace profundo o la sesión abren otro estado, seguir a su objetivo.
+const initialGoal = initial.featured ? 'destacados' : goalOf(initial).id;
+const goalChips = [...goalFilter.querySelectorAll('.band-chip')];
+goalChips.forEach((c) => c.classList.toggle('active', c.dataset.goal === initialGoal));
+applyGoalFilter(initialGoal);
 updateCustomLabels();
 // Marca la portadora activa (fila principal y modo girado) y muestra el panel.
 syncCarrierChips();
@@ -1424,21 +1493,35 @@ setTimeout(() => {
   revealables.forEach((el) => el.classList.add('revealed'));
 }, 6000);
 
-// Filtro por banda de frecuencia (delta, theta, alfa, beta, gamma…).
+// Banda técnica de un estado (delta, theta, alfa, beta, gamma, schumann…).
 function bandKeyOf(state) {
-  return state.custom ? 'personalizado' : state.band.toLowerCase().split(' ')[0];
+  if (state.custom) return 'personalizado';
+  const key = state.band.toLowerCase().split(' ')[0];
+  // 'Alpha · 10 Hz' se escribe con 'ph' en algunos presets: normalizar.
+  return key === 'alpha' ? 'alfa' : key;
 }
-function applyBandFilter(band) {
+// Filtro por objetivo (dormir, meditar, concentrarse…) o por favoritos.
+function applyGoalFilter(goal) {
   cards.forEach((card) => {
     const s = STATES.find((st) => st.id === card.dataset.id);
     let show;
-    if (band === 'favs') show = favorites.has(s.id);
-    else show = !band || bandKeyOf(s) === band;
+    if (goal === 'favs') show = favorites.has(s.id);
+    else if (goal === 'destacados') show = !!s.featured;
+    else show = goalOf(s).id === goal;
     card.classList.toggle('filtered-out', !show);
+  });
+  // Ocultar los grupos que se quedaron sin estados visibles.
+  groups.forEach(({ section, sub }) => {
+    const empty = ![...sub.children].some((c) => !c.classList.contains('filtered-out'));
+    section.classList.toggle('empty', empty);
   });
   // Si el estado elegido quedó oculto, elegir el primero visible.
   const hidden =
-    band === 'favs' ? !favorites.has(selected.id) : band && bandKeyOf(selected) !== band;
+    goal === 'favs'
+      ? !favorites.has(selected.id)
+      : goal === 'destacados'
+        ? !selected.featured
+        : goal && goalOf(selected).id !== goal;
   if (hidden) {
     const firstVisible = cards.find((c) => !c.classList.contains('filtered-out'));
     if (firstVisible) {
@@ -1446,10 +1529,9 @@ function applyBandFilter(band) {
     }
   }
 }
-const bandFilter = document.getElementById('band-filter');
-bandFilter.addEventListener('click', (e) => {
+goalFilter.addEventListener('click', (e) => {
   const chip = e.target.closest('.band-chip');
   if (!chip) return;
-  bandFilter.querySelectorAll('.band-chip').forEach((c) => c.classList.toggle('active', c === chip));
-  applyBandFilter(chip.dataset.band);
+  goalFilter.querySelectorAll('.band-chip').forEach((c) => c.classList.toggle('active', c === chip));
+  applyGoalFilter(chip.dataset.goal);
 });
