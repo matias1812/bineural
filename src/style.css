@@ -1065,6 +1065,8 @@ body {
 #timer-options {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .timer-btn {
