@@ -51,6 +51,18 @@ export class BinauralEngine {
     return this.ctx;
   }
 
+  // Reanuda el AudioContext si el sistema lo suspendió (p. ej. al volver a
+  // la app tras cambiar de aplicación, bloquear la pantalla o cerrar la
+  // pestaña temporalmente). Sin esto la sesión vuelve muda hasta que el
+  // usuario toca play otra vez.
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {
+        /* el navegador exigirá un gesto para reanudar */
+      });
+    }
+  }
+
   start({ base = 200, beat = 10, volume = 0.5, wave = 'sine' }) {
     const ctx = this.ensure();
     this.stopInstant();

@@ -386,7 +386,6 @@ function start() {
   updateStatus();
   armTimer();
   saveSession();
-  updateRotControls();
 }
 
 function stop() {
@@ -400,7 +399,6 @@ function stop() {
   disarmTimer();
   recordHistory();
   saveSession();
-  updateRotControls();
 }
 
 // ---------------------------------------------------------------- Historial
@@ -854,16 +852,41 @@ fullscreenBtn.addEventListener('click', async () => {
         /* no había fullscreen real activo */
       }
     }
-    resizeCanvas();
+    requestAnimationFrame(resizeCanvas);
+    // En el modo CSS (sin fullscreen real) no llega fullscreenchange: se
+    // reanuda el audio igualmente al salir.
+    setTimeout(resumeAudioIfNeeded, 200);
   }
 });
 document.addEventListener('fullscreenchange', () => {
   const on = !!document.fullscreenElement;
   document.body.classList.toggle('immersive', on);
   setFullscreenIcon(on);
-  // El canvas se re-mide al entrar/salir del modo (el layout cambia).
-  resizeCanvas();
+  // El canvas se re-mide al entrar/salir del modo (el layout cambia). Se
+  // espera un frame para que el CSS ya haya aplicado el nuevo tamaño.
+  requestAnimationFrame(resizeCanvas);
+  // Al salir de pantalla completa algunos navegadores (Android/iOS)
+  // suspenden el AudioContext: se reanuda para que la sesión no quede muda.
+  if (!on) setTimeout(resumeAudioIfNeeded, 200);
 });
+
+// ---------------------------------------------------------------- Reanudar al volver
+// En el móvil el sistema operativo suspende el AudioContext al salir de la
+// app (cambiar de aplicación, bloquear la pantalla, cerrar la pestaña…). Al
+// volver, la sesión se reanuda sola para que no quede muda — "pausada" —
+// hasta que el usuario vuelva a tocar play.
+function resumeAudioIfNeeded() {
+  if (!playing) return;
+  engine.resume();
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) resumeAudioIfNeeded();
+});
+window.addEventListener('pageshow', resumeAudioIfNeeded);
+window.addEventListener('focus', resumeAudioIfNeeded);
+// iOS suele exigir un gesto del usuario para reanudar el contexto: si al
+// volver seguía suspendido, se reanuda con el primer toque sobre la página.
+window.addEventListener('pointerdown', resumeAudioIfNeeded, { passive: true });
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {
@@ -1080,8 +1103,15 @@ function drawVisual() {
   const p = currentParams();
   const beat = Math.max(0.5, p.beat);
 
-  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2.
-  const poolR = Math.min(h, w / 3) * 0.4;
+  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2. En pantalla
+  // completa en el teléfono la fila se agranda un poco (ocupa casi todo el
+  // ancho) para que las gotas sean las protagonistas de la pantalla. La
+  // condición coincide con el CSS: todo dispositivo táctil, no solo estrecho
+  // (un teléfono apaisado mide hasta ~932px de ancho).
+  const mobileImmersive =
+    document.body.classList.contains('immersive') &&
+    (window.innerWidth <= 900 || matchMedia('(hover: none) and (pointer: coarse)').matches);
+  const poolR = Math.min(h, w / 3) * (mobileImmersive ? 0.45 : 0.4);
   const cxs = [w / 6, w / 2, (5 * w) / 6];
   const cys = [h / 2, h / 2, h / 2];
   const cy = h / 2;

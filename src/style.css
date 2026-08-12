@@ -1788,11 +1788,14 @@ body.immersive .controls {
   overflow-y: auto;
 }
 
-/* Teléfono: en pantalla completa solo las gotas, sin controles ni ajustes.
-   El visualizador llena la pantalla en cualquier orientación (vertical u
-   horizontal) y los botones esenciales —play, compartir, volumen— quedan
-   sobre el lienzo. El botón de salir sigue visible en la esquina. */
-@media (max-width: 900px) {
+/* Teléfono y tablet: en pantalla completa solo las gotas, sin controles ni
+   ajustes. El visualizador llena la pantalla en cualquier orientación
+   (vertical u horizontal) y los botones esenciales —play, compartir,
+   volumen— quedan sobre el lienzo. El botón de salir sigue visible en la
+   esquina. Se aplica a todo dispositivo táctil (no solo a los estrechos):
+   un teléfono apaisado mide 844-932px de ancho y quedaría con el layout de
+   escritorio (columna de controles) si solo se mirara el ancho. */
+@media (max-width: 900px), (hover: none) and (pointer: coarse) {
   body.immersive .wrap {
     position: fixed;
     top: 0;
@@ -1813,6 +1816,7 @@ body.immersive .controls {
     flex: 1 1 0;
     min-width: 0;
     margin: 0;
+    padding: 0;
   }
   body.immersive .visualizer-wrap {
     flex: 1 1 0;
@@ -1821,6 +1825,7 @@ body.immersive .controls {
   body.immersive .visual-panel #visualizer {
     flex: 1 1 0;
     min-height: 0;
+    border-radius: 0;
   }
   body.immersive .visual-panel .legend,
   body.immersive .visual-panel .status {
