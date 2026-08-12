@@ -2218,3 +2218,246 @@ body.immersive .controls {
   }
 }
 
+
+/* ---------------------------------------------------------------- Recordatorio de sesión */
+.alarm-btn {
+  position: absolute;
+  top: 18px;
+  left: 66px;
+  width: 38px;
+  height: 38px;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  z-index: 2;
+}
+
+.alarm-card {
+  max-width: 420px;
+}
+
+.alarm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.alarm-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.alarm-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: inherit;
+}
+
+.alarm-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.alarm-input[type='time'] {
+  font-variant-numeric: tabular-nums;
+}
+
+.alarm-custom {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+.alarm-custom .alarm-field:last-child {
+  margin-bottom: 0;
+}
+
+.alarm-perm {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.alarm-actions {
+  margin-bottom: 14px;
+}
+
+.alarm-actions .quick-start {
+  width: 100%;
+}
+
+.alarm-backup {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: rgba(167, 139, 250, 0.07);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 12px;
+}
+
+.alarm-backup-title {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.alarm-backup-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alarm-backup-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.alarm-backup-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.alarm-list-wrap {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.alarm-list-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.alarm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.alarm-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.alarm-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.alarm-item-info b {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.alarm-item-info small {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.alarm-del {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  flex: none;
+}
+
+.alarm-del:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------- Testimonios (KudosWall) */
+.testimonials {
+  padding: 40px 0 48px;
+}
+
+.testimonials-root {
+  min-height: 220px;
+  position: relative;
+}
+
+.testimonials-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.ts-skel-card {
+  height: 150px;
+  border-radius: 14px;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 40%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 60%
+  );
+  background-size: 200% 100%;
+  animation: skelShimmer 1.4s infinite linear;
+}
+
+@keyframes skelShimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+
+.testimonials-empty {
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+}
+
+@media (max-width: 560px) {
+  .testimonials {
+    padding: 28px 0 36px;
+  }
+
+  .testimonials-root {
+    min-height: 180px;
+  }
+}

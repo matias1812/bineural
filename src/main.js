@@ -4,6 +4,19 @@ import { BinauralEngine } from './audio.js';
 import { AmbientEngine } from './ambient.js';
 import { WaveField } from './wavefield.js';
 import { initStarfield } from './starfield.js';
+import {
+  getAlarms,
+  saveAlarms,
+  removeAlarm,
+  notificationSupported,
+  iosNeedsInstall,
+  requestPermission,
+  fireAlarm,
+  nextAlarmAt,
+  buildGoogleCalendarUrl,
+  downloadIcs,
+  startAlarmWatcher,
+} from './notifications.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -67,6 +80,7 @@ const ICONS = {
   pause: icon('<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>'),
   star: icon('<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>'),
   share: icon('<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/>'),
+  alarm: icon('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
   expand: icon('<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>'),
   compress: icon('<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>'),
 };
@@ -1498,6 +1512,187 @@ function restoreSession(saved) {
   }
 }
 
+// ---------------------------------------------------------------- Recordatorio de sesión
+const alarmBtn = document.getElementById('alarm-btn');
+const alarmModal = document.getElementById('alarm-modal');
+const alarmTime = document.getElementById('alarm-time');
+const alarmState = document.getElementById('alarm-state');
+const alarmCustom = document.getElementById('alarm-custom');
+const alarmBase = document.getElementById('alarm-base');
+const alarmBeat = document.getElementById('alarm-beat');
+const alarmWave = document.getElementById('alarm-wave');
+const alarmMinutes = document.getElementById('alarm-minutes');
+const alarmPerm = document.getElementById('alarm-perm');
+const alarmSave = document.getElementById('alarm-save');
+const alarmGcal = document.getElementById('alarm-gcal');
+const alarmIcs = document.getElementById('alarm-ics');
+const alarmListWrap = document.getElementById('alarm-list-wrap');
+const alarmList = document.getElementById('alarm-list');
+
+if (alarmBtn) alarmBtn.innerHTML = ICONS.alarm;
+
+// Selector de estados: presets + personalizado.
+STATES.forEach((s) => {
+  const opt = document.createElement('option');
+  opt.value = s.id;
+  opt.textContent = s.custom ? 'Personalizado (a tu medida)' : `${s.name} · ${s.band}`;
+  alarmState.appendChild(opt);
+});
+
+function alarmPreset() {
+  return STATES.find((s) => s.id === alarmState.value) || STATES[0];
+}
+
+function defaultAlarmTime() {
+  const d = new Date(Date.now() + 15 * 60000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5, 0, 0);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function refreshAlarmPerm() {
+  if (!notificationSupported()) {
+    alarmPerm.textContent = 'Tu navegador no soporta notificaciones: usá el respaldo de calendario.';
+    return;
+  }
+  const p = Notification.permission;
+  if (p === 'granted') alarmPerm.textContent = '✅ Notificaciones activadas: te avisaremos a la hora elegida.';
+  else if (p === 'denied') alarmPerm.textContent = '⚠️ Notificaciones bloqueadas: activalas en el navegador o usá el respaldo de calendario.';
+  else alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso para notificarte.';
+  if (iosNeedsInstall()) {
+    alarmPerm.textContent += ' En iPhone, instala Vyneural (Compartir → Añadir a pantalla de inicio) para recibir notificaciones.';
+  }
+}
+
+function openAlarmModal() {
+  if (!alarmTime.value) alarmTime.value = defaultAlarmTime();
+  refreshAlarmPerm();
+  renderAlarms();
+  alarmModal.classList.remove('hidden');
+}
+
+function closeAlarmModal() {
+  alarmModal.classList.add('hidden');
+}
+
+alarmBtn.addEventListener('click', openAlarmModal);
+document.getElementById('alarm-close').addEventListener('click', closeAlarmModal);
+alarmModal.addEventListener('click', (e) => {
+  if (e.target === alarmModal) closeAlarmModal();
+});
+
+alarmState.addEventListener('change', () => {
+  const custom = !!alarmPreset().custom;
+  alarmCustom.classList.toggle('hidden', !custom);
+  if (!custom) {
+    alarmBase.value = String(alarmPreset().base);
+    alarmBeat.value = String(alarmPreset().beat);
+    alarmWave.value = 'sine';
+  }
+});
+
+function alarmConfig() {
+  const st = alarmPreset();
+  const minutes = parseInt(alarmMinutes.value, 10) || 0;
+  if (st.custom) {
+    return {
+      name: 'Personalizado',
+      freq: parseFloat(alarmBase.value) || 220,
+      beat: parseFloat(alarmBeat.value) || 10,
+      wave: alarmWave.value || 'sine',
+      minutes,
+    };
+  }
+  return { name: st.name, freq: st.base, beat: st.beat, wave: 'sine', minutes };
+}
+
+alarmSave.addEventListener('click', async () => {
+  const time = alarmTime.value || defaultAlarmTime();
+  const cfg = alarmConfig();
+  const alarm = {
+    id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    time,
+    ...cfg,
+    nextAt: nextAlarmAt(time).getTime(),
+  };
+  const list = getAlarms();
+  list.push(alarm);
+  saveAlarms(list);
+  renderAlarms();
+  showToast(`Recordatorio guardado para las ${time}`);
+  const perm = await requestPermission();
+  if (perm !== 'granted' && perm !== 'unsupported') {
+    showToast('Activá las notificaciones o usá el respaldo de calendario');
+  }
+  refreshAlarmPerm();
+});
+
+function renderAlarms() {
+  const alarms = getAlarms().slice().sort((a, b) => a.nextAt - b.nextAt);
+  alarmListWrap.classList.toggle('hidden', alarms.length === 0);
+  alarmList.innerHTML = '';
+  const today = new Date().toDateString();
+  alarms.forEach((a) => {
+    const li = document.createElement('li');
+    li.className = 'alarm-item';
+    const when = new Date(a.nextAt);
+    const extra = when.toDateString() === today ? '' : ` · ${when.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`;
+    const info = document.createElement('span');
+    info.className = 'alarm-item-info';
+    const b = document.createElement('b');
+    b.textContent = a.name;
+    const small = document.createElement('small');
+    small.textContent = `${a.time}${extra} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
+    info.append(b, small);
+    const del = document.createElement('button');
+    del.className = 'alarm-del';
+    del.setAttribute('aria-label', 'Eliminar recordatorio');
+    del.textContent = '✕';
+    del.addEventListener('click', () => {
+      removeAlarm(a.id);
+      renderAlarms();
+    });
+    li.append(info, del);
+    alarmList.appendChild(li);
+  });
+}
+
+// Respaldo de calendario: aplican a la configuración actual del modal.
+alarmGcal.addEventListener('click', (e) => {
+  const cfg = alarmConfig();
+  const time = alarmTime.value || defaultAlarmTime();
+  e.currentTarget.href = buildGoogleCalendarUrl({ ...cfg, time, nextAt: nextAlarmAt(time).getTime() });
+});
+alarmIcs.addEventListener('click', () => {
+  const cfg = alarmConfig();
+  const time = alarmTime.value || defaultAlarmTime();
+  downloadIcs({ ...cfg, time, nextAt: nextAlarmAt(time).getTime() });
+});
+
+// Watcher de alarmas: al llegar la hora, notificación si la pestaña está
+// oculta o sonido + arranque de la sesión si está en primer plano.
+startAlarmWatcher((alarm) => {
+  if (fireAlarm(alarm) === 'foreground') {
+    showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
+    // Configura la frecuencia exacta del recordatorio y arranca.
+    const custom = STATES.find((s) => s.custom);
+    customBase.value = String(Math.round(alarm.freq * 10) / 10);
+    customBeat.value = String(alarm.beat);
+    customWave.value = alarm.wave || 'sine';
+    selectState(custom);
+    updateCustomLabels();
+    updateCustomPanel();
+    updateCarrierWarning();
+    updateStatus();
+    if (alarm.minutes > 0) {
+      timerMinutes = alarm.minutes;
+      timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
+        btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
+      );
+    }
+    if (!playing) start();
+  }
+});
+
 // ---------------------------------------------------------------- Arranque
 // Deep link: ?state=meditacion abre directamente ese estado (tiene prioridad
 // sobre la sesión guardada para que compartir funcione).
@@ -1526,7 +1721,20 @@ else if (isFinite(deepF1) && deepF1 > 0) {
   customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
 }
 const savedSession = lsGet(LS_SESSION, null);
-const wantId = deepState || (savedSession && savedSession.state);
+// Deep link de alarma: ?freq={base}&beat={ritmo}&wave={onda}&autostart=true
+// configura el estado personalizado con la frecuencia exacta del recordatorio.
+const deepFreq = parseFloat(deepParams.get('freq'));
+const deepBeat = parseFloat(deepParams.get('beat'));
+const deepWave = deepParams.get('wave');
+const deepAutostart = deepParams.get('autostart') === 'true';
+const customState = STATES.find((s) => s.custom);
+let wantId = deepState || (savedSession && savedSession.state);
+if (isFinite(deepFreq) && deepFreq > 0) {
+  customBase.value = String(Math.round(deepFreq * 10) / 10);
+  customBeat.value = String(deepBeat > 0 ? Math.round(deepBeat * 10) / 10 : 10);
+  customWave.value = deepWave || 'sine';
+  wantId = customState ? customState.id : wantId;
+}
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
 restoreSession(savedSession);
 selectState(initial);
@@ -1546,8 +1754,19 @@ updateHistory();
 
 // Inicio rápido: solo en la primera visita, sin deep link ni sesión guardada.
 // (savedSession se leyó antes de selectState(), que sí guarda una sesión).
-if (!(deepState || deepF1 || deepCarrier) && !savedSession && !lsGet(LS_QUICK, null)) {
+if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession && !lsGet(LS_QUICK, null)) {
   showQuickstart();
+}
+
+// Arranque automático desde la notificación de alarma (?autostart=true). El
+// clic en la notificación cuenta como gesto del usuario, así que el audio
+// puede arrancar; si el navegador lo bloquea, el estado queda configurado.
+if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
+  try {
+    start();
+  } catch {
+    showToast('Toca play para comenzar tu sesión');
+  }
 }
 
 // Registro del service worker para la PWA (solo en producción).

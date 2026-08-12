@@ -187,6 +187,7 @@
       <section class="panel visual-panel">
         <button id="fullscreen-btn" class="icon-btn fs-btn" aria-label="Pantalla completa" title="Modo inmersivo"></button>
         <button id="history-btn" class="icon-btn hist-btn" aria-label="Historial de sesiones" title="Historial de sesiones"></button>
+        <button id="alarm-btn" class="icon-btn alarm-btn" aria-label="Recordatorio de sesión" title="Recordatorio de sesión"></button>
         <div class="visualizer-wrap">
           <canvas id="visualizer"></canvas>
           <!-- Controles individuales sobre las gotas: play abajo a la derecha,
@@ -387,6 +388,76 @@
       <button id="install-close" class="ib-close" aria-label="Cerrar aviso">✕</button>
     </div>
 
+    <div id="alarm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Recordatorio de sesión">
+      <div class="modal-card alarm-card">
+        <div class="modal-head">
+          <h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> Recordatorio de sesión</h3>
+          <button id="alarm-close" class="modal-close" aria-label="Cerrar recordatorio">✕</button>
+        </div>
+
+        <label class="alarm-field">
+          <span class="alarm-label">Hora del recordatorio</span>
+          <input id="alarm-time" type="time" class="alarm-input" />
+        </label>
+
+        <label class="alarm-field">
+          <span class="alarm-label">Frecuencia a activar</span>
+          <select id="alarm-state" class="alarm-input"></select>
+        </label>
+
+        <div id="alarm-custom" class="alarm-custom hidden">
+          <label class="alarm-field">
+            <span class="alarm-label">Frecuencia base (Hz)</span>
+            <input id="alarm-base" type="number" min="40" max="800" step="1" value="220" class="alarm-input" />
+          </label>
+          <label class="alarm-field">
+            <span class="alarm-label">Ritmo binaural (Hz)</span>
+            <input id="alarm-beat" type="number" min="0.5" max="40" step="0.5" value="10" class="alarm-input" />
+          </label>
+          <label class="alarm-field">
+            <span class="alarm-label">Forma de onda</span>
+            <select id="alarm-wave" class="alarm-input">
+              <option value="sine" selected>Senoidal (suave)</option>
+              <option value="triangle">Triangular</option>
+              <option value="sawtooth">Diente de sierra</option>
+              <option value="square">Cuadrada</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="alarm-field">
+          <span class="alarm-label">Duración de la sesión</span>
+          <select id="alarm-minutes" class="alarm-input">
+            <option value="15">15 minutos</option>
+            <option value="20">20 minutos</option>
+            <option value="25">25 minutos</option>
+            <option value="30" selected>30 minutos</option>
+            <option value="60">60 minutos</option>
+            <option value="0">Sin límite</option>
+          </select>
+        </label>
+
+        <p id="alarm-perm" class="alarm-perm"></p>
+
+        <div class="alarm-actions">
+          <button id="alarm-save" class="quick-start">Guardar recordatorio</button>
+        </div>
+
+        <div class="alarm-backup">
+          <p class="alarm-backup-title">¿La app va a estar cerrada? Respalda el aviso en tu calendario:</p>
+          <div class="alarm-backup-btns">
+            <a id="alarm-gcal" class="alarm-backup-btn" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Google Calendar</a>
+            <button id="alarm-ics" class="alarm-backup-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg> Descargar .ics</button>
+          </div>
+        </div>
+
+        <div id="alarm-list-wrap" class="alarm-list-wrap hidden">
+          <h4 class="alarm-list-title">Recordatorios activos</h4>
+          <ul id="alarm-list" class="alarm-list"></ul>
+        </div>
+      </div>
+    </div>
+
     <div id="history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Historial de sesiones">
       <div class="modal-card">
         <div class="modal-head">
@@ -398,6 +469,20 @@
         <p id="history-empty" class="history-empty hidden">Aún no hay sesiones registradas. Cuando termines una sesión, aparecerá aquí.</p>
       </div>
     </div>
+
+    <section class="testimonials" id="testimonios" aria-label="Experiencias en Vyneural">
+      <div class="wrap">
+        <h2 class="section-title">Experiencias en Vyneural</h2>
+        <p class="section-hint">Lo que cuentan quienes ya escuchan sus frecuencias.</p>
+        <div id="testimonials-root" class="testimonials-root" aria-live="polite">
+          <div class="testimonials-skeleton" aria-hidden="true">
+            <div class="ts-skel-card"></div>
+            <div class="ts-skel-card"></div>
+            <div class="ts-skel-card"></div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <footer class="site-footer">
       <div class="footer-grid">

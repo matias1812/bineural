@@ -70,3 +70,41 @@ if (spySections.length && spyLinks.length && 'IntersectionObserver' in window) {
   );
   spySections.forEach((s) => spyObserver.observe(s));
 }
+
+// ---------------------------------------------------------------- Testimonios (KudosWall)
+// Carga asíncrona del widget de testimonios de pro.kudoswall.com antes del
+// footer. Reemplazá KUDOSWALL_WIDGET_ID por el ID de tu widget (el snippet
+// que te da KudosWall es: <script src="https://kudoswall.org/widget.js"
+// data-id="TU_ID" async></script>). Mientras carga se muestra un skeleton
+// para evitar saltos de layout (CLS).
+const KUDOSWALL_WIDGET_ID = 'REEMPLAZA_CON_TU_WIDGET_ID_DE_KUDOSWALL';
+const testimonialsRoot = document.getElementById('testimonials-root');
+if (testimonialsRoot && KUDOSWALL_WIDGET_ID && KUDOSWALL_WIDGET_ID.startsWith('REEMPLAZA') === false) {
+  const skeleton = testimonialsRoot.querySelector('.testimonials-skeleton');
+  const script = document.createElement('script');
+  script.src = 'https://kudoswall.org/widget.js';
+  script.dataset.id = KUDOSWALL_WIDGET_ID;
+  script.async = true;
+  script.defer = true;
+  const hideSkeleton = () => {
+    if (skeleton) skeleton.remove();
+  };
+  script.onload = hideSkeleton;
+  script.onerror = () => {
+    hideSkeleton();
+    const p = document.createElement('p');
+    p.className = 'testimonials-empty';
+    p.textContent = 'Las experiencias de nuestros oyentes se cargan aquí.';
+    testimonialsRoot.appendChild(p);
+  };
+  testimonialsRoot.appendChild(script);
+} else if (testimonialsRoot) {
+  // Sin widget configurado todavía: mantener el espacio reservado estable
+  // para no saltar el layout cuando se agregue el ID.
+  const skeleton = testimonialsRoot.querySelector('.testimonials-skeleton');
+  if (skeleton) skeleton.remove();
+  const p = document.createElement('p');
+  p.className = 'testimonials-empty';
+  p.textContent = 'Próximamente: experiencias de quienes usan Vyneural.';
+  testimonialsRoot.appendChild(p);
+}
