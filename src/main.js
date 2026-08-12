@@ -855,7 +855,7 @@ fullscreenBtn.addEventListener('click', async () => {
     requestAnimationFrame(resizeCanvas);
     // En el modo CSS (sin fullscreen real) no llega fullscreenchange: se
     // reanuda el audio igualmente al salir.
-    setTimeout(resumeAudioIfNeeded, 200);
+    setTimeout(restoreFromBackground, 200);
   }
 });
 document.addEventListener('fullscreenchange', () => {
@@ -867,26 +867,40 @@ document.addEventListener('fullscreenchange', () => {
   requestAnimationFrame(resizeCanvas);
   // Al salir de pantalla completa algunos navegadores (Android/iOS)
   // suspenden el AudioContext: se reanuda para que la sesión no quede muda.
-  if (!on) setTimeout(resumeAudioIfNeeded, 200);
+  if (!on) setTimeout(restoreFromBackground, 200);
 });
 
-// ---------------------------------------------------------------- Reanudar al volver
-// En el móvil el sistema operativo suspende el AudioContext al salir de la
-// app (cambiar de aplicación, bloquear la pantalla, cerrar la pestaña…). Al
-// volver, la sesión se reanuda sola para que no quede muda — "pausada" —
-// hasta que el usuario vuelva a tocar play.
-function resumeAudioIfNeeded() {
-  if (!playing) return;
-  engine.resume();
+// ---------------------------------------------------------------- Primer plano / segundo plano
+// Al pasar la app a segundo plano (cambiar de aplicación, bloquear la
+// pantalla, navegar a otra página…) el sistema suspende el AudioContext o
+// el audio queda reproduciéndose a trompicones. Se hace un fundido de
+// salida para no oír cortes ni interferencias, y al volver la sesión se
+// reanuda y se funde de nuevo a su volumen.
+let bgMuted = false;
+
+function muteForBackground() {
+  if (!playing || bgMuted) return;
+  bgMuted = true;
+  engine.fadeTo(0, 0.25);
 }
+
+function restoreFromBackground() {
+  if (!playing || !bgMuted) return;
+  bgMuted = false;
+  engine.resume();
+  engine.fadeTo(volumeLevel, 0.4);
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) resumeAudioIfNeeded();
+  if (document.hidden) muteForBackground();
+  else restoreFromBackground();
 });
-window.addEventListener('pageshow', resumeAudioIfNeeded);
-window.addEventListener('focus', resumeAudioIfNeeded);
+window.addEventListener('pagehide', muteForBackground);
+window.addEventListener('pageshow', restoreFromBackground);
+window.addEventListener('focus', restoreFromBackground);
 // iOS suele exigir un gesto del usuario para reanudar el contexto: si al
 // volver seguía suspendido, se reanuda con el primer toque sobre la página.
-window.addEventListener('pointerdown', resumeAudioIfNeeded, { passive: true });
+window.addEventListener('pointerdown', restoreFromBackground, { passive: true });
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {

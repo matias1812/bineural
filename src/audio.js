@@ -112,6 +112,18 @@ export class BinauralEngine {
     this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
   }
 
+  // Fundido suave del volumen maestro a un nivel dado (0…1). Se usa al pasar
+  // la app a segundo plano (fade-out a 0) y al volver (fade-in al volumen de
+  // la sesión), para que la suspensión/reanudación del AudioContext no suene
+  // a cortes, clics o interferencias.
+  fadeTo(v, seconds = 0.25) {
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    this.masterGain.gain.cancelScheduledValues(now);
+    this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
+    this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, v), now + seconds);
+  }
+
   // Reajusta las frecuencias en marcha con una transición suave (ramp),
   // sin reiniciar los osciladores ni cortar el sonido: al cambiar de estado
   // la portadora y el latido se deslizan hasta los valores nuevos.

@@ -319,15 +319,22 @@ a:hover {
 }
 
 /* ---------------------------------------------------------------- Tabla de bandas */
-.band-table {
-  width: 100%;
-  border-collapse: collapse;
+/* La tabla vive dentro de un contenedor con scroll horizontal: conserva su
+   layout real (display: table) para que columnas y filas queden alineadas
+   en cualquier pantalla, y en móvil se desplaza en vez de romperse. */
+.band-table-wrap {
   margin: 18px 0 24px;
-  font-size: 15px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.band-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
 }
 
 .band-table th,
@@ -362,8 +369,8 @@ a:hover {
 
 @media (max-width: 640px) {
   .band-table {
-    display: block;
-    overflow-x: auto;
+    min-width: 560px;
+    white-space: nowrap;
   }
 }
 

@@ -39,6 +39,12 @@ body {
 }
 
 .wrap {
+  /* width explícito: .wrap es un flex item de body (display: flex en columna) y
+     con width:auto su ancho se resuelve al tamaño del contenido —p. ej. la tabla
+     de frecuencias con min-width— y desborda la pantalla en móvil. Con 100% se
+     ciñe al viewport y el contenedor interno con scroll horizontal (band-table-wrap)
+     se encarga de desplazar la tabla. */
+  width: 100%;
   max-width: 920px;
   margin: 0 auto;
   padding: 48px 20px 64px;
@@ -1311,13 +1317,53 @@ body {
   transform: rotate(90deg);
 }
 
-.band-details .band-table {
-  font-size: 13.5px;
-  display: block;
-  max-width: 100%;
+/* La tabla se envuelve en un contenedor con scroll horizontal: la <table>
+   conserva su layout real (display: table) para que columnas y filas queden
+   siempre alineadas, y en pantallas chicas se desplaza en vez de romperse
+   (display: block en la tabla desalinea los encabezados en iOS Safari). */
+.band-details .band-table-wrap {
+  margin: 14px 0 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 12px;
   overflow-x: auto;
-  white-space: nowrap;
   -webkit-overflow-scrolling: touch;
+}
+
+.band-details .band-table {
+  width: 100%;
+  min-width: 600px;
+  font-size: 13.5px;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.band-details .band-table th,
+.band-details .band-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.band-details .band-table thead th {
+  background: rgba(167, 139, 250, 0.08);
+  color: #c4b5fd;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.band-details .band-table tr:last-child td {
+  border-bottom: none;
+}
+
+.band-details .band-table td:first-child {
+  font-weight: 700;
+}
+
+.band-details .band-table .hz {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .table-note {
