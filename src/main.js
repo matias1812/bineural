@@ -285,13 +285,15 @@ function toggleFav(state, starEl) {
   if (activeChip && activeChip.dataset.goal === 'favs') applyGoalFilter('favs');
 }
 
-// Guarda la sesión actual (último estado, volumen, ambientes y temporizador)
-// para recuperarla al volver a la página.
+// Guarda la sesión actual (último estado, volumen, ambientes, temporizador,
+// forma de onda, valores personalizados y filtro) para recuperarla al volver
+// a la página. Se llama en cada cambio y también antes de cerrar la pestaña.
 function saveSession() {
   const layerVolumes = {};
   document.querySelectorAll('#ambient-volumes input').forEach((i) => {
     layerVolumes[i.dataset.type] = parseFloat(i.value);
   });
+  const activeChip = goalFilter ? goalFilter.querySelector('.band-chip.active') : null;
   lsSet(LS_SESSION, {
     state: selected.id,
     volume: volumeLevel,
@@ -300,8 +302,23 @@ function saveSession() {
     layerVolumes,
     timer: timerMinutes,
     wave: selectedWave,
+    // Valores del panel personalizado: sin esto, la base y el ritmo
+    // personalizados se perdían al recargar.
+    custom: {
+      base: parseFloat(customBase ? customBase.value : NaN),
+      beat: parseFloat(customBeat ? customBeat.value : NaN),
+    },
+    // Filtro activo de la rejilla (Dormir, Meditar, Favoritos…).
+    goal: activeChip ? activeChip.dataset.goal : 'destacados',
   });
 }
+
+// Persiste el último estado también al cerrar u ocultar la pestaña, para no
+// perder los cambios hechos justo antes de irse (aunque el navegador cierre).
+window.addEventListener('beforeunload', saveSession);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveSession();
+});
 
 function hexToRgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -528,6 +545,106 @@ window.addEventListener('keydown', (e) => {
     closeSessionSummary();
   }
 });
+
+// ---------------------------------------------------------------- Respaldo de datos
+// Exporta e importa todos los datos de la app (preferencias, favoritos,
+// historial, alarmas y consentimientos) en un archivo JSON. Así los datos
+// sobreviven a un cambio de dispositivo o a un navegador que borra el
+// almacenamiento local. Es la capa final de la persistencia local.
+const BACKUP_KEYS = [
+  'ob-session-v1', // sesión (estado, volumen, ambientes, valores, filtro)
+  'ob-favs-v1', // estados favoritos
+  'ob-history-v1', // historial de sesiones
+  'ob-carrier-v1', // portadora elegida
+  'ob-quickstart-v1', // inicio rápido ya visto
+  'ob-install-v1', // banner de instalación cerrado
+  'vyneural-cookie-consent', // elección del aviso de privacidad
+  'vyneural_alarms', // recordatorios de sesión
+];
+
+function backupPayload() {
+  const data = { app: 'vyneural', version: 1, exportedAt: new Date().toISOString(), keys: {} };
+  for (const key of BACKUP_KEYS) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw != null) data.keys[key] = raw;
+    } catch {
+      /* sin almacenamiento disponible */
+    }
+  }
+  return data;
+}
+
+function downloadBackup() {
+  const data = backupPayload();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `vyneural-respaldo-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  setBackupStatus('✅ Respaldo descargado. Guardalo en un lugar seguro.', 'ok');
+}
+
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || data.app !== 'vyneural' || !data.keys || typeof data.keys !== 'object') {
+        throw new Error('formato inválido');
+      }
+      let restored = 0;
+      for (const [key, raw] of Object.entries(data.keys)) {
+        if (!BACKUP_KEYS.includes(key)) continue;
+        try {
+          localStorage.setItem(key, String(raw));
+          restored++;
+        } catch {
+          /* ignorar claves que no se puedan escribir */
+        }
+      }
+      setBackupStatus(
+        restored > 0
+          ? `✅ Se restauraron ${restored} bloques de datos. Recargamos la página para aplicarlos.`
+          : '⚠️ El respaldo no contenía datos reconocibles de Vyneural.',
+        'ok',
+      );
+      if (restored > 0) setTimeout(() => location.reload(), 1400);
+    } catch {
+      setBackupStatus('⚠️ No pudimos leer ese archivo: no parece un respaldo de Vyneural.', 'err');
+    }
+  };
+  reader.onerror = () => setBackupStatus('⚠️ No pudimos leer el archivo. Intentá de nuevo.', 'err');
+  reader.readAsText(file);
+}
+
+const backupExport = document.getElementById('backup-export');
+const backupImport = document.getElementById('backup-import');
+const backupFile = document.getElementById('backup-file');
+const backupStatus = document.getElementById('backup-status');
+
+function setBackupStatus(msg, kind) {
+  if (!backupStatus) return;
+  backupStatus.textContent = msg;
+  backupStatus.dataset.kind = kind || 'ok';
+  backupStatus.classList.remove('hidden');
+  clearTimeout(setBackupStatus._t);
+  setBackupStatus._t = setTimeout(() => backupStatus.classList.add('hidden'), 7000);
+}
+
+if (backupExport) backupExport.addEventListener('click', downloadBackup);
+if (backupImport && backupFile) {
+  backupImport.addEventListener('click', () => backupFile.click());
+  backupFile.addEventListener('change', () => {
+    if (backupFile.files && backupFile.files[0]) importBackup(backupFile.files[0]);
+    backupFile.value = '';
+  });
+}
 
 // ---------------------------------------------------------------- Resumen de sesión
 // Al terminar una sesión por el temporizador se muestra un resumen con la
@@ -1076,23 +1193,31 @@ fullscreenBtn.addEventListener('click', async () => {
         /* fullscreen no soportado: el modo CSS llena igual la pantalla */
         document.body.classList.add('immersive');
         setFullscreenIcon(true);
+        lockPortrait();
+        updateRotateOverlay();
       }
       // Soporte parcial (iOS): si no llegó a entrar de verdad, activa el modo CSS.
       setTimeout(() => {
         if (!document.fullscreenElement) {
           document.body.classList.add('immersive');
           setFullscreenIcon(true);
+          lockPortrait();
+          updateRotateOverlay();
         }
         resizeCanvas();
       }, 250);
     } else {
       document.body.classList.add('immersive');
       setFullscreenIcon(true);
+      lockPortrait();
+      updateRotateOverlay();
       resizeCanvas();
     }
   } else {
     document.body.classList.remove('immersive');
     setFullscreenIcon(false);
+    unlockOrientation();
+    updateRotateOverlay();
     const ext = document.exitFullscreen?.bind(document) ?? document.webkitExitFullscreen?.bind(document);
     if (ext) {
       try {
@@ -1111,6 +1236,11 @@ document.addEventListener('fullscreenchange', () => {
   const on = !!document.fullscreenElement;
   document.body.classList.toggle('immersive', on);
   setFullscreenIcon(on);
+  // En el teléfono se intenta bloquear la orientación vertical al entrar
+  // (Android lo permite en pantalla completa; iOS no, por eso también hay
+  // un aviso visual para girar el celular).
+  if (on) lockPortrait();
+  updateRotateOverlay();
   // El canvas se re-mide al entrar/salir del modo (el layout cambia). Se
   // espera un frame para que el CSS ya haya aplicado el nuevo tamaño.
   requestAnimationFrame(resizeCanvas);
@@ -1118,6 +1248,49 @@ document.addEventListener('fullscreenchange', () => {
   // suspenden el AudioContext: se reanuda para que la sesión no quede muda.
   if (!on) setTimeout(restoreFromBackground, 200);
 });
+
+// ---------------------------------------------------------------- Orientación de las gotas
+// En pantalla completa (modo inmersivo) las gotas se disfrutan en vertical:
+// si el celular está apaisado se muestra un aviso que tapa el lienzo hasta
+// volver a ponerlo de pie, y donde el navegador lo permite se bloquea la
+// orientación directamente (Android en pantalla completa; iOS no lo soporta
+// y usa solo el aviso). En escritorio o en vertical nunca aparece.
+const rotateOverlay = document.getElementById('rotate-overlay');
+
+function isTouchDevice() {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+function updateRotateOverlay() {
+  if (!rotateOverlay) return;
+  const immersive = document.body.classList.contains('immersive');
+  const landscape = window.innerWidth > window.innerHeight;
+  rotateOverlay.classList.toggle('hidden', !(immersive && isTouchDevice() && landscape));
+}
+
+async function lockPortrait() {
+  try {
+    if (screen.orientation && typeof screen.orientation.lock === 'function') {
+      await screen.orientation.lock('portrait');
+    }
+  } catch (_) {
+    /* sin bloqueo de orientación: el aviso de girar cubre el caso */
+  }
+}
+
+function unlockOrientation() {
+  try {
+    if (screen.orientation && typeof screen.orientation.unlock === 'function') {
+      screen.orientation.unlock();
+    }
+  } catch (_) {
+    /* nunca se bloqueó */
+  }
+}
+
+window.addEventListener('resize', updateRotateOverlay);
+window.addEventListener('orientationchange', updateRotateOverlay);
+updateRotateOverlay();
 
 // ---------------------------------------------------------------- Primer plano / segundo plano
 // Al pasar la app a segundo plano (cambiar de aplicación, bloquear la
@@ -1571,6 +1744,19 @@ function restoreSession(saved) {
   if (WAVES.some((w) => w.id === saved.wave)) {
     selectedWave = saved.wave;
   }
+  // Valores del panel personalizado (base y ritmo). Solo se restauran si no
+  // vienen valores explícitos por deep link (?f1=… / ?freq=…), que tienen
+  // prioridad para que los enlaces compartidos sigan funcionando.
+  const deepFreqActive = isFinite(deepFreq) && deepFreq > 0;
+  const deepF1Active = isFinite(deepF1) && deepF1 > 0 && carrier === 'personalizado';
+  if (saved.custom && !deepFreqActive && !deepF1Active) {
+    if (typeof saved.custom.base === 'number' && isFinite(saved.custom.base) && saved.custom.base > 0) {
+      customBase.value = String(saved.custom.base);
+    }
+    if (typeof saved.custom.beat === 'number' && isFinite(saved.custom.beat) && saved.custom.beat > 0) {
+      customBeat.value = String(saved.custom.beat);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- Recordatorio de sesión
@@ -1842,9 +2028,26 @@ if (isFinite(deepFreq) && deepFreq > 0) {
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
 restoreSession(savedSession);
 selectState(initial);
-// El filtro arranca en la vista curada 'Destacados' (los más populares);
-// si el enlace profundo o la sesión abren otro estado, seguir a su objetivo.
-const initialGoal = initial.featured ? 'destacados' : goalOf(initial).id;
+// El filtro arranca en la vista curada 'Destacados' (los más populares), o en
+// el filtro que el usuario dejó guardado. Si el enlace profundo o la sesión
+// abren otro estado, seguir a su objetivo.
+const savedGoal = savedSession && savedSession.goal;
+const validGoals = [...goalFilter.querySelectorAll('.band-chip')].map((c) => c.dataset.goal);
+// Solo cuenta como deep link explícito si viene de una alarma (?freq=…), de
+// una portadora con f1 fija, o de un estado distinto al de la sesión guardada
+// (los enlaces que la propia app reescribe en la URL al recargar no deben
+// descartar el filtro guardado).
+const deepLinked =
+  isFinite(deepF1) ||
+  isFinite(deepFreq) ||
+  Boolean(deepAutostart) ||
+  (Boolean(deepState) && (!savedSession || deepState !== savedSession.state));
+const initialGoal =
+  !deepLinked && validGoals.includes(savedGoal)
+    ? savedGoal
+    : initial.featured
+      ? 'destacados'
+      : goalOf(initial).id;
 const goalChips = [...goalFilter.querySelectorAll('.band-chip')];
 goalChips.forEach((c) => c.classList.toggle('active', c.dataset.goal === initialGoal));
 applyGoalFilter(initialGoal);
@@ -2043,4 +2246,6 @@ goalFilter.addEventListener('click', (e) => {
   if (!chip) return;
   goalFilter.querySelectorAll('.band-chip').forEach((c) => c.classList.toggle('active', c === chip));
   applyGoalFilter(chip.dataset.goal);
+  // El filtro elegido también se guarda para la próxima visita.
+  saveSession();
 });

@@ -114,7 +114,13 @@ if (testimonialsRoot && KUDOSWALL_WIDGET_ID && KUDOSWALL_WIDGET_ID.startsWith('R
 // (Formspree u otro compatible con POST JSON). Creá un formulario en
 // https://formspree.io y pegá acá el endpoint, por ejemplo:
 //   const FORMSPREE_ENDPOINT = 'https://formspree.io/f/abcdwxyz';
+// Si el endpoint no está configurado, el formulario usa un respaldo que
+// siempre funciona sin backend: compone el mensaje, lo copia al
+// portapapeles y abre el DM de Instagram de la cuenta configurada para
+// que la persona lo pegue y lo envíe. Así el éxito y los avisos del
+// formulario se muestran siempre.
 const FORMSPREE_ENDPOINT = '';
+const IG_ACCOUNT = 'vyneural.cl';
 const experienceForm = document.getElementById('experience-form');
 if (experienceForm) {
   const expIg = document.getElementById('exp-ig');
@@ -123,6 +129,10 @@ if (experienceForm) {
   const expText = document.getElementById('exp-text');
   const expError = document.getElementById('exp-error');
   const expDone = document.getElementById('exp-done');
+  const expDoneText = document.getElementById('exp-done-text');
+  const expDm = document.getElementById('exp-dm');
+  const expDoneNote = document.getElementById('exp-done-note');
+  const expMessage = document.getElementById('exp-message');
   const expStars = document.getElementById('exp-stars');
   const expGotcha = document.getElementById('exp-gotcha');
   const expSubmit = document.getElementById('exp-submit');
@@ -148,6 +158,37 @@ if (experienceForm) {
     expError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
+  function showExpDone() {
+    experienceForm.classList.add('hidden');
+    expDone.classList.remove('hidden');
+    expDone.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function setDmVisible(on) {
+    [expDm, expDoneNote, expMessage].forEach((el) => el && el.classList.toggle('hidden', !on));
+  }
+
+  // Compone el mensaje listo para pegar en el DM de Instagram.
+  function buildDmMessage(igUser, exp) {
+    const who = ['@' + igUser, expName.value.trim()].filter(Boolean).join(' · ');
+    const freq = expFreq.value;
+    return [
+      '¡Hola Vyneural! 👋 Quiero compartir mi experiencia:',
+      '',
+      `“${exp}”`,
+      freq ? `Frecuencia: ${freq}` : '',
+      `— ${who}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  }
+
   experienceForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     expError.classList.add('hidden');
@@ -168,57 +209,85 @@ if (experienceForm) {
       showExpError('Contanos un poco más: tu experiencia necesita al menos 10 caracteres.');
       return;
     }
-    if (!FORMSPREE_ENDPOINT) {
-      showExpError('Ups, el formulario aún no está conectado a nuestro servicio de envío. Escribinos por Instagram y lo resolvemos.');
+    const freq = expFreq.value;
+
+    if (FORMSPREE_ENDPOINT) {
+      // Envío por email (Formspree u otro compatible con POST JSON).
+      expSubmit.disabled = true;
+      expSubmit.textContent = 'Enviando…';
+      try {
+        const res = await fetch(FORMSPREE_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            _subject: `Nueva experiencia en Vyneural — @${igUser}`,
+            instagram: igUser,
+            nombre: expName.value.trim(),
+            frecuencia: freq,
+            valoracion: expRating > 0 ? `${expRating}/5` : '',
+            experiencia: exp,
+          }),
+        });
+        if (!res.ok) throw new Error(`formspree ${res.status}`);
+        setDmVisible(false);
+        if (expDoneText) {
+          expDoneText.textContent =
+            'Tu experiencia fue enviada. La revisamos y pronto podría aparecer en esta sección.';
+        }
+        showExpDone();
+      } catch {
+        showExpError('No pudimos enviar tu experiencia. Revisá tu conexión e intentá de nuevo.');
+      } finally {
+        expSubmit.disabled = false;
+        expSubmit.textContent = 'Enviar mi experiencia';
+      }
       return;
     }
-    const freq = expFreq.value;
-    expSubmit.disabled = true;
-    expSubmit.textContent = 'Enviando…';
-    try {
-      const res = await fetch(FORMSPREE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          _subject: `Nueva experiencia en Vyneural — @${igUser}`,
-          instagram: igUser,
-          nombre: expName.value.trim(),
-          frecuencia: freq,
-          valoracion: expRating > 0 ? `${expRating}/5` : '',
-          experiencia: exp,
-        }),
-      });
-      if (!res.ok) throw new Error(`formspree ${res.status}`);
-      experienceForm.classList.add('hidden');
-      expDone.classList.remove('hidden');
-    } catch {
-      showExpError('No pudimos enviar tu experiencia. Revisá tu conexión e intentá de nuevo.');
-    } finally {
-      expSubmit.disabled = false;
-      expSubmit.textContent = 'Enviar mi experiencia';
+
+    // Respaldo sin backend: mensaje listo para el DM de Instagram. Los
+    // enlaces ig.me no admiten mensaje prellenado, así que se copia al
+    // portapapeles y se abre el DM para pegarlo.
+    const message = buildDmMessage(igUser, exp);
+    if (expMessage) expMessage.value = message;
+    if (expDm) {
+      expDm.href = `https://ig.me/m/${IG_ACCOUNT}`;
+      expDm.textContent = `Abrir Instagram (@${IG_ACCOUNT})`;
     }
+    copyText(message);
+    setDmVisible(true);
+    if (expDoneText) {
+      expDoneText.textContent =
+        'Tu mensaje quedó listo y copiado. Tocá el botón para abrir Instagram y pegalo en nuestro DM:';
+    }
+    showExpDone();
   });
 }
 
 // ---------------------------------------------------------------- Aviso de cookies
 // La app no usa cookies de seguimiento: solo almacenamiento local del
 // navegador (preferencias, sesiones, historial y recordatorios). Igual se
-// muestra un aviso en la primera visita y se guarda la elección.
+// muestra un aviso en la primera visita, se guarda la elección y se puede
+// volver a abrir desde el footer ("Gestionar cookies").
 const COOKIE_CONSENT_KEY = 'vyneural-cookie-consent';
 const cookieBanner = document.getElementById('cookie-banner');
+function showCookieBanner() {
+  if (!cookieBanner) return;
+  cookieBanner.classList.remove('hidden');
+}
+function hideCookieBanner(choice) {
+  if (!cookieBanner) return;
+  try {
+    localStorage.setItem(COOKIE_CONSENT_KEY, choice);
+  } catch {
+    /* sin almacenamiento disponible */
+  }
+  cookieBanner.classList.add('hidden');
+}
 if (cookieBanner) {
-  const hideCookieBanner = (choice) => {
-    try {
-      localStorage.setItem(COOKIE_CONSENT_KEY, choice);
-    } catch {
-      /* sin almacenamiento disponible */
-    }
-    cookieBanner.classList.add('hidden');
-  };
   try {
     if (!localStorage.getItem(COOKIE_CONSENT_KEY)) {
       // Pequeña espera para no interrumpir el arranque de la app.
-      window.setTimeout(() => cookieBanner.classList.remove('hidden'), 900);
+      window.setTimeout(showCookieBanner, 900);
     }
   } catch {
     /* sin almacenamiento: no mostrar el aviso */
@@ -227,4 +296,16 @@ if (cookieBanner) {
   const cookieReject = document.getElementById('cookie-reject');
   if (cookieAccept) cookieAccept.addEventListener('click', () => hideCookieBanner('accepted'));
   if (cookieReject) cookieReject.addEventListener('click', () => hideCookieBanner('rejected'));
+  // "Gestionar cookies" en el footer: volver a mostrar el aviso para que el
+  // usuario pueda revisar o cambiar su elección.
+  const cookieManage = document.getElementById('cookie-manage');
+  if (cookieManage) {
+    cookieManage.addEventListener('click', (e) => {
+      e.preventDefault();
+      showCookieBanner();
+      cookieBanner.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      const first = cookieBanner.querySelector('button');
+      if (first) first.focus();
+    });
+  }
 }

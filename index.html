@@ -474,6 +474,16 @@
         <div id="history-today" class="history-today hidden"></div>
         <ul id="history-list" class="history-list"></ul>
         <p id="history-empty" class="history-empty hidden">Aún no hay sesiones registradas. Cuando termines una sesión, aparecerá aquí.</p>
+        <div class="backup-wrap">
+          <h4 class="backup-title"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg> Respaldo de tus datos</h4>
+          <p class="backup-hint">Descargá una copia de tus preferencias, favoritos, historial, alarmas y recordatorios. Sirve para restaurarlos en otro dispositivo o si el navegador borra los datos.</p>
+          <div class="backup-btns">
+            <button id="backup-export" class="backup-btn">Descargar respaldo</button>
+            <button id="backup-import" class="backup-btn">Restaurar respaldo</button>
+            <input type="file" id="backup-file" accept="application/json,.json" hidden />
+          </div>
+          <p id="backup-status" class="backup-status hidden" role="status"></p>
+        </div>
       </div>
     </div>
 
@@ -534,20 +544,33 @@
           </form>
           <div id="exp-done" class="exp-done hidden">
             <p class="exp-done-title">¡Gracias por compartir! 💜</p>
-            <p class="exp-done-text">Tu experiencia fue enviada. La revisamos y pronto podría aparecer en esta sección.</p>
+            <p id="exp-done-text" class="exp-done-text">Tu mensaje quedó listo y copiado. Tocá el botón para abrir Instagram y pegalo en nuestro DM:</p>
+            <a id="exp-dm" class="quick-start exp-dm hidden" href="#" target="_blank" rel="noopener noreferrer">Abrir Instagram</a>
+            <p id="exp-done-note" class="exp-done-note hidden">Si no se copió solo, copiá el texto de abajo y pegalo en nuestro DM:</p>
+            <textarea id="exp-message" class="alarm-input exp-message hidden" rows="5" readonly></textarea>
           </div>
         </div>
       </div>
     </section>
 
-    <div id="cookie-banner" class="cookie-banner hidden" role="region" aria-label="Aviso de privacidad">
+    <div id="rotate-overlay" class="rotate-overlay hidden" role="alert" aria-live="polite">
+      <div class="rotate-card">
+        <svg class="rotate-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+        <p class="rotate-title">Girá tu teléfono</p>
+        <p class="rotate-text">Las gotas se disfrutan en vertical. Poné el celular de pie para seguir con tu sesión.</p>
+      </div>
+    </div>
+
+    <div id="cookie-banner" class="cookie-banner hidden" role="region" aria-label="Aviso de privacidad y cookies" aria-live="polite">
       <p class="cookie-text">
-        🍪 Usamos el almacenamiento local de tu navegador para guardar tus preferencias, sesiones y
-        recordatorios. No usamos cookies de seguimiento ni vendemos tus datos.
+        🍪 No usamos cookies de seguimiento ni vendemos tus datos. Tus preferencias, sesiones,
+        historial y recordatorios se guardan <strong>solo en el almacenamiento local de tu
+        navegador</strong> y no se envían a servidores.
+        <a href="/privacidad" class="cookie-link">Política de privacidad</a>
       </p>
       <div class="cookie-actions">
-        <button id="cookie-accept" class="cookie-btn cookie-btn-primary">Aceptar</button>
-        <button id="cookie-reject" class="cookie-btn">Rechazar</button>
+        <button id="cookie-accept" class="cookie-btn cookie-btn-primary">Entendido</button>
+        <button id="cookie-reject" class="cookie-btn">Solo lo esencial</button>
       </div>
     </div>
 
@@ -581,6 +604,7 @@
           <h4>Sitio</h4>
           <a href="/sobre-nosotros">Sobre nosotros</a>
           <a href="/privacidad">Privacidad</a>
+          <a href="#" id="cookie-manage">Gestionar cookies</a>
           <a href="/sobre-nosotros#contacto">Contacto</a>
           <a class="social-link" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> Instagram</a>
         </div>

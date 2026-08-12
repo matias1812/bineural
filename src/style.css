@@ -1757,6 +1757,85 @@ body {
   line-height: 1.6;
 }
 
+/* ---------------------------------------------------------------- Respaldo de datos */
+.backup-wrap {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.backup-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.backup-title .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.backup-hint {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.backup-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backup-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.backup-btn:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.backup-status {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+}
+
+.backup-status[data-kind='ok'] {
+  color: #86efac;
+  border-color: rgba(134, 239, 172, 0.35);
+  background: rgba(134, 239, 172, 0.08);
+}
+
+.backup-status[data-kind='err'] {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.08);
+}
+
 /* ---------------------------------------------------------------- Toast */
 .toast {
   position: fixed;
@@ -1782,13 +1861,22 @@ body {
 }
 
 /* ---------------------------------------------------------------- Modo inmersivo (pantalla completa) */
+/* En inmersivo solo se ven las gotas: se ocultan también las secciones fuera
+   del wrap (testimonios, aviso de cookies) para que no se puedan leer ni
+   desplazar los comentarios estando a pantalla completa. */
 body.immersive .site-nav,
 body.immersive .hero,
 body.immersive section.panel:not(.visual-panel),
+body.immersive .testimonials,
+body.immersive #cookie-banner,
 body.immersive .info,
 body.immersive .final-cta,
 body.immersive .site-footer {
   display: none;
+}
+
+body.immersive {
+  overflow: hidden;
 }
 
 /* En inmersivo todo cabe en una pantalla, sin scroll vertical: el
@@ -2151,6 +2239,65 @@ body.immersive .controls {
   body.immersive .visual-panel .legend,
   body.immersive .visual-panel .status {
     display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- Aviso de girar el teléfono
+   En pantalla completa las gotas se disfrutan en vertical: si el teléfono
+   está apaisado se muestra un aviso que tapa el lienzo hasta volver a
+   ponerlo de pie. En escritorio o en vertical nunca aparece. */
+.rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0d1a;
+  padding: 24px;
+  text-align: center;
+}
+
+.rotate-card {
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.rotate-ico {
+  width: 64px;
+  height: 64px;
+  color: var(--accent);
+  animation: rotateHint 2.2s ease-in-out infinite;
+}
+
+.rotate-title {
+  margin: 8px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.rotate-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+@keyframes rotateHint {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(90deg);
+  }
+  80%,
+  100% {
+    transform: rotate(90deg);
   }
 }
 
@@ -2530,6 +2677,24 @@ body.immersive .controls {
   line-height: 1.5;
 }
 
+.exp-dm {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.exp-done-note {
+  margin: 18px 0 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.exp-message {
+  text-align: left;
+  white-space: pre-wrap;
+  font-size: 13px;
+  resize: none;
+}
+
 @media (max-width: 560px) {
   .testimonials-form-wrap {
     margin-top: 28px;
@@ -2686,6 +2851,17 @@ body.immersive .controls {
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-dim);
+}
+
+.cookie-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.cookie-link:hover {
+  color: var(--text);
 }
 
 .cookie-actions {
