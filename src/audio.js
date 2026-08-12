@@ -51,6 +51,18 @@ export class BinauralEngine {
     return this.ctx;
   }
 
+  // Reanuda el AudioContext si el sistema lo suspendió (p. ej. al volver a
+  // la app tras cambiar de aplicación, bloquear la pantalla o cerrar la
+  // pestaña temporalmente). Sin esto la sesión vuelve muda hasta que el
+  // usuario toca play otra vez.
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {
+        /* el navegador exigirá un gesto para reanudar */
+      });
+    }
+  }
+
   start({ base = 200, beat = 10, volume = 0.5, wave = 'sine' }) {
     const ctx = this.ensure();
     this.stopInstant();
@@ -98,6 +110,18 @@ export class BinauralEngine {
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
     this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
+  }
+
+  // Fundido suave del volumen maestro a un nivel dado (0…1). Se usa al pasar
+  // la app a segundo plano (fade-out a 0) y al volver (fade-in al volumen de
+  // la sesión), para que la suspensión/reanudación del AudioContext no suene
+  // a cortes, clics o interferencias.
+  fadeTo(v, seconds = 0.25) {
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    this.masterGain.gain.cancelScheduledValues(now);
+    this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
+    this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, v), now + seconds);
   }
 
   // Reajusta las frecuencias en marcha con una transición suave (ramp),

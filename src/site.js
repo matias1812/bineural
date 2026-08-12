@@ -44,3 +44,29 @@ document.querySelectorAll('.site-links a').forEach((a) => {
     a.setAttribute('aria-current', 'page');
   }
 });
+
+// ---------------------------------------------------------------- Scrollspy
+// En la home, resalta en la nav el enlace de la sección visible
+// (#estados / #como-funciona) mientras el usuario hace scroll.
+const spySections = ['estados', 'como-funciona']
+  .map((id) => document.getElementById(id))
+  .filter(Boolean);
+const spyLinks = [...document.querySelectorAll('.site-links a[href="#estados"], .site-links a[href="#como-funciona"]')];
+if (spySections.length && spyLinks.length && 'IntersectionObserver' in window) {
+  const spyObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const id = entry.target.id;
+        spyLinks.forEach((a) => {
+          const on = a.getAttribute('href') === '#' + id;
+          a.classList.toggle('active', on);
+          if (on) a.setAttribute('aria-current', 'true');
+          else if (a.getAttribute('aria-current') === 'true') a.removeAttribute('aria-current');
+        });
+      });
+    },
+    { rootMargin: '-40% 0px -55% 0px' },
+  );
+  spySections.forEach((s) => spyObserver.observe(s));
+}

@@ -30,11 +30,16 @@ export class WaveField {
     this._cy = cy;
     this._r = r;
     this.mask.fill(0);
+    // Máscara suave: alpha 0..1 con un borde difuminado de ~1.5 celdas.
+    // Así la gota no tiene un canto duro/pixelado al escalarla al lienzo.
+    this.soft = this.soft || new Float32Array(this.n);
     for (let y = 0; y < this.size; y++) {
       for (let x = 0; x < this.size; x++) {
         const dx = x - cx;
         const dy = y - cy;
-        if (dx * dx + dy * dy <= r * r) this.mask[y * this.size + x] = 1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= r) this.mask[y * this.size + x] = 1;
+        this.soft[y * this.size + x] = Math.min(1, Math.max(0, (r + 1.5 - dist) / 1.5));
       }
     }
   }
@@ -109,7 +114,7 @@ export class WaveField {
   // crestas brillan hacia blanco y los valles se oscurecen, igual que la
   // luz reflejándose en agua real.
   render([r, g, b]) {
-    const { u, mask, img } = this;
+    const { u, mask, img, soft } = this;
     const d = img.data;
     for (let i = 0; i < this.n; i++) {
       const o = i * 4;
@@ -138,7 +143,8 @@ export class WaveField {
       d[o] = cr > 255 ? 255 : cr;
       d[o + 1] = cg > 255 ? 255 : cg;
       d[o + 2] = cb > 255 ? 255 : cb;
-      d[o + 3] = 255;
+      // Borde suave: el alpha se desvanece en el canto de la cuenca.
+      d[o + 3] = soft ? Math.round(255 * soft[i]) : 255;
     }
     this.ctx.putImageData(img, 0, 0);
     return this.canvas;
