@@ -377,29 +377,6 @@
         conduces o manejas maquinaria.
       </p>
     </footer>
-    <!-- En teléfono, el modo inmersivo se muestra en horizontal (contenido girado)
-         y un aviso compacto invita a girar el dispositivo. -->
-    <div id="rotate-overlay" class="rotate-overlay hidden" role="status" aria-label="Gira tu teléfono">
-      <span class="ro-phone" aria-hidden="true">📱</span>
-      <span>Gira tu teléfono</span>
-    </div>
-    <!-- Barra compacta del modo girado: play, compartir y portadoras. -->
-    <div id="rot-controls" class="rot-controls hidden">
-      <button id="rot-share" class="icon-btn" aria-label="Compartir esta frecuencia" title="Compartir enlace"></button>
-      <button id="rot-play" class="play-btn rot-play" aria-label="Comenzar sesión" title="Comenzar sesión"></button>
-      <label class="rot-volume" aria-label="Volumen">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-        <input id="rot-volume" type="range" min="0" max="1" step="0.01" value="0.6" />
-      </label>
-      <div id="rot-carriers" class="rot-carriers">
-        <button class="carrier-btn active" data-carrier="estandar">432</button>
-        <button class="carrier-btn" data-carrier="estandar220">220</button>
-        <button class="carrier-btn" data-carrier="solfeggio">528</button>
-        <button class="carrier-btn" data-carrier="ancestral">136</button>
-        <button class="carrier-btn" data-carrier="schumann">194.7</button>
-        <button class="carrier-btn" data-carrier="personalizado">✎</button>
-      </div>
-    </div>
     <script type="module" src="/src/site.js"></script>
     <script type="module" src="/src/main.js"></script>
   </body>

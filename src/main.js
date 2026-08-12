@@ -109,7 +109,6 @@ const goalFilter = document.getElementById('goal-filter');
 const playBtn = document.getElementById('play-btn');
 const volume = document.getElementById('volume');
 const volumeLabel = document.getElementById('volume-label');
-const rotVolume = document.getElementById('rot-volume');
 const timerOptions = document.getElementById('timer-options');
 const timerDisplay = document.getElementById('timer-display');
 const ambientOptions = document.getElementById('ambient-options');
@@ -521,13 +520,11 @@ playBtn.setAttribute('aria-label', 'Comenzar sesión');
 function setVolume(v) {
   volumeLevel = parseFloat(v);
   volume.value = String(volumeLevel);
-  if (rotVolume) rotVolume.value = String(volumeLevel);
   if (volumeLabel) volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
   engine.setVolume(volumeLevel);
   saveSession();
 }
 volume.addEventListener('input', () => setVolume(volume.value));
-if (rotVolume) rotVolume.addEventListener('input', () => setVolume(rotVolume.value));
 
 // ---------------------------------------------------------------- Temporizador
 function armTimer() {
@@ -801,113 +798,72 @@ async function shareLink() {
 }
 shareBtn.addEventListener('click', shareLink);
 
-// Pantalla completa / modo inmersivo: el visualizador y los controles
-// ocupan toda la pantalla. En teléfono se intenta bloquear la orientación
-// a horizontal y, si el bloqueo no es posible, un aviso obliga a girar el
-// dispositivo antes de poder usar el modo.
+// Pantalla completa / modo inmersivo: las gotas llenan la pantalla. En
+// escritorio se añaden los controles al lado; en teléfono (iOS o Android)
+// solo las gotas a pantalla completa, sin giros ni ajustes, con play,
+// compartir y volumen sobre el lienzo. iOS Safari solo tiene soporte
+// parcial de la Fullscreen API: si no entra, el modo CSS llena igual el
+// viewport.
 const fullscreenBtn = document.getElementById('fullscreen-btn');
-const rotateOverlay = document.getElementById('rotate-overlay');
-const isTouchDevice = () =>
-  (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) && window.innerWidth < 900;
-const isLandscape = () => window.matchMedia('(orientation: landscape)').matches;
-// Modo girado: pantalla completa en un teléfono en vertical. El contenido se
-// gira 90° con CSS y las gotas se dibujan a lo largo del eje Y del canvas
-// para que aparezcan en horizontal sobre la pantalla (portraitImmersive).
-let portraitImmersive = false;
-const portraitQuery = window.matchMedia('(max-width: 900px) and (orientation: portrait)');
 
-function updateRotateOverlay() {
-  portraitImmersive = document.body.classList.contains('immersive') && portraitQuery.matches;
-  updateRotControls();
-  if (!rotateOverlay) return;
-  const show = portraitImmersive && isTouchDevice() && !isLandscape();
-  rotateOverlay.classList.toggle('hidden', !show);
-}
-
-// ---------------------------------------------------------------- Controles del modo girado
-// En un teléfono en vertical a pantalla completa, junto a las gotas en
-// horizontal se muestra una barra compacta (fuera del contenedor girado, así
-// queda legible) con play, compartir y las portadoras.
-const rotControls = document.getElementById('rot-controls');
-const rotCarrierGroup = document.getElementById('rot-carriers');
-const rotPlayBtn = document.getElementById('rot-play');
-const rotShareBtn = document.getElementById('rot-share');
-
-// Marca la portadora activa tanto en la fila principal como en la del modo girado.
+// Marca la portadora activa en la fila principal.
 function syncCarrierChips() {
-  const groups = [carrierOptions, rotCarrierGroup].filter(Boolean);
-  groups.forEach((g) =>
-    g.querySelectorAll('.carrier-btn').forEach((b) =>
-      b.classList.toggle('active', b.dataset.carrier === carrier),
-    ),
+  carrierOptions.querySelectorAll('.carrier-btn').forEach((b) =>
+    b.classList.toggle('active', b.dataset.carrier === carrier),
   );
 }
 
-function updateRotControls() {
-  if (!rotControls) return;
-  rotControls.classList.toggle('hidden', !portraitImmersive);
-  if (rotPlayBtn) {
-    // Solo el icono, sin texto, para que la barra compacta quede limpia.
-    rotPlayBtn.innerHTML = playing ? ICONS.pause : ICONS.play;
-    rotPlayBtn.setAttribute('aria-label', playing ? 'Pausar sesión' : 'Comenzar sesión');
-  }
-  if (rotVolume) rotVolume.value = String(volumeLevel);
-}
-
-if (rotPlayBtn) {
-  rotPlayBtn.addEventListener('click', () => {
-    if (playing) stop();
-    else start();
-  });
-}
-if (rotShareBtn) {
-  rotShareBtn.innerHTML = ICONS.share;
-  rotShareBtn.addEventListener('click', shareLink);
-}
-if (rotCarrierGroup) {
-  rotCarrierGroup.addEventListener('click', (e) => {
-    const btn = e.target.closest('.carrier-btn');
-    if (btn) applyCarrier(btn.dataset.carrier);
-  });
-}
-
 fullscreenBtn.innerHTML = ICONS.expand;
+function setFullscreenIcon(on) {
+  fullscreenBtn.innerHTML = on ? ICONS.compress : ICONS.expand;
+  fullscreenBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
+}
 fullscreenBtn.addEventListener('click', async () => {
-  if (!document.fullscreenElement) {
-    try {
-      await document.documentElement.requestFullscreen?.();
-    } catch (_) {
-      /* pantalla completa no soportada */
-    }
-    // En teléfono, forzar horizontal (el lock requiere fullscreen activo).
-    if (isTouchDevice()) {
+  if (!document.fullscreenElement && !document.body.classList.contains('immersive')) {
+    const el = document.documentElement;
+    const req = el.requestFullscreen?.bind(el) ?? el.webkitRequestFullscreen?.bind(el);
+    if (req) {
       try {
-        await screen.orientation.lock('landscape');
+        await req();
       } catch (_) {
-        /* lock no disponible: el aviso de rotación se encarga */
+        /* fullscreen no soportado: el modo CSS llena igual la pantalla */
+        document.body.classList.add('immersive');
+        setFullscreenIcon(true);
       }
+      // Soporte parcial (iOS): si no llegó a entrar de verdad, activa el modo CSS.
+      setTimeout(() => {
+        if (!document.fullscreenElement) {
+          document.body.classList.add('immersive');
+          setFullscreenIcon(true);
+        }
+        resizeCanvas();
+      }, 250);
+    } else {
+      document.body.classList.add('immersive');
+      setFullscreenIcon(true);
+      resizeCanvas();
     }
   } else {
-    try {
-      screen.orientation.unlock?.();
-    } catch (_) {
-      /* no había lock activo */
+    document.body.classList.remove('immersive');
+    setFullscreenIcon(false);
+    const ext = document.exitFullscreen?.bind(document) ?? document.webkitExitFullscreen?.bind(document);
+    if (ext) {
+      try {
+        await ext();
+      } catch (_) {
+        /* no había fullscreen real activo */
+      }
     }
-    document.exitFullscreen?.();
+    resizeCanvas();
   }
 });
 document.addEventListener('fullscreenchange', () => {
   const on = !!document.fullscreenElement;
   document.body.classList.toggle('immersive', on);
-  fullscreenBtn.innerHTML = on ? ICONS.compress : ICONS.expand;
-  fullscreenBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
-  updateRotateOverlay();
+  setFullscreenIcon(on);
   // El canvas se re-mide al entrar/salir del modo (el layout cambia).
   resizeCanvas();
 });
-// Si el usuario rota el teléfono o cambia el tamaño, el aviso se actualiza solo.
-window.addEventListener('resize', updateRotateOverlay);
-window.addEventListener('orientationchange', updateRotateOverlay);
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {
@@ -1124,14 +1080,10 @@ function drawVisual() {
   const p = currentParams();
   const beat = Math.max(0.5, p.beat);
 
-  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2. En el modo
-  // girado (pantalla completa en un teléfono vertical) la fila se dibuja a lo
-  // largo del eje Y: al girar el lienzo 90° las gotas quedan horizontales en
-  // pantalla, invitando a girar el celular.
-  const rotated = portraitImmersive;
-  const poolR = rotated ? Math.min(w, h / 3) * 0.45 : Math.min(h, w / 3) * 0.4;
-  const cxs = rotated ? [w / 2, w / 2, w / 2] : [w / 6, w / 2, (5 * w) / 6];
-  const cys = rotated ? [(5 * h) / 6, h / 2, h / 6] : [h / 2, h / 2, h / 2];
+  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2.
+  const poolR = Math.min(h, w / 3) * 0.4;
+  const cxs = [w / 6, w / 2, (5 * w) / 6];
+  const cys = [h / 2, h / 2, h / 2];
   const cy = h / 2;
 
   // Fase del latido real, tomada del reloj del AudioContext para que las
@@ -1292,7 +1244,6 @@ function restoreSession(saved) {
   if (typeof saved.volume === 'number') {
     volumeLevel = saved.volume;
     volume.value = String(saved.volume);
-    if (rotVolume) rotVolume.value = String(saved.volume);
     if (volumeLabel) volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
     engine.setVolume(volumeLevel);
   }
