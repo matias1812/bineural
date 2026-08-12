@@ -110,10 +110,11 @@ if (testimonialsRoot && KUDOSWALL_WIDGET_ID && KUDOSWALL_WIDGET_ID.startsWith('R
 }
 
 // ---------------------------------------------------------------- Formulario de experiencias
-// Los enlaces ig.me no admiten mensaje prellenado, así que el formulario
-// compone el mensaje, lo copia al portapapeles y abre el DM de la cuenta
-// configurada para que la persona lo pegue y lo envíe.
-const IG_ACCOUNT = 'vyneural.cl';
+// Envía los testimonios por email mediante un servicio de formularios
+// (Formspree u otro compatible con POST JSON). Creá un formulario en
+// https://formspree.io y pegá acá el endpoint, por ejemplo:
+//   const FORMSPREE_ENDPOINT = 'https://formspree.io/f/abcdwxyz';
+const FORMSPREE_ENDPOINT = '';
 const experienceForm = document.getElementById('experience-form');
 if (experienceForm) {
   const expIg = document.getElementById('exp-ig');
@@ -122,9 +123,9 @@ if (experienceForm) {
   const expText = document.getElementById('exp-text');
   const expError = document.getElementById('exp-error');
   const expDone = document.getElementById('exp-done');
-  const expDm = document.getElementById('exp-dm');
-  const expMessage = document.getElementById('exp-message');
   const expStars = document.getElementById('exp-stars');
+  const expGotcha = document.getElementById('exp-gotcha');
+  const expSubmit = document.getElementById('exp-submit');
 
   // Selector de valoración: 1 a 5 estrellas (opcional).
   let expRating = 0;
@@ -147,9 +148,11 @@ if (experienceForm) {
     expError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
-  experienceForm.addEventListener('submit', (e) => {
+  experienceForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     expError.classList.add('hidden');
+    // Honeypot anti-spam: si está completado, ignorar el envío.
+    if (expGotcha && expGotcha.value) return;
     // Solo se tolera la arroba inicial: el resto debe ser un usuario válido.
     const igUser = expIg.value.trim().replace(/^@+/, '');
     if (!igUser) {
@@ -165,26 +168,34 @@ if (experienceForm) {
       showExpError('Contanos un poco más: tu experiencia necesita al menos 10 caracteres.');
       return;
     }
-    const who = ['@' + igUser, expName.value.trim()].filter(Boolean).join(' · ');
-    const freq = expFreq.value;
-    const rating = expRating > 0 ? `${expRating}/5 ⭐` : '';
-    const message = [
-      '¡Hola Vyneural! 👋 Quiero compartir mi experiencia:',
-      '',
-      `“${exp}”`,
-      rating ? `Valoración: ${rating}` : '',
-      freq ? `Frecuencia: ${freq}` : '',
-      `— ${who}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-    expMessage.value = message;
-    expDm.href = `https://ig.me/m/${IG_ACCOUNT}`;
-    expDm.textContent = `Abrir Instagram (@${IG_ACCOUNT})`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(message).catch(() => {});
+    if (!FORMSPREE_ENDPOINT) {
+      showExpError('Ups, el formulario aún no está conectado a nuestro servicio de envío. Escribinos por Instagram y lo resolvemos.');
+      return;
     }
-    experienceForm.classList.add('hidden');
-    expDone.classList.remove('hidden');
+    const freq = expFreq.value;
+    expSubmit.disabled = true;
+    expSubmit.textContent = 'Enviando…';
+    try {
+      const res = await fetch(FORMSPREE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          _subject: `Nueva experiencia en Vyneural — @${igUser}`,
+          instagram: igUser,
+          nombre: expName.value.trim(),
+          frecuencia: freq,
+          valoracion: expRating > 0 ? `${expRating}/5` : '',
+          experiencia: exp,
+        }),
+      });
+      if (!res.ok) throw new Error(`formspree ${res.status}`);
+      experienceForm.classList.add('hidden');
+      expDone.classList.remove('hidden');
+    } catch {
+      showExpError('No pudimos enviar tu experiencia. Revisá tu conexión e intentá de nuevo.');
+    } finally {
+      expSubmit.disabled = false;
+      expSubmit.textContent = 'Enviar mi experiencia';
+    }
   });
 }
