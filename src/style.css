@@ -1044,12 +1044,93 @@ body {
 .controls {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 20px;
+  gap: 16px;
   margin: 0 auto 32px;
   /* Al agrandar la ventana (o en modo inmersivo) los controles no se
      estiran con la pantalla: se mantienen compactos y centrados. */
   max-width: 520px;
+}
+
+/* Botón que despliega los ajustes (duración, ambiente, frecuencias y
+   condición experimental). Colapsados por defecto; el estado se recuerda. */
+.settings-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.settings-toggle[aria-expanded='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.settings-toggle .settings-chevron {
+  transition: transform 0.25s ease;
+}
+
+.settings-toggle[aria-expanded='true'] .settings-chevron {
+  transform: rotate(180deg);
+}
+
+.settings-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  animation: settingsIn 0.25s ease;
+}
+
+@keyframes settingsIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Pantallas anchas: los ajustes de frecuencia se organizan en dos columnas
+   (Portadora + Forma de onda) y las filas largas ocupan el ancho completo. */
+@media (min-width: 720px) {
+  .controls {
+    max-width: 720px;
+  }
+  .settings-body {
+    grid-template-columns: 1fr 1fr;
+  }
+  .timer-row,
+  .ambient-row,
+  .exp-setting-row {
+    grid-column: 1 / -1;
+  }
+  .carrier-row,
+  .wave-row {
+    align-self: start;
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .carrier-row .carrier-hint,
+  .wave-row .wave-hint {
+    display: none;
+  }
 }
 
 .play-btn {
@@ -2781,6 +2862,37 @@ body.immersive .controls {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--border);
+}
+
+/* Fila de la condición experimental bajo el reproductor: misma identidad que
+   las demás filas de ajustes, con los chips del modo experimental. */
+.exp-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.exp-setting-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  flex-basis: 100%;
+  justify-content: center;
+}
+
+.exp-setting-hint {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.75;
+  margin-left: 2px;
 }
 
 .wave-label {

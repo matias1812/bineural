@@ -116,6 +116,37 @@ AudioContext → masterGain → compressor → analyser → outputTap
 - **Diagnóstico**: `window.__audioProbe()` incluye transporte y elemento
   (modo, paused, readyState, currentTime, error) — P0.5.5.
 
+## P0.6 — Transiciones de frecuencia (audio + visual, sin saltos)
+
+Cuando cambia la portadora, el latido o la condición experimental, el cambio
+se ve **poco a poco** — el audio y las visuales transicionan con la misma
+constante de tiempo (τ = 1,5 s):
+
+- **Audio** (`retune()` en `src/audio.js`): `linearRampToValueAtTime` de 1,5 s
+  sobre la frecuencia de cada oscilador (y del modulador AM) con
+  `cancelScheduledValues` — sin clics ni saltos de fase.
+- **Visual (gotas, `src/main.js` drawVisual)**: las frecuencias visuales
+  `visBase`/`visBeat` son una EMA (τ = 1,5 s) hacia la frecuencia REAL del
+  motor. El ritmo de excitación de las cuencas (`T1 = K_VIS/f`, `T2`) y el
+  período del latido visual derivan de ellas, así que las ondas
+  aceleran/desaceleran gradualmente. Protección `isFinite` para inputs
+  personalizados vacíos; primer frame inicializa sin glide (evita un barrido
+  al cargar).
+- **Visual (cimática, `src/cymatics.js`)**: `pBase` ya era EMA interna (τ =
+  1,5 s); ahora además cada gota afina su frecuencia con `_dropF` (misma EMA)
+  hacia su objetivo por condición — incluye el cambio estructural
+  binaural→tono puro (f2 = f1) — de modo que los modos dominantes se
+  reorganizan gradualmente, sin que el patrón salte.
+- **Sincronía intacta**: el pulso de luz sigue anclado al reloj REAL del
+  AudioContext (`getBeatPhase`, fase 0 = pulso); solo morfa el ritmo de las
+  ondas y la afinación de la placa. No hay drift ni doble reloj.
+- **Diagnóstico**: `window.__platformProbe().visual` expone
+  `smoothedBase/smoothedBeat` (lo que dibujan las visuales) vs.
+  `targetBase/targetBeat` (lo que suena) — verificado en vivo: al pasar de
+  Meditación (210/6) a Concentración (240/16) la visual recorrió
+  218,5 → 228,3 → 233,7 → 236,7 Hz y el latido 8,8 → 12,1 → 13,9 → 14,9 Hz;
+  en reposo coinciden.
+
 ## P12/P14/P15 — Notificaciones de alarma y Service Worker
 
 - `public/sw.js` implementa `notificationclick` (cerrar, enfocar ventana

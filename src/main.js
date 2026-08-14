@@ -468,6 +468,9 @@ function applyAmbient() {
 }
 
 function start() {
+  // La condición experimental elegida se aplica a la sesión nueva (el motor
+  // la lee al construir sus fuentes; en vivo setExpCondition la reconstruye).
+  if (simulation && simulation.audio) simulation.audio.setCondition(expCondition);
   // `playing` se marca antes de applyAudio(): applyAmbient() depende de él
   // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
@@ -484,7 +487,7 @@ function start() {
     base: p0.base,
     beat: p0.beat,
     wave: p0.wave,
-    condition: 'BINAURAL',
+    condition: EXP_CONDITION_TO_SESSION[expCondition] || 'BINAURAL',
   });
   // Reclama la Media Session ANTES de que suene el audio: el navegador
   // asocia el controlador de notificaciones a la sesión en marcha y algunos
@@ -1835,6 +1838,7 @@ if (moreBtn && moreMenu) {
 // reproducible con semilla). Ver src/core/experiments.js.
 const experimentModal = document.getElementById('experiment-modal');
 const expConditions = document.getElementById('exp-conditions');
+const expConditionsSettings = document.getElementById('exp-conditions-settings');
 const expCarrier = document.getElementById('exp-carrier');
 const expBeat = document.getElementById('exp-beat');
 const expCarrierV = document.getElementById('exp-carrier-v');
@@ -1862,13 +1866,74 @@ if (experimentModal) {
   });
 }
 
-if (expConditions) {
-  expConditions.addEventListener('click', (e) => {
+// La condición del modo experimental es una sola: se elige desde el modal o
+// desde los ajustes bajo el reproductor (fila nueva) y ambos se sincronizan.
+// La sesión viva la registra (sessionLog) para no ocultar la condición real.
+const EXP_CONDITION_TO_SESSION = {
+  binaural: 'BINAURAL',
+  'pure-tone': 'PURE_TONE_CONTROL',
+  noise: 'NOISE_CONTROL',
+  'amplitude-modulation': 'AMPLITUDE_MODULATION',
+  none: 'SILENCE',
+};
+
+function setExpCondition(cond) {
+  expCondition = cond;
+  [expConditions, expConditionsSettings].forEach((group) => {
+    if (!group) return;
+    group.querySelectorAll('.exp-cond').forEach((c) => c.classList.toggle('active', c.dataset.cond === cond));
+  });
+  // La condición cambia el estímulo REAL: se reconstruye el audio en vivo con
+  // crossfade (sin clics ni reinicio de sesión) y se registra el cambio.
+  if (simulation && simulation.audio) {
+    simulation.audio.setCondition(cond);
+    if (playing && sessionLog) {
+      sessionLog.conditionChanged({ condition: EXP_CONDITION_TO_SESSION[cond] || cond });
+    }
+    // Ambientes: solo las condiciones rítmicas (binaural/AM) respiran al
+    // latido; las demás respiran a un ritmo natural lento.
+    const rhythmic = cond === 'binaural' || cond === 'amplitude-modulation';
+    if (ambient && ambient.ctx) {
+      ambient.setBeat(rhythmic ? currentParams().beat : 0.3, simulation.audio.getBeatEpoch());
+    }
+  }
+}
+
+[expConditions, expConditionsSettings].forEach((group) => {
+  if (!group) return;
+  group.addEventListener('click', (e) => {
     const b = e.target.closest('.exp-cond');
     if (!b) return;
-    expCondition = b.dataset.cond;
-    expConditions.querySelectorAll('.exp-cond').forEach((c) => c.classList.toggle('active', c === b));
+    setExpCondition(b.dataset.cond);
   });
+});
+
+// ── Ajustes desplegables ────────────────────────────────────────────────────
+// Duración, ambiente, portadora, forma de onda y condición experimental quedan
+// plegados bajo un botón (el usuario pidió que se desplieguen con un toque).
+// El estado abierto/cerrado se recuerda entre visitas.
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsBody = document.getElementById('settings-body');
+function toggleSettings(open) {
+  if (!settingsBody) return;
+  const on = open != null ? open : settingsBody.classList.contains('hidden');
+  settingsBody.classList.toggle('hidden', !on);
+  if (settingsToggle) settingsToggle.setAttribute('aria-expanded', String(on));
+  try {
+    localStorage.setItem('vyneural_settings_open', on ? '1' : '0');
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+if (settingsToggle && settingsBody) {
+  settingsToggle.addEventListener('click', () => toggleSettings());
+  let saved = null;
+  try {
+    saved = localStorage.getItem('vyneural_settings_open');
+  } catch {
+    /* sin almacenamiento */
+  }
+  toggleSettings(saved === '1'); // por defecto: plegado
 }
 
 function syncExpLabels() {
@@ -2106,9 +2171,19 @@ if (permissionsModal) {
   });
 }
 
+// Pantalla táctil (móvil/tableta): el visualizador limita su resolución y
+// cadencia para no saturar el hilo principal. El audio comparte ese hilo:
+// la interferencia al moverse por la app viene de la contención con el
+// render (un teléfono con dpr 3 pinta 9× los píxeles de un dpr 1).
+const IS_TOUCH =
+  typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 function resizeCanvas() {
-  canvas.width = canvas.clientWidth * devicePixelRatio;
-  canvas.height = canvas.clientHeight * devicePixelRatio;
+  // En táctil el dpr se topa en 2: a dpr 3 el canvas pinta 2,25× más píxeles
+  // por el mismo tamaño visual (el suavizado es imperceptible a esa escala).
+  const dpr = IS_TOUCH ? Math.min(devicePixelRatio || 1, 2) : devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -2268,12 +2343,35 @@ function drawField(field, rgb, cx, cy, r, composite, alpha = 1) {
   ctx2d.restore();
 }
 
+// Cadencia adaptativa del visualizador en táctil: en sesión se pintan 3 de
+// cada 4 frames (~45 fps) y en pausa 2 de cada 4 (~30 fps). El latido y los
+// impulsos se anclan al reloj del AudioContext (fase 0 = pulso), así que la
+// sincronía visual con el audio no cambia; lo que baja es la contención del
+// hilo principal (la causa de la interferencia al interactuar en el móvil).
+let vizFrame = 0;
+// Frecuencias visuales suavizadas (τ = 1,5 s, el mismo ramp que el audio):
+// cuando la portadora o el latido cambian, el agua y la placa se afinan
+// gradualmente — el cambio de frecuencia SE VE poco a poco, sin saltos de
+// ritmo ni reencuadres bruscos. El pulso de luz sigue anclado al reloj real
+// del AudioContext (getBeatPhase), así que la sincronía con el latido no
+// cambia: solo morfa el ritmo de las ondas y la afinación de la placa.
+let visBase = 220;
+let visBeat = 6;
+let lastVizT = 0;
+let vizWarm = false;
+// Cache de los gradientes esféricos de las gotas: se recrean solo cuando
+// cambia el tamaño de las cuencas o el color de acento (antes se creaban
+// 6 gradientes por frame).
+let shadeCache = null;
+let shadeCacheKey = '';
+
 function drawVisual() {
   requestAnimationFrame(drawVisual);
   // Segundo plano: no hay nada que renderizar. La simulación visual se
   // congela (P21) y, al volver, la fase se reconstruye desde el reloj de
   // audio (AudioClock) — no se repiten frames perdidos ni se quema CPU.
   if (document.hidden) return;
+  if (IS_TOUCH && vizFrame++ % 4 > (playing ? 2 : 1)) return;
   const dpr = devicePixelRatio;
   const w = canvas.width;
   const h = canvas.height;
@@ -2282,7 +2380,37 @@ function drawVisual() {
   const now = performance.now();
   const t = now / 1000;
   const p = currentParams();
-  const beat = Math.max(0.5, p.beat);
+  // Suavizado de la frecuencia visual: EMA con τ = 1,5 s hacia la frecuencia
+  // REAL (la del motor). Protección NaN/Infinity por si el input personalizado
+  // quedó vacío. El primer frame inicializa sin glide (evita un barrido de
+  // arranque al cargar).
+  const dts = lastVizT ? Math.min(0.1, (now - lastVizT) / 1000) : 0.016;
+  lastVizT = now;
+  const tb = isFinite(p.base) ? p.base : visBase;
+  const tbt = isFinite(p.beat) ? p.beat : visBeat;
+  if (!vizWarm) {
+    vizWarm = true;
+    visBase = tb;
+    visBeat = tbt;
+  } else {
+    const kS = 1 - Math.exp(-dts / 1.5);
+    visBase += (tb - visBase) * kS;
+    visBeat += (tbt - visBeat) * kS;
+  }
+  const beat = Math.max(0.5, visBeat);
+
+  // ----- Condición experimental → física visual ---------------------------
+  // La condición elegida (Fase 16) cambia CÓMO se excita el agua y la placa,
+  // no solo el audio: tono puro → patrón estacionario simétrico de un solo
+  // tono; AM → la placa respira con la envolvente; ruido → régimen turbulento
+  // sin estructura tonal; silencio → agua en calma. Las condiciones sin
+  // batido real (tono puro, ruido, silencio) respiran a ritmo natural en
+  // lugar de pulsar con el latido (el motor de audio devuelve fase nula).
+  const cond = expCondition;
+  const rhythmic = cond === 'binaural' || cond === 'amplitude-modulation';
+  const isPure = cond === 'pure-tone';
+  const isNoise = cond === 'noise';
+  const isSilence = cond === 'none';
 
   // ----- Simulación alternativa: cimática ---------------------------------
   // Si el usuario eligió Cimática se dibuja la placa de Faraday en lugar de
@@ -2291,7 +2419,7 @@ function drawVisual() {
   if (vizMode === 'cimatica') {
     const periodMs = Math.max(80, 1000 / beat);
     let phase;
-    if (playing && simulation.audio.isPlaying) {
+    if (playing && simulation.audio.isPlaying && rhythmic) {
       const ph = simulation.audio.getBeatPhase();
       phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
     } else {
@@ -2299,10 +2427,13 @@ function drawVisual() {
     }
     const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
     cymatics.render(ctx2d, w, h, {
-      base: p.base || 220, // portadora: 220 Hz por defecto
+      // Frecuencias ya suavizadas: la placa se afina gradualmente y sus
+      // modos dominantes se reorganizan poco a poco al cambiar el tono.
+      base: visBase,
       beat,
       playing,
       pulse: eased,
+      condition: cond,
       // Misma paleta que las gotas: izquierda azul, centro morado (acento
       // del estado), derecha rosa.
       colors: [LANE_LEFT_COLOR_RGB, ACCENT_RGB, LANE_RIGHT_COLOR_RGB],
@@ -2328,7 +2459,7 @@ function drawVisual() {
   // En pausa, respiración suave.
   const periodMs = Math.max(80, 1000 / beat);
   let phase;
-  if (playing && simulation.audio.isPlaying) {
+  if (playing && simulation.audio.isPlaying && rhythmic) {
     const ph = simulation.audio.getBeatPhase();
     phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
   } else {
@@ -2354,31 +2485,99 @@ function drawVisual() {
   // queda en ~1,5 s, y al subir/bajar la frecuencia los pulsos se aceleran
   // o espacian exactamente en esa proporción.
   const K_VIS = 330;
-  const f1v = Math.max(1, p.base || 220);
+  // Frecuencia visual suavizada: las gotas aceleran/desaceleran su ritmo de
+  // ondas gradualmente con el cambio de tono real (sin salto de T1/T2).
+  const f1v = Math.max(1, visBase);
   const f2v = f1v + beat;
   const T1 = K_VIS / f1v;
   const T2 = K_VIS / f2v;
   const Tpause = K_VIS * 2.2 / f1v; // en pausa, ~2,2× más espaciado
   if (playing) {
-    // Las tres frecuencias: una fuente por cuenca (los laterales en el
-    // centro, la unión con azul y rosa desfasadas que chocan al cruzarse).
-    // Cada cuenca late a su propia frecuencia: f1 y f2 a ritmos distintos
-    // que producen el batido real entre las dos gotas.
-    if (t - impactTimes[0] >= T1) {
-      waveLeft.pokeDisc(s, s, 1.5);
-      impactTimes[0] = t;
-    }
-    if (t - impactTimes[1] >= T2) {
-      waveRight.pokeDisc(s, s, 1.5);
-      impactTimes[1] = t;
-    }
-    if (t - impactTimes[2] >= T1) {
-      waveBrainB.pokeDisc(s - off, s, 1.3);
-      impactTimes[2] = t;
-    }
-    if (t - impactTimes[3] >= T2) {
-      waveBrainP.pokeDisc(s + off, s, 1.3);
-      impactTimes[3] = t;
+    if (isNoise) {
+      // Ruido: excitación turbulenta e irregular. Los intervalos y las
+      // intensidades son pseudoaleatorios (hash del reloj visual) y las
+      // fuentes se desplazan del centro: el agua se agita sin estructura
+      // tonal, como el estímulo NOISE real.
+      const hsh = (x) => {
+        const v = Math.sin(x * 12.9898) * 43758.5453;
+        return v - Math.floor(v);
+      };
+      const n1 = hsh(Math.floor(t * 3.7));
+      const n2 = hsh(Math.floor(t * 3.7) + 1);
+      if (t - impactTimes[0] >= 0.25 + n1 * 0.9) {
+        waveLeft.pokeDisc(s + (n2 - 0.5) * size * 0.3, s + (n1 - 0.5) * size * 0.3, 0.5 + n1 * 1.1);
+        impactTimes[0] = t;
+      }
+      if (t - impactTimes[1] >= 0.25 + n2 * 0.9) {
+        waveRight.pokeDisc(s + (n1 - 0.5) * size * 0.3, s + (n2 - 0.5) * size * 0.3, 0.5 + n2 * 1.1);
+        impactTimes[1] = t;
+      }
+      if (t - impactTimes[2] >= 0.3 + n1 * 1.1) {
+        waveBrainB.pokeDisc(s - off + (n2 - 0.5) * size * 0.2, s + (n1 - 0.5) * size * 0.2, 0.6 + n2 * 0.9);
+        impactTimes[2] = t;
+      }
+      if (t - impactTimes[3] >= 0.3 + n2 * 1.1) {
+        waveBrainP.pokeDisc(s + off + (n1 - 0.5) * size * 0.2, s + (n2 - 0.5) * size * 0.2, 0.6 + n1 * 0.9);
+        impactTimes[3] = t;
+      }
+    } else if (isSilence) {
+      // Silencio: el control SILENCE no excita el agua con tono alguno —
+      // solo impulsos suaves y muy espaciados, agua en calma.
+      if (t - impactTimes[0] >= Tpause) {
+        waveLeft.pokeDisc(s, s, 0.6);
+        impactTimes[0] = t;
+      }
+      if (t - impactTimes[1] >= Tpause) {
+        waveRight.pokeDisc(s, s, 0.6);
+        impactTimes[1] = t;
+      }
+      if (t - impactTimes[2] >= Tpause) {
+        waveBrainB.pokeDisc(s - off, s, 0.5);
+        impactTimes[2] = t;
+      }
+      if (t - impactTimes[3] >= Tpause) {
+        waveBrainP.pokeDisc(s + off, s, 0.5);
+        impactTimes[3] = t;
+      }
+    } else if (isPure) {
+      // Tono puro: una única frecuencia excita todas las cuencas al mismo
+      // ritmo — patrón estacionario simétrico, sin batido entre dos tonos
+      // (las dos gotas laterales vibran en fase, no desfasadas).
+      if (t - impactTimes[0] >= T1) {
+        waveLeft.pokeDisc(s, s, 1.5);
+        waveRight.pokeDisc(s, s, 1.5);
+        waveBrainB.pokeDisc(s - off, s, 1.3);
+        waveBrainP.pokeDisc(s + off, s, 1.3);
+        impactTimes[0] = t;
+        impactTimes[1] = t;
+        impactTimes[2] = t;
+        impactTimes[3] = t;
+      }
+    } else {
+      // Binaural / AM: las dos frecuencias, una fuente por cuenca (los
+      // laterales en el centro, la unión con azul y rosa desfasadas que
+      // chocan al cruzarse). Cada cuenca late a su propia frecuencia: f1 y
+      // f2 a ritmos distintos que producen el batido real entre las dos
+      // gotas. En AM la fuerza de cada impulso respira con la envolvente
+      // de amplitud (el pulso real), como la portadora modulada que suena.
+      const amStr = cond === 'amplitude-modulation' ? 0.7 + 1.0 * eased : 1.5;
+      const amStrB = cond === 'amplitude-modulation' ? 0.6 + 0.9 * eased : 1.3;
+      if (t - impactTimes[0] >= T1) {
+        waveLeft.pokeDisc(s, s, amStr);
+        impactTimes[0] = t;
+      }
+      if (t - impactTimes[1] >= T2) {
+        waveRight.pokeDisc(s, s, amStr);
+        impactTimes[1] = t;
+      }
+      if (t - impactTimes[2] >= T1) {
+        waveBrainB.pokeDisc(s - off, s, amStrB);
+        impactTimes[2] = t;
+      }
+      if (t - impactTimes[3] >= T2) {
+        waveBrainP.pokeDisc(s + off, s, amStrB);
+        impactTimes[3] = t;
+      }
     }
   } else {
     // En pausa: impulsos espaciados y suaves, el agua sigue viva pero
@@ -2400,8 +2599,10 @@ function drawVisual() {
       impactTimes[3] = t;
     }
   }
-  // Latido: una gota de luz exacta en cada pulso real (fase 0).
-  if (playing && phase != null) {
+  // Latido: una gota de luz exacta en cada pulso real (fase 0). Solo las
+  // condiciones con batido real (binaural/AM) pulsan el centro; el resto
+  // (tono puro, ruido, silencio) no tiene pulso que marcar.
+  if (playing && rhythmic && phase != null) {
     const wrapped = lastBeatPhase > phase && lastBeatPhase - phase > 0.5;
     if (wrapped) waveBrainA.pokeDisc(s, s, 1.8);
   }
@@ -2430,43 +2631,49 @@ function drawVisual() {
     { x: cxs[2], y: cys[2], color: LANE_RIGHT_COLOR },
   ];
 
-  pools.forEach((pool) => {
-    // Sombreado esférico: los bordes se oscurecen para que se lea como
-    // una gota esférica de agua con luz.
-    const shade = ctx2d.createRadialGradient(
-      pool.x - poolR * 0.25,
-      pool.y - poolR * 0.25,
-      poolR * 0.15,
-      pool.x,
-      pool.y,
-      poolR,
-    );
-    shade.addColorStop(0, 'rgba(0,0,0,0)');
-    shade.addColorStop(0.7, 'rgba(0,0,0,0.05)');
-    shade.addColorStop(1, 'rgba(0,0,0,0.3)');
-    ctx2d.fillStyle = shade;
+  // Gradientes esféricos cacheados: la clave incluye el tamaño de las
+  // cuencas y el color de acento (cambian con el layout y el estado).
+  const shadeKey = `${Math.round(poolR * 10)}|${accentColor}`;
+  if (shadeCacheKey !== shadeKey) {
+    shadeCacheKey = shadeKey;
+    shadeCache = pools.map((pool) => {
+      const shade = ctx2d.createRadialGradient(
+        pool.x - poolR * 0.25,
+        pool.y - poolR * 0.25,
+        poolR * 0.15,
+        pool.x,
+        pool.y,
+        poolR,
+      );
+      shade.addColorStop(0, 'rgba(0,0,0,0)');
+      shade.addColorStop(0.7, 'rgba(0,0,0,0.05)');
+      shade.addColorStop(1, 'rgba(0,0,0,0.3)');
+      const hx = pool.x - poolR * 0.32;
+      const hy = pool.y - poolR * 0.38;
+      const hg = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.45);
+      hg.addColorStop(0, 'rgba(255,255,255,0.3)');
+      hg.addColorStop(0.3, 'rgba(255,255,255,0.07)');
+      hg.addColorStop(1, 'rgba(255,255,255,0)');
+      const gl = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.13);
+      gl.addColorStop(0, 'rgba(255,255,255,0.9)');
+      gl.addColorStop(1, 'rgba(255,255,255,0)');
+      return { shade, hg, gl, hx, hy };
+    });
+  }
+  pools.forEach((pool, i) => {
+    const g = shadeCache[i];
+    if (!g) return;
+    ctx2d.fillStyle = g.shade;
     ctx2d.beginPath();
     ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
     ctx2d.fill();
-
-    // Luz entrando en la gota: brillo suave y destello especular arriba a la izquierda.
-    const hx = pool.x - poolR * 0.32;
-    const hy = pool.y - poolR * 0.38;
-    const hg = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.45);
-    hg.addColorStop(0, 'rgba(255,255,255,0.3)');
-    hg.addColorStop(0.3, 'rgba(255,255,255,0.07)');
-    hg.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx2d.fillStyle = hg;
+    ctx2d.fillStyle = g.hg;
     ctx2d.beginPath();
     ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
     ctx2d.fill();
-
-    const gl = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.13);
-    gl.addColorStop(0, 'rgba(255,255,255,0.9)');
-    gl.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx2d.fillStyle = gl;
+    ctx2d.fillStyle = g.gl;
     ctx2d.beginPath();
-    ctx2d.ellipse(hx, hy, poolR * 0.17, poolR * 0.12, -0.5, 0, Math.PI * 2);
+    ctx2d.ellipse(g.hx, g.hy, poolR * 0.17, poolR * 0.12, -0.5, 0, Math.PI * 2);
     ctx2d.fill();
   });
 
@@ -2908,6 +3115,15 @@ window.__platformProbe = async () => {
     push: { supported: caps.push.supported, configured: caps.push.configured },
     badges: { setAppBadge: !!(nav && nav.setAppBadge) },
     alarms: am ? { count: am.list().length, scheduler: am.activeScheduler } : null,
+    visual: {
+      // Frecuencia suavizada con la que dibujan las ondas y la placa (τ=1,5 s)
+      // vs. la frecuencia real del motor: durante una transición se ven
+      // valores intermedios; en reposo coinciden.
+      smoothedBase: Math.round(visBase * 10) / 10,
+      smoothedBeat: Math.round(visBeat * 10) / 10,
+      targetBase: Math.round((isFinite(currentParams().base) ? currentParams().base : visBase) * 10) / 10,
+      targetBeat: Math.round((isFinite(currentParams().beat) ? currentParams().beat : visBeat) * 10) / 10,
+    },
   };
 };
 

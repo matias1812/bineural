@@ -282,7 +282,23 @@ export class AmbientEngine {
     src.start();
     layer.nodes.push(src, hp, lp, g);
 
-    // Gotitas: ráfagas suaves, con ataque gradual y sin picos agudos.
+    // Espuma fina: brillo agudo del agua cayendo (el "siseo" de la lluvia
+    // fuerte), muy sutil, para que el lecho no suene a manta plana.
+    const hiss = ctx.createBufferSource();
+    hiss.buffer = makeNoise(ctx, 'white', 6);
+    hiss.loop = true;
+    const hissLp = ctx.createBiquadFilter();
+    hissLp.type = 'lowpass';
+    hissLp.frequency.value = 8000;
+    const hissG = ctx.createGain();
+    hissG.gain.value = 0.045;
+    hiss.connect(hissLp).connect(hissG).connect(layer.syncGain);
+    hiss.start();
+    layer.nodes.push(hiss, hissLp, hissG);
+
+    // Gotitas: ráfagas suaves, con ataque gradual y sin picos agudos. La
+    // frecuencia del pling varía mucho más (cerca y lejos) para que la
+    // lluvia suene densa y con cuerpo, no como metrónomo.
     const droplet = () => {
       if (this.layers.get('lluvia') !== layer) return;
       const t = ctx.currentTime;
@@ -290,16 +306,16 @@ export class AmbientEngine {
       dsrc.buffer = this._dropBuf;
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = 1100 + Math.random() * 2400;
-      bp.Q.value = 4.5;
+      bp.frequency.value = 700 + Math.random() * 4600;
+      bp.Q.value = 3.5 + Math.random() * 3;
       const lp2 = ctx.createBiquadFilter();
       lp2.type = 'lowpass';
-      lp2.frequency.value = 4200;
+      lp2.frequency.value = 4600;
       const dg = ctx.createGain();
-      const peak = 0.05 + Math.random() * 0.09;
+      const peak = 0.045 + Math.random() * 0.1;
       dg.gain.setValueAtTime(0.0001, t);
       dg.gain.linearRampToValueAtTime(peak, t + 0.008);
-      dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.05 + Math.random() * 0.09);
+      dg.gain.exponentialRampToValueAtTime(0.0001, t + 0.05 + Math.random() * 0.1);
       dsrc.connect(bp).connect(lp2).connect(dg).connect(layer.syncGain);
       dsrc.start(t);
       dsrc.stop(t + 0.35);
@@ -345,6 +361,63 @@ export class AmbientEngine {
     src.start();
     lfo.start();
     layer.nodes.push(src, lp, g, lfo, lfoG);
+
+    // Brillo del agua sobre piedras: ruido rosa filtrado agudo, con su propio
+    // LFO lento — el "chorrito" que suena entre las rocas del río.
+    const shimmer = ctx.createBufferSource();
+    shimmer.buffer = makeNoise(ctx, 'pink', 6);
+    shimmer.loop = true;
+    const shBp = ctx.createBiquadFilter();
+    shBp.type = 'bandpass';
+    shBp.frequency.value = 1900;
+    shBp.Q.value = 0.8;
+    const shG = ctx.createGain();
+    shG.gain.value = 0.035;
+    const shLfo = ctx.createOscillator();
+    shLfo.frequency.value = 0.4;
+    const shLfoG = ctx.createGain();
+    shLfoG.gain.value = 0.018;
+    shLfo.connect(shLfoG).connect(shG.gain);
+    shimmer.connect(shBp).connect(shG).connect(layer.syncGain);
+    shimmer.start();
+    shLfo.start();
+    layer.nodes.push(shimmer, shBp, shG, shLfo, shLfoG);
+
+    // Gorgoteo: burbujas ocasionales — un tono corto que barre hacia abajo,
+    // como una burbuja que sube y estalla.
+    const gurgle = () => {
+      if (this.layers.get('rio') !== layer) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      const f0 = 340 + Math.random() * 480;
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.16);
+      const og = ctx.createGain();
+      const pk = 0.02 + Math.random() * 0.035;
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.linearRampToValueAtTime(pk, t + 0.015);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(og).connect(layer.syncGain);
+      o.start(t);
+      o.stop(t + 0.3);
+      layer.timers.push(
+        setTimeout(() => {
+          try {
+            o.disconnect();
+          } catch (_) {
+            /* ya desconectado */
+          }
+          try {
+            og.disconnect();
+          } catch (_) {
+            /* ya desconectado */
+          }
+        }, 500),
+      );
+      layer.timers.push(setTimeout(gurgle, 2400 + Math.random() * 5200));
+    };
+    gurgle();
   }
 
   // ------------------------------------------------------------ Bosque
@@ -369,6 +442,30 @@ export class AmbientEngine {
     src.start();
     lfo.start();
     layer.nodes.push(src, lp, g, lfo, lfoG);
+
+    // Hojarasca: el viento moviendo hojas — ruido rosa agudo, muy bajo, con
+    // ráfagas aleatorias lentas (como una hoja que se arrastra por el suelo).
+    const rustle = ctx.createBufferSource();
+    rustle.buffer = makeNoise(ctx, 'pink', 6);
+    rustle.loop = true;
+    const ruHp = ctx.createBiquadFilter();
+    ruHp.type = 'highpass';
+    ruHp.frequency.value = 2200;
+    const ruG = ctx.createGain();
+    ruG.gain.value = 0.02;
+    rustle.connect(ruHp).connect(ruG).connect(layer.syncGain);
+    rustle.start();
+    layer.nodes.push(rustle, ruHp, ruG);
+    const rustleTimer = () => {
+      if (this.layers.get('bosque') !== layer) return;
+      // Ráfaga suave: sube y baja la ganancia de la hojarasca.
+      ruG.gain.cancelScheduledValues(ctx.currentTime);
+      ruG.gain.setValueAtTime(ruG.gain.value, ctx.currentTime);
+      ruG.gain.linearRampToValueAtTime(0.012 + Math.random() * 0.03, ctx.currentTime + 0.6 + Math.random() * 0.8);
+      ruG.gain.linearRampToValueAtTime(0.02, ctx.currentTime + 2.4 + Math.random() * 2.5);
+      layer.timers.push(setTimeout(rustleTimer, 1800 + Math.random() * 3200));
+    };
+    rustleTimer();
     this._scheduleBirds(layer);
   }
 
@@ -420,6 +517,41 @@ export class AmbientEngine {
     hiss.start();
     hlfo.start();
     layer.nodes.push(hiss, hp, hg, hlfo, hlfoG);
+
+    // Lavado suave: pequeñas subidas de agua entre olas grandes (el agua que
+    // sube por la arena y se retira), mucho más discretas que el choque.
+    const wash = () => {
+      if (this.layers.get('oceano') !== layer) return;
+      const t = ctx.currentTime;
+      const wsrc = ctx.createBufferSource();
+      wsrc.buffer = makeNoise(ctx, 'pink', 1.2);
+      wsrc.loop = true;
+      const wb = ctx.createBiquadFilter();
+      wb.type = 'lowpass';
+      wb.frequency.setValueAtTime(520, t);
+      wb.frequency.linearRampToValueAtTime(260, t + 1.6);
+      const wg = ctx.createGain();
+      const wpk = 0.05 + Math.random() * 0.06;
+      wg.gain.setValueAtTime(0.0001, t);
+      wg.gain.linearRampToValueAtTime(wpk, t + 0.5 + Math.random() * 0.5);
+      wg.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+      wsrc.connect(wb).connect(wg).connect(layer.syncGain);
+      wsrc.start(t);
+      wsrc.stop(t + 2.3);
+      layer.timers.push(
+        setTimeout(() => {
+          [wsrc, wb, wg].forEach((n) => {
+            try {
+              n.disconnect();
+            } catch (_) {
+              /* ya desconectado */
+            }
+          });
+        }, 2500),
+      );
+      layer.timers.push(setTimeout(wash, 2400 + Math.random() * 3600));
+    };
+    wash();
 
     // Choques de ola: ráfaga de ruido que sube despacio, rompe y decae.
     const crash = () => {
@@ -493,15 +625,16 @@ export class AmbientEngine {
     layer.nodes.push(src, lp, g, flick, flickG, roar, roarG);
 
     // Crepitar: chasquido seco de ruido blanco, muy corto y filtrado agudo.
-    const crackle = (t) => {
+    const crackle = (t, low = false) => {
       const csrc = ctx.createBufferSource();
       csrc.buffer = this._dropBuf;
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = 1800 + Math.random() * 3400;
-      bp.Q.value = 2.5;
+      // Chasquido normal (agudo) o pop grave de madera que revienta (bajo).
+      bp.frequency.value = low ? 320 + Math.random() * 480 : 1800 + Math.random() * 3400;
+      bp.Q.value = low ? 4.5 : 2.5;
       const cg = ctx.createGain();
-      const peak = 0.02 + Math.random() * 0.12;
+      const peak = low ? 0.03 + Math.random() * 0.07 : 0.02 + Math.random() * 0.12;
       cg.gain.setValueAtTime(0.0001, t);
       cg.gain.linearRampToValueAtTime(peak, t + 0.002);
       cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.012 + Math.random() * 0.04);
@@ -529,6 +662,8 @@ export class AmbientEngine {
       for (let i = 0; i < n; i++) {
         crackle(now + i * (0.03 + Math.random() * 0.06));
       }
+      // De vez en cuando, un pop grave: una burbuja de resina que revienta.
+      if (Math.random() < 0.14) crackle(now + 0.02, true);
       layer.timers.push(setTimeout(timer, 80 + Math.random() * 320));
     };
     timer();
@@ -557,7 +692,11 @@ export class AmbientEngine {
   // sincronizadas a múltiplos del latido.
   _chirp(time, layer) {
     const ctx = this.ctx;
-    const notes = 1 + Math.floor(Math.random() * 2);
+    // A veces un trino rápido (3-4 notas casi seguidas, como un pájaro
+    // insistente); lo demás son notas simples o dobles.
+    const notes =
+      Math.random() < 0.25 ? 3 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 2);
+    const trill = notes >= 3;
     let start = time;
     for (let n = 0; n < notes; n++) {
       const osc = ctx.createOscillator();
@@ -567,8 +706,9 @@ export class AmbientEngine {
       osc.frequency.exponentialRampToValueAtTime(f0 * (1.25 + Math.random() * 0.4), start + 0.07);
       osc.frequency.exponentialRampToValueAtTime(f0 * 0.85, start + 0.15);
       const g = ctx.createGain();
+      const pk = trill ? 0.05 : 0.07;
       g.gain.setValueAtTime(0.0001, start);
-      g.gain.linearRampToValueAtTime(0.07, start + 0.02);
+      g.gain.linearRampToValueAtTime(pk, start + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
       osc.connect(g).connect(layer.syncGain);
       osc.start(start);
@@ -587,7 +727,7 @@ export class AmbientEngine {
           }
         }, 500),
       );
-      start += 0.18 + Math.random() * 0.12;
+      start += trill ? 0.07 + Math.random() * 0.05 : 0.18 + Math.random() * 0.12;
     }
   }
 

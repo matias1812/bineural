@@ -706,3 +706,22 @@ de schema; el watcher legacy se eliminó (0 schedulers duplicados).
 | Sin interferencia con audio | la notificación jamás crea AudioContext/sesión | `onFire` en hidden solo notifica/chime (Fase 21) |
 
 Informe completo del sistema: **`docs/notification-report.md`**.
+
+---
+
+## ADDENDUM — P0.6 Transiciones de frecuencia y condición (visuales graduales)
+
+Fase 16 (condiciones) y FASE 1/FASE 2 (audio continuo + reloj): el cambio de
+frecuencia y de condición ahora se ve **poco a poco**, sin saltos:
+
+| Capa | Mecanismo | τ | Evidencia |
+|---|---|---|---|
+| Audio | `retune()`: `linearRampToValueAtTime` con `cancelScheduledValues` en osciladores y modulador AM | 1,5 s | código + audición |
+| Gotas | `visBase`/`visBeat` (EMA) alimentan `T1 = K_VIS/f` y el período del latido | 1,5 s | probe `visual` en navegador |
+| Cimática | `pBase` EMA + `_dropF` por gota (incluye f2=f1 en tono puro) | 1,5 s | probe + canvas |
+| Pulso | sigue anclado a `getBeatPhase()` real — solo morfa el ritmo, no la fase | — | sin drift |
+
+**Verificado en navegador:** Meditación (210/6) → Concentración (240/16):
+visual recorrió 218,5 → 228,3 → 233,7 → 236,7 Hz y latido 8,8 → 12,1 → 13,9
+→ 14,9 Hz; 240→210 en sentido inverso idéntico. `__platformProbe().visual`
+expone smoothed vs target. Sin errores de consola; 71/71 tests; build ✓.

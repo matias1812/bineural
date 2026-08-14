@@ -926,7 +926,10 @@ export class CymaticsRenderer {
    *   pulse: 0..1, fase del latido real (1 = justo en el pulso)
    */
   render(ctx, w, h, params) {
-    const { base = 220, beat = 6, pulse = 0.5, colors, playing = true } = params;
+    const { base = 220, beat = 6, pulse = 0.5, colors, playing = true, condition = 'binaural' } = params;
+    // Condiciones con batido real (binaural/AM): la placa respira con el
+    // latido. Las demás (tono puro, ruido, silencio) respiran a ritmo natural.
+    const rhythmicCond = () => condition === 'binaural' || condition === 'amplitude-modulation';
 
     // PHASE 3: Render Mode gate. All artistic (HEURISTIC/VISUAL) layers are
     // disabled in 'scientific' mode so only physically-derived Bessel eigenmodes
@@ -943,7 +946,9 @@ export class CymaticsRenderer {
     const dt = Math.min(0.1, t - this._lastT);
     this._lastT = t;
 
-    const target = playing ? 1 : 0;
+    // SILENCE control: no hay estímulo → la placa no se excita (agua en
+    // calma). Las demás condiciones mantienen la energía de vibración.
+    const target = playing && condition !== 'none' ? 1 : 0;
     this._energy += (target - this._energy) * (1 - Math.exp(-dt / 0.7));
     const env = this._energy;
 
@@ -955,6 +960,26 @@ export class CymaticsRenderer {
     const TAU_PHYS = 1.5; // seconds time-constant for physics state smoothing
     const emaK = 1 - Math.exp(-dt / TAU_PHYS);
     if (playing) {
+      // La condición experimental define el régimen de la placa (Fase 16):
+      //   binaural           → interferencia de dos frecuencias (coherencia media)
+      //   pure-tone          → patrón estacionario de UN tono (coherencia alta,
+      //                        complejidad baja: la flor simétrica del plato)
+      //   amplitude-mod...   → portadora con envolvente (velocidad alta)
+      //   noise              → régimen turbulento (coherencia baja, complejidad
+      //                        y velocidad altas: la estructura se rompe)
+      //   none               → reposo (la placa no se excita)
+      const CT = {
+        binaural:               { coherence: 0.6, velocity: 0.5, complexity: 0.55 },
+        'pure-tone':            { coherence: 0.85, velocity: 0.25, complexity: 0.25 },
+        'amplitude-modulation': { coherence: 0.7, velocity: 0.65, complexity: 0.5 },
+        noise:                  { coherence: 0.25, velocity: 0.85, complexity: 0.85 },
+        none:                   { coherence: 0.5, velocity: 0.2, complexity: 0.3 },
+      };
+      const ct = CT[condition] || CT.binaural;
+      this._physicsTarget.coherence     = ct.coherence;
+      this._physicsTarget.velocity      = ct.velocity;
+      this._physicsTarget.complexity    = ct.complexity;
+      this._physicsTarget.baseFrequency = base;
       this._physicsState.coherence     += (this._physicsTarget.coherence     - this._physicsState.coherence)     * emaK;
       this._physicsState.velocity      += (this._physicsTarget.velocity      - this._physicsState.velocity)      * emaK;
       this._physicsState.complexity    += (this._physicsTarget.complexity    - this._physicsState.complexity)    * emaK;
@@ -978,7 +1003,14 @@ export class CymaticsRenderer {
     if (env <= 0.18) pat = 0;
     else if (env >= 0.85) pat = 1;
     else pat = (env - 0.18) / 0.67;
-    const ampPattern = pat * pat * (3 - 2 * pat); // suavizado
+    let ampPattern = pat * pat * (3 - 2 * pat); // suavizado
+    // AMPLITUDE MODULATION: la placa entera respira a la velocidad de la
+    // envolvente real — el patrón crece y se retira con la modulación, no
+    // solo brilla (la estructura varía con la señal, como en el agua).
+    if (condition === 'amplitude-modulation') {
+      const pe = playing ? pulse : 0.5;
+      ampPattern *= 0.55 + 0.45 * (0.5 + 0.5 * Math.cos(TWO_PI * pe));
+    }
     const alive = 0.12 + 0.88 * env * env;
     const pulseEff = playing ? pulse : 0.5;
     const gain = 0.08 + 0.04 * ampPattern;
@@ -1006,7 +1038,9 @@ export class CymaticsRenderer {
     //
     // NOTE: The binaural beat (Δf) remains the STIMULUS; the visual system
     // maps it to the nearest physical eigenmode. These are distinct quantities.
-    const ws_beat = Math.PI * Math.max(1, beat); // sub-harmonic of beat
+    // En PURE TONE no hay batido: la gota central se afina a la resonancia
+    // de la propia portadora — el plato vibra en un único modo estacionario.
+    const ws_beat = Math.PI * Math.max(1, rhythmicCond() ? beat : base); // sub-harmonic of beat
     let bestD_beat = Infinity;
     let m_beat = 2, n_beat = 1;
     for (let mm = 2; mm <= 6; mm++) {
@@ -1032,11 +1066,28 @@ export class CymaticsRenderer {
     const C_SCI_WHITE = [220, 220, 240]; // near-white for scientific clarity
     const sciPals = [C_SCI_WHITE, C_SCI_WHITE, C_SCI_WHITE];
     const dropPals = sciMode ? sciPals : (colors && colors.length === 3 ? colors : [C_CYAN, C_INDIGO, C_CYAN]);
+    // NOISE: la turbulencia desentona las gotas — un ligero vaivén de
+    // frecuencia alrededor de la portadora rompe el patrón estacionario y
+    // las flores se reorganizan continuamente (la estructura se agita).
+    const nzW = (i) => 0.5 * Math.sin(t * 7.3 + i * 2.7) + 0.5 * Math.sin(t * 3.1 + i * 5.9);
+    const fR = condition === 'noise' ? 1 + 0.04 * nzW(0) : 1;
+    const fC = condition === 'noise' ? 1 + 0.04 * nzW(1) : 1;
+    const fL = condition === 'noise' ? 1 + 0.04 * nzW(2) : 1;
     const drops = [
-      { x: cx - step, f: pBase,              p0: 0.0, pal: dropPals[0], deep: shadeDeep(dropPals[0]) },
-      { x: cx,        f: Math.max(1, f_center), p0: 2.1, pal: dropPals[1], deep: shadeDeep(dropPals[1]) },
-      { x: cx + step, f: pBase + beat,       p0: 4.2, pal: dropPals[2], deep: shadeDeep(dropPals[2]) },
+      { x: cx - step, f: pBase * fR,                 p0: 0.0, pal: dropPals[0], deep: shadeDeep(dropPals[0]) },
+      { x: cx,        f: Math.max(1, f_center) * fC, p0: 2.1, pal: dropPals[1], deep: shadeDeep(dropPals[1]) },
+      { x: cx + step, f: (rhythmicCond() ? pBase + beat : pBase) * fL, p0: 4.2, pal: dropPals[2], deep: shadeDeep(dropPals[2]) },
     ];
+    // Transición de afinación: cuando cambia la portadora, el latido o la
+    // condición (p. ej. binaural → tono puro, que hace f2 = f1), las gotas
+    // se afinan GRADUALMENTE con la misma EMA (τ = 1,5 s) que el resto de la
+    // física — los modos dominantes se reorganizan poco a poco, sin que el
+    // patrón salte de golpe. El ruido conserva su vaivén sobre el valor suave.
+    if (!this._dropF) this._dropF = [pBase, pBase, pBase];
+    for (let i = 0; i < 3; i++) {
+      this._dropF[i] += (drops[i].f - this._dropF[i]) * emaK;
+      drops[i].f = Math.max(0.5, this._dropF[i]);
+    }
     const n = drops.length;
 
     // Evolución lenta de los modos: cada modo intercambia peso con los demás
@@ -1226,7 +1277,8 @@ export class CymaticsRenderer {
         (1 + 0.24 * Math.sin(TWO_PI * 0.14 * t + d.p0 * 2.4) +
           0.12 * Math.sin(TWO_PI * 0.33 * t + d.p0 * 5.2));
       // Precesión integrada: la fase ya incluye la evolución temporal.
-      rotDom[i] = this._rotPhase[i * 9 + 0];
+      // NOISE: precesión turbulenta — las flores se agitan sin rumbo fijo.
+      rotDom[i] = this._rotPhase[i * 9 + 0] + (condition === 'noise' ? 0.35 * Math.sin(t * 11.3 + d.p0 * 3.1) + 0.25 * Math.sin(t * 17.7 + d.p0 * 7.7) : 0);
       phaseDom[i] = d.p0 * 1.3;
       // Modos secundarios: los dos vecinos angulares más cercanos en
       // resonancia (dentro de m±2), con amplitud de Lorentz y suelo mínimo.
@@ -1380,11 +1432,14 @@ export class CymaticsRenderer {
       this._rotPhase[L + 8] += -0.5 * rotSpeed(delta, d.p0 * 1.9) * alive * dt;
     }
     this._rotSeeded = true;
+    // Solo las condiciones con batido real (binaural/AM) respiran al ritmo
+    // del latido; las demás respiran a un ritmo natural lento.
+    const visBeat = rhythmicCond() ? beat : 0.09;
     const wobA = new Array(n);
     for (let i = 0; i < n; i++) {
       // El borde de cada gota respira con el latido (la amplitud del patrón
       // vibra con el pulso real del AudioContext); en pausa queda quieto.
-      wobA[i] = 1 + 0.06 * Math.sin(TWO_PI * beat * t + drops[i].p0) * alive;
+      wobA[i] = 1 + 0.06 * Math.sin(TWO_PI * visBeat * t + drops[i].p0) * alive;
     }
     // Oscilación natural: cada modo tiembla a su propio ritmo (shimmer
     // desincronizado, como el batido real entre modos casi degenerados) y
@@ -1448,7 +1503,9 @@ export class CymaticsRenderer {
       ripCos[i] = Math.cos(TWO_PI * 0.5 * t + d.p0 * 1.1);
       ripTravel[i] = 0.17 * alive * pulseRip * (0.5 + 0.5 * Math.cos(surf));
       ripIn[i] = 0.17 * alive * pulseRip * (0.5 + 0.5 * Math.cos(surf + 2.1));
-      ripCol[i] = 0.11 * alive * (0.4 + 0.6 * Math.sin(TWO_PI * 0.09 * t + d.p0 * 1.7));
+      // El nodo de colisión es la interferencia de DOS ondas; sin batido
+      // (tono puro/ruido/silencio) apenas asoma.
+      ripCol[i] = (rhythmicCond() ? 0.11 : 0.045) * alive * (0.4 + 0.6 * Math.sin(TWO_PI * 0.09 * t + d.p0 * 1.7));
       cosCol[i] = Math.cos(TWO_PI * 0.07 * t + d.p0 * 1.3);
     }
     // Amplitud general: el patrón brilla con el latido real (pulseEff) y

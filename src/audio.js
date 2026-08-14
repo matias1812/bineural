@@ -16,8 +16,18 @@ export class BinauralEngine {
     this.analyser = null;
     this.leftOsc = null;
     this.rightOsc = null;
+    this.amGain = null; // condición AM: ganancia modulada por el LFO del ritmo
+    this.amLfo = null; // condición AM: oscilador del ritmo (modulador)
+    this._noiseBuf = null; // búfer de ruido reutilizable (condición 'noise')
     this.beat = 0;
     this._base = 0;
+    // Condición experimental real del estímulo (P18): binaural | pure-tone |
+    // noise | amplitude-modulation | none. Cambia lo que SE OYE, no solo el
+    // registro: binaural = dos tonos L/R (latido); pure-tone = un tono en
+    // ambos oídos (sin latido); amplitude-modulation = tono con envolvente al
+    // ritmo; noise = ruido sin contenido tonal; none = silencio (control).
+    this._condition = 'binaural';
+    this._playing = false;
     this.onBeatPulse = null;
     // Hook para el monitor de ciclo de vida: se dispara con cada cambio real
     // del AudioContext (running ↔ suspended) aunque no haya visibilitychange.
@@ -33,7 +43,7 @@ export class BinauralEngine {
   }
 
   get isPlaying() {
-    return this.leftOsc !== null;
+    return this._playing;
   }
 
   get currentBeat() {
@@ -144,35 +154,15 @@ export class BinauralEngine {
     return Math.sqrt(sum / fft);
   }
 
-  start({ base = 200, beat = 10, volume = 0.5, wave = 'sine' }) {
+  start({ base = 200, beat = 10, volume = 0.5, wave = 'sine', condition }) {
     const ctx = this.ensure();
     this.stopInstant();
+    if (condition) this._condition = condition;
     this._base = base;
     this.beat = beat;
-
-    const left = ctx.createOscillator();
-    const right = ctx.createOscillator();
-    left.type = wave;
-    right.type = wave;
-    left.frequency.value = base;
-    right.frequency.value = base + beat;
-
-    const leftGain = ctx.createGain();
-    leftGain.gain.value = 0.5;
-    const rightGain = ctx.createGain();
-    rightGain.gain.value = 0.5;
-    const leftPanner = ctx.createStereoPanner();
-    leftPanner.pan.value = -1;
-    const rightPanner = ctx.createStereoPanner();
-    rightPanner.pan.value = 1;
-
-    left.connect(leftGain).connect(leftPanner).connect(this.masterGain);
-    right.connect(rightGain).connect(rightPanner).connect(this.masterGain);
-
-    left.start();
-    right.start();
-    this.leftOsc = left;
-    this.rightOsc = right;
+    this._wave = wave;
+    this._playing = true;
+    this._createSources(base, beat, wave);
     // En modo 'element', arranca el elemento real dentro del gesto de play:
     // es ÉL el que el SO ve como reproducción (MediaSession, audio focus).
     if (this.transport) this.transport.play();
@@ -189,6 +179,158 @@ export class BinauralEngine {
     this.masterGain.gain.linearRampToValueAtTime(volume, now + 1.2);
 
     this._startPulse();
+  }
+
+  // ── Condición experimental: construye las fuentes del estímulo real ────────
+  // binaural             → dos osciladores L/R (base y base+latido), pan ±1
+  // pure-tone            → UN tono en ambos oídos (mismo centro): sin latido
+  // amplitude-modulation → portadora con envolvente AM a la frecuencia del ritmo
+  // noise                → ruido (sin contenido tonal) filtrado cerca de la portadora
+  // none                 → silencio (condición control; solo ambientes si los hay)
+  _createSources(base, beat, wave) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    switch (this._condition) {
+      case 'pure-tone': {
+        const osc = ctx.createOscillator();
+        osc.type = wave;
+        osc.frequency.value = base;
+        const g = ctx.createGain();
+        g.gain.value = 0.5;
+        osc.connect(g).connect(this.masterGain);
+        osc.start();
+        this.leftOsc = osc;
+        this.rightOsc = null;
+        break;
+      }
+      case 'amplitude-modulation': {
+        const osc = ctx.createOscillator();
+        osc.type = wave;
+        osc.frequency.value = base;
+        const am = ctx.createGain();
+        am.gain.value = 0.5;
+        const lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = beat;
+        const depth = ctx.createGain();
+        depth.gain.value = 0.42; // 0.5 ± 0.42: modulación profunda y rítmica
+        lfo.connect(depth).connect(am.gain);
+        osc.connect(am).connect(this.masterGain);
+        osc.start();
+        lfo.start();
+        this.leftOsc = osc;
+        this.rightOsc = null;
+        this.amGain = am;
+        this.amLfo = lfo;
+        break;
+      }
+      case 'noise': {
+        if (!this._noiseBuf) {
+          const len = Math.floor(ctx.sampleRate * 2);
+          const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+          const d = buf.getChannelData(0);
+          for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+          this._noiseBuf = buf;
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = this._noiseBuf;
+        src.loop = true;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = Math.min(6000, Math.max(250, base * 1.5));
+        bp.Q.value = 0.55;
+        const g = ctx.createGain();
+        g.gain.value = 0.32;
+        src.connect(bp).connect(g).connect(this.masterGain);
+        src.start();
+        this.leftOsc = src;
+        this.rightOsc = null;
+        break;
+      }
+      case 'none':
+        // Control de silencio: no hay estímulo (la sesión sigue "corriendo",
+        // los ambientes seleccionados sí suenan a través del master).
+        this.leftOsc = null;
+        this.rightOsc = null;
+        break;
+      default: {
+        // binaural (comportamiento original)
+        const left = ctx.createOscillator();
+        const right = ctx.createOscillator();
+        left.type = wave;
+        right.type = wave;
+        left.frequency.value = base;
+        right.frequency.value = base + beat;
+        const leftGain = ctx.createGain();
+        leftGain.gain.value = 0.5;
+        const rightGain = ctx.createGain();
+        rightGain.gain.value = 0.5;
+        const leftPanner = ctx.createStereoPanner();
+        leftPanner.pan.value = -1;
+        const rightPanner = ctx.createStereoPanner();
+        rightPanner.pan.value = 1;
+        left.connect(leftGain).connect(leftPanner).connect(this.masterGain);
+        right.connect(rightGain).connect(rightPanner).connect(this.masterGain);
+        left.start();
+        right.start();
+        this.leftOsc = left;
+        this.rightOsc = right;
+      }
+    }
+  }
+
+  // Cambia la condición experimental EN VIVO con un crossfade corto (sin
+  // clics ni reinicio de sesión): baja al piso, reconstruye las fuentes y
+  // sube suave al volumen de la sesión. Con la sesión detenida solo queda
+  // almacenada para el próximo start().
+  setCondition(cond) {
+    const c = cond || 'binaural';
+    if (c === this._condition) return;
+    this._condition = c;
+    if (!this.ctx || !this._playing) return;
+    const now = this.ctx.currentTime;
+    const vol = this._volume != null ? this._volume : 0.5;
+    try {
+      this.masterGain.gain.cancelScheduledValues(now);
+      this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
+      this.masterGain.gain.linearRampToValueAtTime(0.0001, now + 0.12);
+    } catch (_) {
+      /* contexto cerrado */
+    }
+    this._teardownSources();
+    this._createSources(this._base, this.beat, this._wave || 'sine');
+    const t1 = now + 0.12;
+    try {
+      this.masterGain.gain.setValueAtTime(0.0001, t1);
+      this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, vol), t1 + 0.3);
+    } catch (_) {
+      /* contexto cerrado */
+    }
+    // Re-época del latido: el nuevo estímulo arranca su propia fase 0.
+    this._epoch = this.ctx.currentTime + 0.3;
+    this.clock.setEpoch(this._epoch);
+    this._startPulse();
+  }
+
+  _teardownSources() {
+    const nodes = [this.leftOsc, this.rightOsc, this.amLfo, this.amGain];
+    this.leftOsc = null;
+    this.rightOsc = null;
+    this.amLfo = null;
+    this.amGain = null;
+    nodes.forEach((n) => {
+      if (!n) return;
+      try {
+        if (typeof n.stop === 'function') n.stop();
+      } catch (_) {
+        /* ya detenido */
+      }
+      try {
+        n.disconnect();
+      } catch (_) {
+        /* ya desconectado */
+      }
+    });
   }
 
   setVolume(v) {
@@ -216,18 +358,32 @@ export class BinauralEngine {
   // sin reiniciar los osciladores ni cortar el sonido: al cambiar de estado
   // la portadora y el latido se deslizan hasta los valores nuevos en 1.5s.
   retune({ base, beat }) {
-    if (!this.ctx || !this.leftOsc) return;
+    if (!this.ctx || !this._playing) return;
     const now = this.ctx.currentTime;
-    
-    // Transición ultra-suave cancelando valores previos
-    this.leftOsc.frequency.cancelScheduledValues(now);
-    this.leftOsc.frequency.setValueAtTime(this.leftOsc.frequency.value, now);
-    this.leftOsc.frequency.linearRampToValueAtTime(base, now + 1.5);
-    
-    this.rightOsc.frequency.cancelScheduledValues(now);
-    this.rightOsc.frequency.setValueAtTime(this.rightOsc.frequency.value, now);
-    this.rightOsc.frequency.linearRampToValueAtTime(base + beat, now + 1.5);
-    
+    // En silencio (condición control) solo se guardan los valores.
+    if (this._condition === 'none') {
+      this._base = base;
+      this.beat = beat;
+      return;
+    }
+    // Transición ultra-suave cancelando valores previos. Las fuentes según
+    // condición: binaural tiene L/R; pure-tone/AM solo la portadora; noise no
+    // tiene frecuencia (se omite).
+    if (this.leftOsc && this.leftOsc.frequency) {
+      this.leftOsc.frequency.cancelScheduledValues(now);
+      this.leftOsc.frequency.setValueAtTime(this.leftOsc.frequency.value, now);
+      this.leftOsc.frequency.linearRampToValueAtTime(base, now + 1.5);
+    }
+    if (this.rightOsc && this.rightOsc.frequency) {
+      this.rightOsc.frequency.cancelScheduledValues(now);
+      this.rightOsc.frequency.setValueAtTime(this.rightOsc.frequency.value, now);
+      this.rightOsc.frequency.linearRampToValueAtTime(base + beat, now + 1.5);
+    }
+    // AM: el modulador del ritmo sigue al latido nuevo.
+    if (this.amLfo && this.amLfo.frequency) {
+      this.amLfo.frequency.cancelScheduledValues(now);
+      this.amLfo.frequency.linearRampToValueAtTime(beat, now + 1.5);
+    }
     this._base = base;
     this.beat = beat;
   }
@@ -235,15 +391,16 @@ export class BinauralEngine {
   // Cambia la forma de onda en vivo: el tipo del oscilador es mutable, así
   // que se puede cambiar sobre la marcha sin cortar ni reiniciar el sonido.
   setWave(wave) {
-    if (this.leftOsc) this.leftOsc.type = wave;
-    if (this.rightOsc) this.rightOsc.type = wave;
+    this._wave = wave;
+    if (this.leftOsc && this.leftOsc.type !== undefined) this.leftOsc.type = wave;
+    if (this.rightOsc && this.rightOsc.type !== undefined) this.rightOsc.type = wave;
   }
 
   // Desvanece el volumen maestro a cero (fade-out) durante `duration` ms y
   // avisa al terminar, para que el final del temporizador no corte en seco.
   fadeAndStop(duration = 2000, done) {
     const ctx = this.ctx;
-    if (!ctx || !this.leftOsc) {
+    if (!ctx || !this._playing) {
       if (done) done();
       return;
     }
@@ -262,7 +419,9 @@ export class BinauralEngine {
   _startPulse() {
     if (this._pulseTimer) clearTimeout(this._pulseTimer);
     const tick = () => {
-      if (!this.leftOsc) return;
+      if (!this._playing) return;
+      // Sin latido percibido (tono puro, ruido, silencio): no hay pulso.
+      if (this._condition === 'pure-tone' || this._condition === 'noise' || this._condition === 'none') return;
       if (this.onBeatPulse) this.onBeatPulse();
       let delay = this.beat > 0 ? 1000 / this.beat : 1000;
       if (this.ctx && this._epoch != null) {
@@ -279,7 +438,10 @@ export class BinauralEngine {
   // 0 = justo el latido, igual que el pulso que ven las gotas del visualizador.
   // Derivada del AudioClock (AudioContext.currentTime): sin drift por timers.
   getBeatPhaseAt(time) {
-    if (!this.ctx || this._epoch == null || !this.leftOsc || !this.beat) return null;
+    if (!this.ctx || this._epoch == null || !this._playing || !this.beat) return null;
+    // Solo las condiciones rítmicas (binaural, AM) tienen fase de latido; las
+    // demás no perciben beat y el visualizador vuelve a la respiración suave.
+    if (this._condition === 'pure-tone' || this._condition === 'noise' || this._condition === 'none') return null;
     return this.clock.beatPhase(this.beat, time);
   }
 
@@ -300,7 +462,8 @@ export class BinauralEngine {
       currentTime: this.ctx.currentTime,
       gain: this.masterGain ? this.masterGain.gain.value : 0,
       rms: this.getRms(),
-      oscillatorCount: this.leftOsc ? 2 : 0,
+      oscillatorCount: (this.leftOsc ? (this.rightOsc ? 2 : 1) : 0) + (this.amLfo ? 1 : 0),
+      condition: this._condition,
     };
   }
 
@@ -310,28 +473,36 @@ export class BinauralEngine {
   }
 
   stop(fade = true) {
-    if (!this.ctx || !this.leftOsc) return;
-    const oscs = [this.leftOsc, this.rightOsc];
+    if (!this.ctx || !this._playing) return;
+    const nodes = [this.leftOsc, this.rightOsc, this.amLfo, this.amGain];
     if (this.transport) this.transport.pause();
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
     this.masterGain.gain.linearRampToValueAtTime(0.0001, now + (fade ? 1 : 0.05));
+    this._playing = false;
     this.leftOsc = null;
     this.rightOsc = null;
+    this.amLfo = null;
+    this.amGain = null;
     if (this._pulseTimer) {
       clearTimeout(this._pulseTimer);
       this._pulseTimer = null;
     }
     setTimeout(
       () =>
-        oscs.forEach((o) => {
+        nodes.forEach((n) => {
+          if (!n) return;
           try {
-            o.stop();
+            n.stop();
           } catch (_) {
             /* ya detenido */
           }
-          o.disconnect();
+          try {
+            n.disconnect();
+          } catch (_) {
+            /* ya desconectado */
+          }
         }),
       fade ? 1100 : 80,
     );

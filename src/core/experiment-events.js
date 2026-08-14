@@ -57,6 +57,13 @@ export class ExperimentEventLog {
     this.interruptions = [];
   }
 
+  /** La condición experimental cambió a mitad de sesión (registro honesto).
+   *  No altera la exposición ni la integridad: solo documenta el cambio de
+   *  estímulo real (binaural → tono puro, ruido, AM o silencio). */
+  conditionChanged(payload = {}) {
+    this._record('conditionChanged', payload);
+  }
+
   /** La sesión comienza a sonar. */
   start(payload = {}) {
     if (this.startWall != null) return;

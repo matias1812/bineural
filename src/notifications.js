@@ -291,16 +291,42 @@ export function buildIcs(alarm) {
   ].join('\r\n');
 }
 
-export function downloadIcs(alarm) {
-  const blob = new Blob([buildIcs(alarm)], { type: 'text/calendar;charset=utf-8' });
+// Exporta el .ics con UN toque: en móvil abre el share sheet del sistema
+// (Guardar en Archivos / Calendario / Google Calendar) vía Web Share API, y
+// en escritorio descarga el archivo directamente. En iOS el atributo
+// `download` de los blob URLs no funciona en el navegador; el share es el
+// camino "automático" para que el botón funcione siempre.
+export async function downloadIcs(alarm) {
+  const fileName = `vyneural-${String(alarm.time || 'sesion').replace(':', '-')}-${Math.round(alarm.freq)}hz.ics`;
+  const ics = buildIcs(alarm);
+  try {
+    // Web Share API Level 2: compartir el archivo .ics (móvil y algunos
+    // escritorios). Un toque → el usuario elige dónde guardarlo.
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.share) {
+      const file = new File([ics], fileName, { type: 'text/calendar' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Recordatorio Vyneural · ${Math.round(alarm.freq)} Hz`,
+          text: `Sesión de ondas binaurales de ${Math.round(alarm.freq)} Hz el ${new Date(alarm.nextAt).toLocaleString()}`,
+        });
+        return true; // compartido/guardado
+      }
+    }
+  } catch {
+    /* el usuario canceló el share: seguir con la descarga */
+  }
+  // Fallback: descarga directa (escritorio / sin Web Share).
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `vyneural-${alarm.time.replace(':', '-')}-${Math.round(alarm.freq)}hz.ics`;
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return false;
 }
 
 

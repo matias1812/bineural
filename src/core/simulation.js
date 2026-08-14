@@ -100,7 +100,8 @@ export class SimulationEngine {
       base: baseFreq || this.currentProfile.stimulus.carrierBase,
       beat: this.currentProfile.stimulus.beat,
       wave: this.currentProfile.stimulus.modulation,
-      volume: 0.6 // Controlled from UI elsewhere
+      volume: 0.6, // Controlled from UI elsewhere
+      condition: this.audio._condition || 'binaural', // condición experimental real
     };
     
     this.audio.start(params);
@@ -241,7 +242,9 @@ export class SimulationEngine {
   // consume batería y, si el SO vuelve a suspender, produce clics al volver.
   // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
   _audioWatchdog() {
-    if (this.isPlaying && this.audio && this.audio.ctx && !document.hidden) {
+    // La condición 'none' es silencio deliberado (control): el watchdog no
+    // debe intentar "recuperar" una sesión que no tiene estímulo.
+    if (this.isPlaying && this.audio && this.audio.ctx && this.audio._condition !== 'none' && !document.hidden) {
       this._healthFrames++;
       if (this._healthFrames % 30 === 0) {
         const health = evaluateAudioHealth({
