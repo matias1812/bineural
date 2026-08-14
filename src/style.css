@@ -61,6 +61,7 @@ body {
   opacity: 0.85;
 }
 
+
 /* ---------------------------------------------------------------- Loader */
 .loader {
   position: fixed;
@@ -936,6 +937,54 @@ body {
   background: rgba(0, 0, 0, 0.25);
 }
 
+/* Interruptor para elegir la simulación: 💧 Gotas (ondas en agua) o
+   🔮 Cimática (placa de Faraday). Flota sobre el visualizador. */
+.viz-switch {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(11, 13, 18, 0.72);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.viz-switch-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s ease;
+}
+
+.viz-switch-btn:hover {
+  color: var(--text);
+}
+
+.viz-switch-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.24), rgba(99, 102, 241, 0.24));
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+}
+
+.viz-switch-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -1469,6 +1518,11 @@ body {
 
   #visualizer {
     height: 260px;
+  }
+
+  /* Debajo de los botones de la esquina (historial/campana) para no taparlos. */
+  .viz-switch {
+    top: 62px;
   }
 
   .slider-row,
@@ -2236,7 +2290,8 @@ body.immersive .controls {
     border-radius: 0;
   }
   body.immersive .visual-panel .legend,
-  body.immersive .visual-panel .status {
+  body.immersive .visual-panel .status,
+  body.immersive .viz-switch {
     display: none;
   }
 }
@@ -2789,4 +2844,494 @@ body.immersive .controls {
 .custom-beat-only .wave-options {
   margin-top: 8px;
   justify-content: flex-start;
+}
+
+/* ---------------------------------------------------------------- Scientific HUD */
+/* El panel científico se oculta por defecto con la clase .hidden (utilidad
+   global display:none !important) y se abre con el botón hud-btn. */
+.scientific-hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 250px;
+  background: rgba(10, 10, 15, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'Space Mono', monospace, sans-serif;
+  font-size: 11px;
+  color: var(--text-dim);
+  z-index: 1000;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hud-header {
+  font-weight: bold;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.hud-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.hud-row span:last-child {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.hud-warning {
+  color: #fb7185 !important;
+}
+
+/* Scientific HUD: honest-provenance tags and collapse behavior (Fase 17). */
+.hud-header {
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hud-collapse {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.scientific-hud.collapsed .hud-body {
+  display: none;
+}
+
+.hud-prov {
+  float: right;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #fbbf24;
+  opacity: 0.9;
+}
+
+.hud-row i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.8;
+  margin-left: 3px;
+}
+
+.hud-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Botón del panel científico: estado activo cuando el panel está abierto. */
+.icon-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---------------------------------------------------------------- Modo experimental */
+.experiment-card {
+  max-width: 560px;
+}
+
+.exp-intro {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+
+.exp-field {
+  margin-bottom: 12px;
+}
+
+.exp-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.exp-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exp-cond {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.exp-cond:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.exp-cond.active {
+  color: #0b0d1a;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.exp-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.exp-slider input[type='range'] {
+  width: 100%;
+}
+
+.exp-value {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.exp-results {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+}
+
+.exp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.exp-head b {
+  color: var(--accent);
+}
+
+.exp-head span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.exp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.exp-block {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.exp-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+
+.exp-title em {
+  font-style: normal;
+  float: right;
+  color: #fbbf24;
+  opacity: 0.9;
+}
+
+.exp-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.exp-line b {
+  color: var(--text);
+}
+
+.exp-band {
+  display: grid;
+  grid-template-columns: 92px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.exp-band span {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exp-band em {
+  font-style: normal;
+  font-size: 9px;
+  color: #fbbf24;
+  opacity: 0.8;
+  margin-left: 3px;
+}
+
+.exp-band b {
+  color: var(--text);
+  text-align: right;
+  font-weight: 500;
+}
+
+.exp-band b i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.exp-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.exp-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), #a78bfa);
+}
+
+.exp-psd {
+  width: 100%;
+  height: 120px;
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.exp-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.exp-error {
+  color: #fb7185;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.exp-export {
+  margin-top: 12px;
+  width: 100%;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.exp-export:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 560px) {
+  .exp-grid,
+  .exp-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------- Más opciones (⋯) */
+.more-btn {
+  position: absolute;
+  top: 18px;
+  right: 66px;
+  width: 38px;
+  height: 38px;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  z-index: 2;
+}
+
+.more-menu {
+  position: absolute;
+  top: 62px;
+  right: 66px;
+  z-index: 20;
+  min-width: 220px;
+  background: #14162b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.more-item .ico {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+.more-item small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  opacity: 0.85;
+  margin-top: 1px;
+}
+
+.more-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.more-item.active {
+  color: var(--accent);
+}
+
+.more-item.active small {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+@media (max-width: 420px) {
+  .more-menu {
+    right: 12px;
+  }
+}
+
+/* ---------------------------------------------------------------- Permisos de la web */
+.perm-intro {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.perm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.perm-state {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+}
+
+.perm-state.ok {
+  color: #4ade80;
+}
+
+.perm-state.bad {
+  color: #fb7185;
+}
+
+.perm-state.warn {
+  color: #fbbf24;
+}
+
+.perm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.perm-actions .quick-start {
+  flex: 1;
+}
+
+.perm-off {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.perm-off:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.perm-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 14px;
+  line-height: 1.5;
 }

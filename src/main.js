@@ -3,6 +3,11 @@ import { inject } from '@vercel/analytics';
 import { BinauralEngine } from './audio.js';
 import { AmbientEngine } from './ambient.js';
 import { WaveField } from './wavefield.js';
+import { CymaticsRenderer } from './cymatics.js';
+import { SimulationEngine } from './core/simulation.js';
+import { ExperimentRunner } from './core/experiments.js';
+import { SimulationConfig, experimentToJson } from './core/reproducibility.js';
+import { PROFILES, getProfileById } from './models/profiles.js';
 import { initStarfield } from './starfield.js';
 import {
   getAlarms,
@@ -18,13 +23,21 @@ import {
   startAlarmWatcher,
 } from './notifications.js';
 
+import { runBineuralDiagnostics } from './validation/diagnostics.js';
+
 // Initialize Vercel Analytics (no-op in development)
 inject();
 
-initStarfield();
+// Expose diagnostics to console
+window.runBineuralDiagnostics = runBineuralDiagnostics;
 
-const engine = new BinauralEngine();
+// Controlador del fondo espacial (fondo decorativo de estrellas).
+const starfield = initStarfield();
+
+const cymatics = new CymaticsRenderer();
+const simulation = new SimulationEngine(cymatics);
 const ambient = new AmbientEngine();
+simulation.ambient = ambient; // Link for auditory masking model
 
 // ---------------------------------------------------------------- Iconos SVG
 // Reemplazan a los emojis: iconos de trazo (estilo Lucide) que heredan el
@@ -85,38 +98,9 @@ const ICONS = {
   compress: icon('<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>'),
 };
 
-// ---------------------------------------------------------------- Estados
-const STATES = [
-  { id: 'meditacion', icon: ICONS.meditacion, name: 'Meditación', desc: 'Calma mental profunda y claridad interior', band: 'Theta · 6 Hz', color: '#a78bfa', base: 210, beat: 6, featured: true },
-  { id: 'sueno', icon: ICONS.sueno, name: 'Sueño profundo', desc: 'Relajación total para un descanso profundo', band: 'Delta · 2 Hz', color: '#60a5fa', base: 170, beat: 2, featured: true },
-  { id: 'relajacion', icon: ICONS.relajacion, name: 'Relajación', desc: 'Reduce el estrés y la ansiedad del día', band: 'Alpha · 10 Hz', color: '#34d399', base: 200, beat: 10, featured: true },
-  { id: 'concentracion', icon: ICONS.concentracion, name: 'Concentración', desc: 'Atención sostenida y mayor productividad', band: 'Beta · 16 Hz', color: '#fbbf24', base: 240, beat: 16, featured: true },
-  { id: 'energia', icon: ICONS.energia, name: 'Energía', desc: 'Estado de alerta, vitalidad y motivación', band: 'Beta · 25 Hz', color: '#fb7185', base: 260, beat: 25 },
-  { id: 'creatividad', icon: ICONS.creatividad, name: 'Creatividad', desc: 'Flujo creativo e inspiración', band: 'Theta · 8 Hz', color: '#f0abfc', base: 220, beat: 8, featured: true },
-  { id: 'aprendizaje', icon: ICONS.aprendizaje, name: 'Aprendizaje', desc: 'Memoria y procesamiento profundo', band: 'Gamma · 40 Hz', color: '#f97316', base: 280, beat: 40, featured: true },
-  { id: 'schumann', icon: ICONS.schumann, name: 'Resonancia Schumann', desc: 'La frecuencia de la Tierra: calma y conexión', band: 'Schumann · 7.83 Hz', color: '#4ade80', base: 190, beat: 7.83, featured: true },
-  { id: 'sueno-ligero', icon: ICONS['sueno-ligero'], name: 'Sueño ligero', desc: 'Transición suave hacia el descanso', band: 'Delta · 3 Hz', color: '#818cf8', base: 180, beat: 3, featured: true },
-
-  { id: 'profundidad', icon: ICONS.profundidad, name: 'Profundidad', desc: 'Inmersión total en el descanso', band: 'Delta · 1 Hz', color: '#6d6ee8', base: 160, beat: 1 },
-  { id: 'calma', icon: ICONS.calma, name: 'Calma', desc: 'Serenidad ligera para el día a día', band: 'Theta · 5 Hz', color: '#2dd4bf', base: 195, beat: 5 },
-  { id: 'intuicion', icon: ICONS.intuicion, name: 'Intuición', desc: 'Conexión interior y claridad sutil', band: 'Theta · 4.5 Hz', color: '#a78bfa', base: 205, beat: 4.5 },
-  { id: 'lucidez', icon: ICONS.lucidez, name: 'Lucidez', desc: 'Mente despejada y foco agudo', band: 'Beta · 18 Hz', color: '#f59e0b', base: 250, beat: 18 },
-  { id: 'alerta', icon: ICONS.alerta, name: 'Alerta', desc: 'Energía y disposición inmediata', band: 'Beta · 22 Hz', color: '#f87171', base: 270, beat: 22 },
-  { id: 'memoria', icon: ICONS.memoria, name: 'Memoria', desc: 'Para acompañar el estudio y el repaso', band: 'Gamma · 32 Hz', color: '#fb923c', base: 300, beat: 32 },
-  { id: 'armonia', icon: ICONS.armonia, name: 'Armonía', desc: 'Equilibrio emocional y bienestar', band: 'Alfa · 9 Hz', color: '#38bdf8', base: 215, beat: 9 },
-  { id: 'despertar', icon: ICONS.despertar, name: 'Despertar', desc: 'Saliendo del sueño con suavidad', band: 'Alfa · 12 Hz', color: '#fbbf24', base: 230, beat: 12 },
-  { id: 'foco', icon: ICONS.foco, name: 'Foco profundo', desc: 'Atención sostenida sin distraerte', band: 'Beta · 14 Hz', color: '#34d399', base: 260, beat: 14 },
-  { id: 'renovacion', icon: ICONS.renovacion, name: 'Renovación', desc: 'Descanso reparador de la noche', band: 'Delta · 2.5 Hz', color: '#4ade80', base: 175, beat: 2.5 },
-  { id: 'silencio', icon: ICONS.silencio, name: 'Silencio interior', desc: 'Vacío mental y paz profunda', band: 'Theta · 3.5 Hz', color: '#c4b5fd', base: 200, beat: 3.5 },
-  { id: 'vitalidad', icon: ICONS.vitalidad, name: 'Vitalidad', desc: 'Arrancar el día con energía', band: 'Beta · 20 Hz', color: '#fde047', base: 265, beat: 20 },
-  { id: 'vision', icon: ICONS.vision, name: 'Visión clara', desc: 'Claridad mental y comprensión rápida', band: 'Gamma · 38 Hz', color: '#f472b6', base: 310, beat: 38 },
-  { id: 'estudio', icon: ICONS.estudio, name: 'Estudio', desc: 'Concentración para aprender', band: 'Beta · 15 Hz', color: '#93c5fd', base: 245, beat: 15 },
-  { id: 'paz', icon: ICONS.paz, name: 'Paz', desc: 'Serenidad total en el presente', band: 'Theta · 4 Hz', color: '#e0e7ff', base: 190, beat: 4 },
-  { id: 'equilibrio', icon: ICONS.equilibrio, name: 'Equilibrio', desc: 'Calma y estabilidad emocional', band: 'Alfa · 7 Hz', color: '#5eead4', base: 210, beat: 7 },
-  { id: 'gateway', icon: ICONS.gateway, name: 'Gateway', desc: 'El experimento: expansión de conciencia (Foco 10)', band: 'Theta · 4 Hz', color: '#a78bfa', base: 200, beat: 4 },
-  { id: 'hemisync', icon: ICONS.hemisync, name: 'Hemi-Sync', desc: 'Sincronización de hemisferios (Foco 12)', band: 'Theta · 5.5 Hz', color: '#818cf8', base: 210, beat: 5.5 },
-  { id: 'personalizado', icon: ICONS.personalizado, name: 'Personalizado', desc: 'Diseña tu propia frecuencia a tu gusto', band: 'A tu medida', color: '#22d3ee', base: 220, beat: 10, custom: true },
-];
+// Inject icons from ICONS into each PROFILE so the card renderer has `profile.icon`
+PROFILES.forEach(p => { p.icon = ICONS[p.iconKey] || ''; });
+const STATES = PROFILES;
 
 // ---------------------------------------------------------------- DOM
 const grid = document.getElementById('states-grid');
@@ -170,6 +154,9 @@ let ACCENT_RGB = [167, 139, 250];
 const LS_SESSION = 'ob-session-v1';
 const LS_FAVS = 'ob-favs-v1';
 const LS_HISTORY = 'ob-history-v1';
+// Visualizador elegido: 'gotas' (simulación de ondas actual) o 'cimatica'
+// (placa circular con gotas de Faraday). Persistente entre visitas.
+const LS_VIZ = 'ob-viz-v1';
 
 function lsGet(key, fallback) {
   try {
@@ -216,14 +203,14 @@ let favorites = new Set(lsGet(LS_FAVS, []));
 // Los estados se organizan por objetivo (Dormir, Meditar, Relajarse…):
 // enfoque de usuario en vez de bandas técnicas, con encabezado por grupo.
 const GOALS = [
-  { id: 'dormir', label: 'Dormir', emoji: '😴', bands: ['delta'], tagline: 'Descanso profundo' },
-  { id: 'meditar', label: 'Meditar', emoji: '🧘', bands: ['theta'], tagline: 'Calma y creatividad' },
-  { id: 'relajarse', label: 'Relajarse', emoji: '🌿', bands: ['alfa'], tagline: 'Suelta el estrés' },
-  { id: 'concentrarse', label: 'Concentrarse', emoji: '🧠', bands: ['beta'], tagline: 'Foco y productividad' },
-  { id: 'aprender', label: 'Aprender', emoji: '📚', bands: ['gamma'], tagline: 'Memoria y aprendizaje' },
-  { id: 'especiales', label: 'Especiales', emoji: '✨', bands: ['schumann', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
+  { id: 'dormir', label: 'Dormir', emoji: '😴', stateIds: ['sueno', 'sueno-ligero', 'profundidad', 'renovacion'], tagline: 'Descanso profundo' },
+  { id: 'meditar', label: 'Meditar', emoji: '🧘', stateIds: ['meditacion', 'intuicion', 'silencio', 'paz', 'equilibrio', 'gateway', 'hemisync'], tagline: 'Calma y conexión' },
+  { id: 'relajarse', label: 'Relajarse', emoji: '🌿', stateIds: ['relajacion', 'calma', 'armonia', 'despertar'], tagline: 'Suelta el estrés' },
+  { id: 'concentrarse', label: 'Concentrarse', emoji: '🧠', stateIds: ['concentracion', 'energia', 'creatividad', 'lucidez', 'alerta', 'foco', 'vitalidad', 'estudio'], tagline: 'Foco y productividad' },
+  { id: 'aprender', label: 'Aprender', emoji: '📚', stateIds: ['aprendizaje', 'memoria', 'vision'], tagline: 'Memoria y retención' },
+  { id: 'especiales', label: 'Especiales', emoji: '✨', stateIds: ['schumann', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
 ];
-const goalOf = (s) => GOALS.find((g) => g.bands.includes(bandKeyOf(s)));
+const goalOf = (s) => GOALS.find((g) => g.stateIds.includes(s.id)) || GOALS[1];
 
 // Construye la rejilla en grupos (sección con encabezado + sub-rejilla).
 const groups = GOALS.map((goal) => {
@@ -355,9 +342,11 @@ function selectState(state) {
   updateCustomPanel();
   updateStatus();
   updateCarrierWarning();
+  
+  // Set the profile on the simulation engine
+  simulation.setProfile(state, currentParams().base);
+  
   if (playing) {
-    // Transición suave: las frecuencias se deslizan sin cortar el sonido.
-    engine.retune(currentParams());
     applyAmbient();
   }
   saveSession();
@@ -386,30 +375,30 @@ function currentParams() {
   } else {
     base = selected.base; // estándar: la base propia del estado
   }
-  const beat = selected.custom ? parseFloat(customBeat.value) : selected.beat;
+  const beat = selected.custom ? parseFloat(customBeat.value) : (selected.stimulus ? selected.stimulus.beat : 10);
   const wave = selectedWave;
   return { base, beat, wave, volume: volumeLevel };
 }
 
 function applyAudio() {
-  engine.start(currentParams());
+  simulation.start(currentParams().base);
+  // Aplica el volumen del slider a la sesión: el motor arranca con un valor
+  // por defecto y aquí se re-afirma el nivel real elegido por el usuario.
+  simulation.setVolume(volumeLevel);
   applyAmbient();
 }
 
 function applyAmbient() {
   if (!playing) return;
-  ambient.attach(engine.ctx, engine.masterGain);
-  ambient.syncToEngine(engine);
+  ambient.attach(simulation.audio.ctx, simulation.audio.masterGain);
+  ambient.syncToEngine(simulation.audio);
   ambient.setVolume(ambientVolumeLevel);
   // Las capas activas coinciden con los botones elegidos y la respiración
   // queda alineada a la fase del latido (mismo reloj que las ondas).
-  ambient.applySet(ambientTypes, currentParams().beat, engine.getBeatEpoch());
+  ambient.applySet(ambientTypes, currentParams().beat, simulation.audio.getBeatEpoch());
 }
 
 function start() {
-  engine.onBeatPulse = () => {
-    lastPulse = performance.now();
-  };
   // `playing` se marca antes de applyAudio(): applyAmbient() depende de él
   // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
@@ -422,13 +411,24 @@ function start() {
   updateStatus();
   armTimer();
   saveSession();
+  // Permisos: notificaciones + WakeLock en el mismo gesto del usuario (play).
+  // WakeLock impide que el SO interrumpa el audio al bloquear la pantalla.
+  requestMediaNotificationPermission();
+  // WakeLock ya se adquiere dentro de requestMediaNotificationPermission → requestAllPermissions.
+  // En iPhone el controlador del reproductor solo aparece si la PWA está
+  // instalada; se avisa una sola vez para que el usuario lo sepa.
+  if (iosNeedsInstall() && !lsGet('vyneural_ios_hint', false)) {
+    lsSet('vyneural_ios_hint', true);
+    showToast('💡 Para controlar el reproductor desde la pantalla de bloqueo, instala Bineural: Compartir → Añadir a pantalla de inicio.');
+  }
 }
 
 // stop(withSummary): el resumen se muestra cuando la sesión termina por el
 // temporizador (endSession), no al pausar manualmente.
 function stop(withSummary) {
-  engine.stop(true);
+  simulation.stop();
   ambient.stopAll();
+  releaseWakeLock(); // liberar pantalla activa al pausar
   playing = false;
   playBtn.classList.remove('playing');
   playBtn.innerHTML = ICONS.play;
@@ -539,10 +539,16 @@ document.getElementById('history-modal').addEventListener('click', (e) => {
   if (e.target === document.getElementById('history-modal')) closeHistory();
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !document.getElementById('history-modal').classList.contains('hidden')) {
+  if (e.key === 'Escape' && moreMenu && !moreMenu.classList.contains('hidden')) {
+    closeMoreMenu();
+  } else if (e.key === 'Escape' && !document.getElementById('history-modal').classList.contains('hidden')) {
     closeHistory();
   } else if (e.key === 'Escape' && !document.getElementById('summary-modal').classList.contains('hidden')) {
     closeSessionSummary();
+  } else if (e.key === 'Escape' && !document.getElementById('experiment-modal').classList.contains('hidden')) {
+    closeExperiment();
+  } else if (e.key === 'Escape' && !document.getElementById('permissions-modal').classList.contains('hidden')) {
+    closePermissions();
   }
 });
 
@@ -556,6 +562,7 @@ const BACKUP_KEYS = [
   'ob-favs-v1', // estados favoritos
   'ob-history-v1', // historial de sesiones
   'ob-carrier-v1', // portadora elegida
+  'ob-viz-v1', // visualizador elegido (gotas / cimática)
   'ob-quickstart-v1', // inicio rápido ya visto
   'ob-install-v1', // banner de instalación cerrado
   'vyneural-cookie-consent', // elección del aviso de privacidad
@@ -702,7 +709,7 @@ function setVolume(v) {
   volumeLevel = parseFloat(v);
   volume.value = String(volumeLevel);
   if (volumeLabel) volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
-  engine.setVolume(volumeLevel);
+  simulation.setVolume(volumeLevel);
   saveSession();
 }
 volume.addEventListener('input', () => setVolume(volume.value));
@@ -730,6 +737,7 @@ function tickTimer() {
   const m = Math.floor(remain / 60);
   const s = remain % 60;
   timerDisplay.innerHTML = `${ICONS.clock} ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  updateMediaPosition();
   if (remain <= 0) endSession();
 }
 
@@ -745,14 +753,22 @@ function endSession() {
     try {
       new Notification('Vyneural', {
         body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        tag: 'vyneural-session-end',
       });
     } catch (_) {
       /* el navegador rechazó la notificación */
     }
   }
-  engine.fadeAndStop(1800, () => {
+  // Época de la sesión que termina: si el usuario pulsa play durante el
+  // fundido (fade de 1,8 s), el callback diferido no debe detener la sesión
+  // nueva (sessionStartTime cambia en start()).
+  const epoch = sessionStartTime;
+  simulation.audio.fadeAndStop(1800, () => {
     fading = false;
     timerDisplay.classList.add('hidden');
+    if (sessionStartTime !== epoch) return;
     stop(true);
   });
 }
@@ -909,7 +925,7 @@ function applyWave(wave) {
   selectedWave = wave;
   syncWaveButtons();
   // El tipo del oscilador es mutable: se cambia en vivo sin cortar el sonido.
-  if (playing) engine.setWave(selectedWave);
+  if (playing) simulation.audio.setWave(selectedWave);
   updateStatus();
   saveSession();
 }
@@ -932,7 +948,7 @@ function applyCarrier(c) {
   syncCarrierChips();
   updateCustomPanel();
   if (playing) {
-    engine.retune(currentParams());
+    simulation.audio.retune(currentParams());
     applyAmbient();
   }
   updateStatus();
@@ -1195,6 +1211,7 @@ fullscreenBtn.addEventListener('click', async () => {
         setFullscreenIcon(true);
         lockPortrait();
         updateRotateOverlay();
+        setTimeout(restoreFromBackground, 250);
       }
       // Soporte parcial (iOS): si no llegó a entrar de verdad, activa el modo CSS.
       setTimeout(() => {
@@ -1205,6 +1222,7 @@ fullscreenBtn.addEventListener('click', async () => {
           updateRotateOverlay();
         }
         resizeCanvas();
+        setTimeout(restoreFromBackground, 250);
       }, 250);
     } else {
       document.body.classList.add('immersive');
@@ -1212,6 +1230,7 @@ fullscreenBtn.addEventListener('click', async () => {
       lockPortrait();
       updateRotateOverlay();
       resizeCanvas();
+      setTimeout(restoreFromBackground, 250);
     }
   } else {
     document.body.classList.remove('immersive');
@@ -1244,9 +1263,10 @@ document.addEventListener('fullscreenchange', () => {
   // El canvas se re-mide al entrar/salir del modo (el layout cambia). Se
   // espera un frame para que el CSS ya haya aplicado el nuevo tamaño.
   requestAnimationFrame(resizeCanvas);
-  // Al salir de pantalla completa algunos navegadores (Android/iOS)
-  // suspenden el AudioContext: se reanuda para que la sesión no quede muda.
-  if (!on) setTimeout(restoreFromBackground, 200);
+  // Al entrar o salir de pantalla completa algunos navegadores (Android/iOS)
+  // suspenden el AudioContext: se reanuda para que la sesión no quede muda
+  // con el botón en play.
+  setTimeout(restoreFromBackground, on ? 250 : 200);
 });
 
 // ---------------------------------------------------------------- Orientación de las gotas
@@ -1293,33 +1313,30 @@ window.addEventListener('orientationchange', updateRotateOverlay);
 updateRotateOverlay();
 
 // ---------------------------------------------------------------- Primer plano / segundo plano
-// Al pasar la app a segundo plano (cambiar de aplicación, bloquear la
-// pantalla, navegar a otra página…) el sistema suspende el AudioContext o
-// el audio queda reproduciéndose a trompicones. Se hace un fundido de
-// salida para no oír cortes ni interferencias, y al volver la sesión se
-// reanuda y se funde de nuevo a su volumen.
-let bgMuted = false;
-
-function muteForBackground() {
-  if (!playing || bgMuted) return;
-  bgMuted = true;
-  engine.fadeTo(0, 0.25);
-}
-
+// El audio NO se enmudece al pasar a segundo plano: la sesión sigue sonando
+// con el celular bloqueado o al cambiar de aplicación, como una app nativa
+// (Spotify no se calla al bloquear la pantalla). El sistema puede suspender
+// el AudioContext —p. ej. iOS al bloquear—; al volver se reanuda solo y con
+// suavidad, sin cortes ni interferencias externas.
 function restoreFromBackground() {
-  if (!playing || !bgMuted) return;
-  bgMuted = false;
-  engine.resume();
-  engine.fadeTo(volumeLevel, 0.4);
+  if (!playing) return;
+  simulation.audio.resume();
+  simulation.audio.fadeTo(volumeLevel, 0.4);
+  // Re-afirma la sesión de medios al volver: algunos navegadores (iOS) la
+  // pierden al suspender la pestaña y el controlador de notificaciones
+  // desaparece hasta el siguiente play. Es barato y no molesta.
+  updateMediaSession();
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) muteForBackground();
-  else restoreFromBackground();
+  if (!document.hidden) restoreFromBackground();
 });
-window.addEventListener('pagehide', muteForBackground);
 window.addEventListener('pageshow', restoreFromBackground);
 window.addEventListener('focus', restoreFromBackground);
+// Ciclo de vida de la página (Chrome): al "descongelarse" una pestaña que el
+// navegador congeló en segundo plano, se re-afirma la sesión para que el audio
+// nunca se quede mudo con el botón en play.
+document.addEventListener('resume', restoreFromBackground);
 // iOS suele exigir un gesto del usuario para reanudar el contexto: si al
 // volver seguía suspendido, se reanuda con el primer toque sobre la página.
 window.addEventListener('pointerdown', restoreFromBackground, { passive: true });
@@ -1342,6 +1359,162 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------------------------------------------------------------- Media Session + WakeLock
+// Reproductor en las notificaciones y la pantalla de bloqueo (como Spotify):
+// la sesión aparece con su nombre, frecuencias y portada, y se controla desde
+// el sistema (play, pausa, siguiente, anterior y el seek del temporizador).
+// Funciona en Android, escritorio y iOS (Safari 15.4+ / PWA instalada 16.4+).
+const MEDIA_SESSION = 'mediaSession' in navigator ? navigator.mediaSession : null;
+
+// ---- WakeLock ---------------------------------------------------------------
+// Screen Wake Lock API: impide que el SO dimme/apague la pantalla mientras
+// suena la sesión. En Android Chrome esto también previene la interferencia
+// de audio al bloquear la pantalla. Se libera al pausar y se re-adquiere al
+// volver al primer plano.
+let _wakeLock = null;
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  if (_wakeLock && !_wakeLock.released) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => {
+      // Si se libera automáticamente (ej. al cambiar de tab), re-adquirir al volver.
+      _wakeLock = null;
+    });
+  } catch (_) {
+    /* El usuario denegó o el navegador no soporta */
+  }
+}
+async function releaseWakeLock() {
+  if (_wakeLock && !_wakeLock.released) {
+    try { await _wakeLock.release(); } catch (_) {}
+    _wakeLock = null;
+  }
+}
+
+// Volver al primer plano: re-adquirir el wake lock si la sesión sigue activa.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && playing) acquireWakeLock();
+});
+
+// ---- Permisos ---------------------------------------------------------------
+// Un solo punto de entrada que pide notificaciones + wakeLock en el mismo
+// gesto de usuario (play). Se muestra solo si aún no se ha decidido.
+// LS_PERM_ASKED: guardamos si ya pedimos permisos para no molestar cada vez.
+const LS_PERM_ASKED = 'ob-perm-asked-v1';
+// El usuario puede desactivar los permisos desde el modal ⋯ → Permisos de la web.
+const LS_PERM_DISABLED = 'vyneural_perms_disabled';
+
+function permsDisabled() {
+  return lsGet(LS_PERM_DISABLED, false) === true;
+}
+
+async function requestAllPermissions() {
+  // Permisos desactivados manualmente → no pedir nada.
+  if (permsDisabled()) return;
+
+  // 1. Notificaciones: necesarias para la MediaSession en algunos Android
+  //    y para las alarmas cuando la pestaña está oculta.
+  if (notificationSupported() && Notification.permission === 'default') {
+    try {
+      await Notification.requestPermission();
+    } catch (_) { /* denegado o no soportado */ }
+  }
+
+  // 2. WakeLock: mantiene el audio sin interferencias al bloquear la pantalla.
+  await acquireWakeLock();
+
+  // 3. Marcar como solicitado para no volver a preguntar
+  lsSet(LS_PERM_ASKED, true);
+}
+
+// Alias para compatibilidad con el código antiguo
+async function requestMediaNotificationPermission() {
+  await requestAllPermissions();
+}
+
+// ---- Actualizar Media Session ------------------------------------------------
+function updateMediaSession() {
+  if (!MEDIA_SESSION) return;
+  if (typeof MediaMetadata !== 'function') return;
+
+  const p = currentParams();
+
+  // Artwork: intentamos con la portada real, con fallback al icono de la app.
+  MEDIA_SESSION.metadata = new MediaMetadata({
+    title: selected.name,
+    artist: 'Bineural · Ondas binaurales',
+    album: `${selected.band} · ${p.base} / ${(p.base + p.beat).toFixed(1)} Hz`,
+    artwork: [
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+  });
+
+  // Estado de reproducción: 'playing' | 'paused' | 'none'
+  MEDIA_SESSION.playbackState = playing ? 'playing' : 'paused';
+
+  // setActive() (Chrome 92+): necesario para que Android muestre el widget en
+  // el sombreado de notificaciones. Sin esto el metadata se asigna pero el
+  // controlador no aparece hasta que el usuario baje la barra de notificaciones.
+  if (typeof MEDIA_SESSION.setActive === 'function') {
+    try { MEDIA_SESSION.setActive(playing); } catch (_) {}
+  }
+
+  updateMediaPosition();
+}
+
+// Barra de progreso del reproductor del sistema: sigue el temporizador de la
+// sesión (si hay uno). Con ∞ no hay duración definida, así que no se muestra.
+let lastPosUpdate = 0;
+function updateMediaPosition() {
+  if (!MEDIA_SESSION || !playing || !timerMinutes || !timerEnd) return;
+  const now = Date.now();
+  if (now - lastPosUpdate < 1000) return;
+  lastPosUpdate = now;
+  const dur = timerMinutes * 60;
+  const pos = Math.max(0, Math.min(dur, (timerEnd - now) / 1000));
+  try {
+    MEDIA_SESSION.setPositionState({ duration: dur, playbackRate: 1, position: pos });
+  } catch (_) {
+    /* el navegador no soporta positionState */
+  }
+}
+
+if (MEDIA_SESSION) {
+  const seekBy = (secs) => {
+    if (!playing || !timerMinutes || !timerEnd) return;
+    const dur = timerMinutes * 60;
+    const pos = Math.max(0, Math.min(dur, (timerEnd - Date.now()) / 1000 + secs));
+    timerEnd = Date.now() + (dur - pos) * 1000;
+  };
+  const moveTrack = (dir) => {
+    const visible = cards.filter((c) => !c.classList.contains('filtered-out'));
+    if (!visible.length) return;
+    const idx = visible.findIndex((c) => c.dataset.id === selected.id);
+    const next = visible[(idx + dir + visible.length) % visible.length];
+    selectState(STATES.find((st) => st.id === next.dataset.id));
+  };
+  try {
+    MEDIA_SESSION.setActionHandler('play', () => { if (!playing) start(); });
+    MEDIA_SESSION.setActionHandler('pause', () => { if (playing) stop(); });
+    MEDIA_SESSION.setActionHandler('stop', () => { if (playing) stop(); });
+    MEDIA_SESSION.setActionHandler('previoustrack', () => moveTrack(-1));
+    MEDIA_SESSION.setActionHandler('nexttrack', () => moveTrack(1));
+    MEDIA_SESSION.setActionHandler('seekto', (d) => {
+      if (d && d.seekTime != null && timerMinutes && timerEnd) {
+        const dur = timerMinutes * 60;
+        const pos = Math.max(0, Math.min(dur, d.seekTime));
+        timerEnd = Date.now() + (dur - pos) * 1000;
+      }
+    });
+    MEDIA_SESSION.setActionHandler('seekbackward', () => seekBy(-15));
+    MEDIA_SESSION.setActionHandler('seekforward', () => seekBy(15));
+  } catch (_) {
+    /* setActionHandler no soportado (Safari < 15.4) */
+  }
+}
+
 // ---------------------------------------------------------------- Estado
 function updateStatus() {
   const p = currentParams();
@@ -1355,6 +1528,7 @@ function updateStatus() {
   if (dotL) dotL.style.setProperty('--c', LANE_LEFT_COLOR);
   if (dotR) dotR.style.setProperty('--c', LANE_RIGHT_COLOR);
   statusState.textContent = playing ? '● Reproduciendo' : '○ En pausa';
+  updateMediaSession();
 }
 
 // ---------------------------------------------------------------- Visualizador
@@ -1364,6 +1538,332 @@ function updateStatus() {
 // de interferencia reales. En la gota del cerebro conviven tres fuentes
 // (azul = frecuencia 1, rosa = frecuencia 2, acento = latido) que chocan
 // entre sí, y el latido inyecta un impulso exacto en cada pulso real.
+//
+// Alternativa: la simulación de cimática (CymaticsRenderer), que el usuario
+// elige con el interruptor del panel (💧 Gotas / 🔮 Cimática) y que también
+// se guarda en localStorage para la próxima visita.
+
+// Visualizador activo: 'gotas' (por defecto) o 'cimatica'.
+let vizMode = lsGet(LS_VIZ, 'gotas');
+if (vizMode !== 'gotas' && vizMode !== 'cimatica') vizMode = 'gotas';
+// cymatics ya fue instanciado arriba y pasado al SimulationEngine.
+
+// Interruptor para elegir la simulación (💧 Gotas / 🔮 Cimática).
+const vizSwitch = document.getElementById('viz-switch');
+const vizBtns = vizSwitch ? [...vizSwitch.querySelectorAll('.viz-switch-btn')] : [];
+function setVizMode(mode) {
+  if (mode !== 'gotas' && mode !== 'cimatica') return;
+  vizMode = mode;
+  lsSet(LS_VIZ, mode);
+  // El fondo (starfield) NO cambia al alternar entre gotas y cimática: se
+  // mantiene estable para que el cambio de visualización no altere el fondo.
+  vizBtns.forEach((b) => {
+    const on = b.dataset.viz === mode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+  // En algunos dispositivos (móvil) crear/cambiar de simulación puede hacer
+  // que el navegador suspenda el AudioContext; se re-afirma la sesión para
+  // que el cambio de visualización nunca deje el audio mudo con el botón
+  // "en play". restoreFromBackground() ya ignora el caso en pausa.
+  if (playing) setTimeout(restoreFromBackground, 150);
+}
+if (vizSwitch) {
+  vizSwitch.addEventListener('click', (e) => {
+    const btn = e.target.closest('.viz-switch-btn');
+    if (btn) setVizMode(btn.dataset.viz);
+  });
+  setVizMode(vizMode); // refleja el valor guardado al cargar
+}
+
+// ---------------------------------------------------------------- Más opciones (⋯)
+// Menú desplegable: Panel Bineural Engine, Modo experimental y Permisos de la web.
+// Evita superponer más botones sobre historial/alarma/viz-switch.
+const moreBtn = document.getElementById('more-btn');
+const moreMenu = document.getElementById('more-menu');
+
+function closeMoreMenu() {
+  if (!moreMenu) return;
+  moreMenu.classList.add('hidden');
+  if (moreBtn) moreBtn.setAttribute('aria-expanded', 'false');
+}
+
+if (moreBtn && moreMenu) {
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = moreMenu.classList.contains('hidden');
+    moreMenu.classList.toggle('hidden', !open);
+    moreBtn.setAttribute('aria-expanded', String(open));
+  });
+  moreMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.more-item');
+    if (!item) return;
+    closeMoreMenu();
+    const action = item.dataset.action;
+    if (action === 'hud') {
+      if (simulation) simulation.hud.toggleVisible();
+    } else if (action === 'experiment') {
+      openExperiment();
+    } else if (action === 'permissions') {
+      openPermissions();
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!moreMenu.classList.contains('hidden') && !moreMenu.contains(e.target) && !moreBtn.contains(e.target)) {
+      closeMoreMenu();
+    }
+  });
+  if (simulation) {
+    simulation.hud.onVisibilityChange = (visible) => {
+      const hudItem = moreMenu.querySelector('[data-action="hud"]');
+      if (hudItem) hudItem.classList.toggle('active', visible);
+    };
+  }
+}
+
+// ---------------------------------------------------------------- Modo experimental (Fase 10)
+// Compara condiciones de estímulo en el modelo reducido (simulación headless,
+// reproducible con semilla). Ver src/core/experiments.js.
+const experimentModal = document.getElementById('experiment-modal');
+const expConditions = document.getElementById('exp-conditions');
+const expCarrier = document.getElementById('exp-carrier');
+const expBeat = document.getElementById('exp-beat');
+const expCarrierV = document.getElementById('exp-carrier-v');
+const expBeatV = document.getElementById('exp-beat-v');
+const expDuration = document.getElementById('exp-duration');
+const expSeed = document.getElementById('exp-seed');
+const expRun = document.getElementById('exp-run');
+const expResults = document.getElementById('exp-results');
+const expExport = document.getElementById('exp-export');
+let expCondition = 'binaural';
+let expLast = null; // { runner, results }
+
+function openExperiment() {
+  if (experimentModal) experimentModal.classList.remove('hidden');
+}
+function closeExperiment() {
+  if (experimentModal) experimentModal.classList.add('hidden');
+}
+
+if (experimentModal) {
+  const expClose = document.getElementById('experiment-close');
+  if (expClose) expClose.addEventListener('click', closeExperiment);
+  experimentModal.addEventListener('click', (e) => {
+    if (e.target === experimentModal) closeExperiment();
+  });
+}
+
+if (expConditions) {
+  expConditions.addEventListener('click', (e) => {
+    const b = e.target.closest('.exp-cond');
+    if (!b) return;
+    expCondition = b.dataset.cond;
+    expConditions.querySelectorAll('.exp-cond').forEach((c) => c.classList.toggle('active', c === b));
+  });
+}
+
+function syncExpLabels() {
+  if (expCarrierV) expCarrierV.textContent = `${expCarrier.value} Hz`;
+  if (expBeatV) expBeatV.textContent = `${expBeat.value} Hz`;
+}
+if (expCarrier && expBeat) {
+  expCarrier.addEventListener('input', syncExpLabels);
+  expBeat.addEventListener('input', syncExpLabels);
+  syncExpLabels();
+}
+
+function renderExperiment(res) {
+  expResults.classList.remove('hidden');
+  const f = res.final;
+  const fmt = (x, d = 2) => (typeof x === 'number' && isFinite(x) ? x.toFixed(d) : '--');
+  const bar = (v) => `<div class="exp-bar"><i style="width:${Math.max(2, Math.min(100, v * 100))}%"></i></div>`;
+  const bands = [
+    ['Delta', f.neural.delta, 'δ'],
+    ['Theta', f.neural.theta, 'θ'],
+    ['Alpha', f.neural.alpha, 'α'],
+    ['Beta', f.neural.beta, 'β'],
+    ['Gamma', f.neural.gamma, 'γ'],
+  ]
+    .map(([n, v, g]) => `<div class="exp-band"><span>${g} ${n} <em>SIMULADO</em></span>${bar(v)}<b>${fmt(v)}</b></div>`)
+    .join('');
+  const cog = [
+    ['Arousal', f.cognitive.arousal],
+    ['Atención', f.cognitive.attention],
+    ['Relajación', f.cognitive.relaxation],
+    ['Flow', f.cognitive.flow],
+  ]
+    .map(([n, o]) => `<div class="exp-band"><span>${n} <em>ESTIMADO</em></span>${bar(o.value)}<b>${fmt(o.value)} <i>c ${fmt(o.confidence)}</i></b></div>`)
+    .join('');
+
+  expResults.innerHTML = `
+    <div class="exp-head">
+      <b>${res.conditionLabel}</b>
+      <span>semilla ${res.seed} · ${res.durationSec} s</span>
+    </div>
+    <div class="exp-grid">
+      <div class="exp-block">
+        <div class="exp-title">ESTÍMULO <em>PHYSICAL</em></div>
+        <div class="exp-line">Oído izquierdo <b>${fmt(res.stimulus.left, 1)} Hz</b></div>
+        <div class="exp-line">Oído derecho <b>${fmt(res.stimulus.right, 1)} Hz</b></div>
+        <div class="exp-line">Δf (latido físico) <b>${fmt(res.stimulus.difference, 2)} Hz</b></div>
+        <div class="exp-line">Dominante simulada <b>${fmt(f.neural.dominantFreq, 1)} Hz</b></div>
+      </div>
+      <div class="exp-block">
+        <div class="exp-title">BANDAS <em>SIMULADO</em></div>
+        ${bands}
+      </div>
+      <div class="exp-block">
+        <div class="exp-title">COGNITIVO <em>ESTIMADO</em></div>
+        ${cog}
+      </div>
+      <div class="exp-block">
+        <div class="exp-title">VISUAL <em>METÁFORA</em></div>
+        <div class="exp-line">Coherencia <b>${fmt(f.visual.coherence)}</b></div>
+        <div class="exp-line">Complejidad <b>${fmt(f.visual.complexity)}</b></div>
+        <div class="exp-line">Movimiento <b>${fmt(f.visual.velocity)}</b></div>
+        <div class="exp-line">PSD θ <b>${fmt(res.psdBands.theta, 3)}</b></div>
+      </div>
+    </div>
+    <canvas id="exp-psd" class="exp-psd" width="640" height="180" aria-label="Espectro de potencia estimado"></canvas>
+    <p class="exp-note">Espectro: reconstrucción sintética del EEG final (FFT 2048 @ 128 Hz). No es una medición fisiológica.</p>
+  `;
+  drawExpPsd(res.psd);
+  expExport.classList.remove('hidden');
+  // Lleva los resultados al viewport dentro del modal (están bajo el pliegue).
+  const card = experimentModal ? experimentModal.querySelector('.modal-card') : null;
+  if (card) card.scrollTo({ top: card.scrollHeight, behavior: 'smooth' });
+}
+
+function drawExpPsd(psd) {
+  const cv = document.getElementById('exp-psd');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const W = cv.width;
+  const H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const FMAX = 50;
+  const data = psd.filter((p) => p.freq <= FMAX);
+  let maxP = 1e-9;
+  for (const p of data) maxP = Math.max(maxP, p.power);
+  ctx.strokeStyle = 'rgba(167,139,250,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  data.forEach((p, i) => {
+    const x = (i / Math.max(1, data.length - 1)) * W;
+    const y = H - 8 - (p.power / maxP) * (H - 20);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '10px sans-serif';
+  ctx.fillText('0', 2, H - 2);
+  ctx.fillText('50 Hz', W - 34, H - 2);
+}
+
+if (expRun) {
+  expRun.addEventListener('click', () => {
+    try {
+      const carrier = parseFloat(expCarrier.value) || 220;
+      const beat = parseFloat(expBeat.value) || 10;
+      const durationSec = parseInt(expDuration.value, 10) || 300;
+      const seedRaw = (expSeed.value || '').trim();
+      const seed = seedRaw === '' ? null : parseInt(seedRaw, 10) || null;
+      const config = new SimulationConfig({
+        carrier,
+        beat,
+        waveform: 'sine',
+        condition: expCondition,
+        durationSec,
+        modelParams: null,
+      });
+      const runner = new ExperimentRunner({ config, seed });
+      const results = runner.run({ durationSec, dt: 0.1 });
+      expLast = { runner, results };
+      renderExperiment(results);
+    } catch (err) {
+      expResults.innerHTML = `<p class="exp-error">Error en la simulación: ${err.message}</p>`;
+      expExport.classList.add('hidden');
+    }
+  });
+}
+
+if (expExport) {
+  expExport.addEventListener('click', () => {
+    if (!expLast) return;
+    const rec = expLast.runner.record(expLast.results);
+    const blob = new Blob([experimentToJson(rec)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `vyneural-experimento-${expLast.results.condition}-${expLast.results.seed}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  });
+}
+
+// ---------------------------------------------------------------- Permisos de la web
+// Acceso directo para activar/desactivar los permisos que usa la app
+// (notificaciones + Wake Lock). Al desactivar, la app deja de pedirlos y los
+// recordatorios solo suenan en primer plano; el permiso de notificaciones del
+// sistema solo puede revocarse en los ajustes del navegador (se explica en el modal).
+const permissionsModal = document.getElementById('permissions-modal');
+const permNotif = document.getElementById('perm-notif');
+const permWakelock = document.getElementById('perm-wakelock');
+const permEnabled = document.getElementById('perm-enabled');
+const permNote = document.getElementById('perm-note');
+
+function openPermissions() {
+  renderPermissionState();
+  if (permissionsModal) permissionsModal.classList.remove('hidden');
+}
+function closePermissions() {
+  if (permissionsModal) permissionsModal.classList.add('hidden');
+}
+
+function permissionStateText() {
+  if (!notificationSupported()) return 'No soportado en este navegador';
+  if (Notification.permission === 'granted') return 'Concedido ✓';
+  if (Notification.permission === 'denied') return 'Denegado en el navegador';
+  return 'Sin decidir';
+}
+
+function renderPermissionState() {
+  if (!permNotif) return;
+  permNotif.textContent = permissionStateText();
+  permNotif.className = 'perm-state' + (Notification && Notification.permission === 'granted' ? ' ok' : ' warn');
+  const hasWake = 'wakeLock' in navigator;
+  const wakeActive = !!(hasWake && _wakeLock && !_wakeLock.released);
+  permWakelock.textContent = hasWake ? (wakeActive ? 'Activo ✓' : 'Inactivo') : 'No soportado';
+  permWakelock.className = 'perm-state' + (wakeActive ? ' ok' : ' warn');
+  const disabled = permsDisabled();
+  permEnabled.textContent = disabled ? 'Desactivados' : 'Activados';
+  permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
+  permNote.textContent = disabled
+    ? 'Permisos desactivados: la app no volverá a pedirlos y los recordatorios solo sonarán en primer plano. Reactívalos cuando quieras.'
+    : 'Las notificaciones del sistema solo pueden revocarse en los ajustes del navegador; aquí solo se desactiva su uso en Vyneural (incluye liberar el Wake Lock).';
+}
+
+if (permissionsModal) {
+  const permClose = document.getElementById('permissions-close');
+  if (permClose) permClose.addEventListener('click', closePermissions);
+  permissionsModal.addEventListener('click', (e) => {
+    if (e.target === permissionsModal) closePermissions();
+  });
+  document.getElementById('perm-on').addEventListener('click', async () => {
+    lsSet(LS_PERM_DISABLED, false);
+    // Gesto de usuario: puede mostrar el diálogo de notificaciones del sistema.
+    await requestAllPermissions();
+    renderPermissionState();
+  });
+  document.getElementById('perm-off').addEventListener('click', async () => {
+    await releaseWakeLock();
+    lsSet(LS_PERM_DISABLED, true);
+    renderPermissionState();
+  });
+}
 
 function resizeCanvas() {
   canvas.width = canvas.clientWidth * devicePixelRatio;
@@ -1539,6 +2039,32 @@ function drawVisual() {
   const p = currentParams();
   const beat = Math.max(0.5, p.beat);
 
+  // ----- Simulación alternativa: cimática ---------------------------------
+  // Si el usuario eligió Cimática se dibuja la placa de Faraday en lugar de
+  // las tres gotas de ondas. Sincronizada con el latido real del
+  // AudioContext: la fase 0 (el pulso) hace brillar el aro LED y las gotas.
+  if (vizMode === 'cimatica') {
+    const periodMs = Math.max(80, 1000 / beat);
+    let phase;
+    if (playing && simulation.audio.isPlaying) {
+      const ph = simulation.audio.getBeatPhase();
+      phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
+    } else {
+      phase = (now % 4000) / 4000;
+    }
+    const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
+    cymatics.render(ctx2d, w, h, {
+      base: p.base || 220, // portadora: 220 Hz por defecto
+      beat,
+      playing,
+      pulse: eased,
+      // Misma paleta que las gotas: izquierda azul, centro morado (acento
+      // del estado), derecha rosa.
+      colors: [LANE_LEFT_COLOR_RGB, ACCENT_RGB, LANE_RIGHT_COLOR_RGB],
+    });
+    return;
+  }
+
   // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2. En pantalla
   // completa en el teléfono la fila se agranda un poco (ocupa casi todo el
   // ancho) para que las gotas sean las protagonistas de la pantalla. La
@@ -1557,8 +2083,8 @@ function drawVisual() {
   // En pausa, respiración suave.
   const periodMs = Math.max(80, 1000 / beat);
   let phase;
-  if (playing && engine.isPlaying) {
-    const ph = engine.getBeatPhase();
+  if (playing && simulation.audio.isPlaying) {
+    const ph = simulation.audio.getBeatPhase();
     phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
   } else {
     phase = (now % 4000) / 4000;
@@ -1577,41 +2103,54 @@ function drawVisual() {
   const s = size / 2;
   const off = size * 0.1; // separación de las fuentes en la unión
 
+  // Intervalo visual de excitación de cada cuenca: proporcional a 1/f de su
+  // portadora real (más frecuencia → más ondas por segundo, como el agua
+  // real). La constante K_VIS lleva la escala: a 220 Hz el período visual
+  // queda en ~1,5 s, y al subir/bajar la frecuencia los pulsos se aceleran
+  // o espacian exactamente en esa proporción.
+  const K_VIS = 330;
+  const f1v = Math.max(1, p.base || 220);
+  const f2v = f1v + beat;
+  const T1 = K_VIS / f1v;
+  const T2 = K_VIS / f2v;
+  const Tpause = K_VIS * 2.2 / f1v; // en pausa, ~2,2× más espaciado
   if (playing) {
     // Las tres frecuencias: una fuente por cuenca (los laterales en el
     // centro, la unión con azul y rosa desfasadas que chocan al cruzarse).
-    if (t - impactTimes[0] >= 1.5) {
+    // Cada cuenca late a su propia frecuencia: f1 y f2 a ritmos distintos
+    // que producen el batido real entre las dos gotas.
+    if (t - impactTimes[0] >= T1) {
       waveLeft.pokeDisc(s, s, 1.5);
       impactTimes[0] = t;
     }
-    if (t - impactTimes[1] >= 1.8) {
+    if (t - impactTimes[1] >= T2) {
       waveRight.pokeDisc(s, s, 1.5);
       impactTimes[1] = t;
     }
-    if (t - impactTimes[2] >= 1.3) {
+    if (t - impactTimes[2] >= T1) {
       waveBrainB.pokeDisc(s - off, s, 1.3);
       impactTimes[2] = t;
     }
-    if (t - impactTimes[3] >= 1.6) {
+    if (t - impactTimes[3] >= T2) {
       waveBrainP.pokeDisc(s + off, s, 1.3);
       impactTimes[3] = t;
     }
   } else {
     // En pausa: impulsos espaciados y suaves, el agua sigue viva pero
-    // tranquila.
-    if (t - impactTimes[0] >= 3.4) {
+    // tranquila (la excitación ambiental, no la portadora).
+    if (t - impactTimes[0] >= Tpause) {
       waveLeft.pokeDisc(s, s, 0.6);
       impactTimes[0] = t;
     }
-    if (t - impactTimes[1] >= 3.4) {
+    if (t - impactTimes[1] >= Tpause) {
       waveRight.pokeDisc(s, s, 0.6);
       impactTimes[1] = t;
     }
-    if (t - impactTimes[2] >= 3.4) {
+    if (t - impactTimes[2] >= Tpause) {
       waveBrainB.pokeDisc(s - off, s, 0.5);
       impactTimes[2] = t;
     }
-    if (t - impactTimes[3] >= 3.4) {
+    if (t - impactTimes[3] >= Tpause) {
       waveBrainP.pokeDisc(s + off, s, 0.5);
       impactTimes[3] = t;
     }
@@ -1711,7 +2250,7 @@ function restoreSession(saved) {
     volumeLevel = saved.volume;
     volume.value = String(saved.volume);
     if (volumeLabel) volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
-    engine.setVolume(volumeLevel);
+    simulation.setVolume(volumeLevel);
   }
   if (Array.isArray(saved.ambient)) {
     ambientTypes = new Set(
@@ -1932,6 +2471,19 @@ function renderAlarms() {
   if (alarmBadge) {
     alarmBadge.textContent = String(alarms.length);
     alarmBadge.classList.toggle('hidden', alarms.length === 0);
+  }
+  syncAppBadge(alarms.length);
+}
+
+// Insignia en el icono de la app instalada (como una app nativa): muestra la
+// cantidad de recordatorios pendientes. Solo aplica a la PWA instalada y a
+// los navegadores que la soportan.
+function syncAppBadge(count) {
+  try {
+    if (count > 0 && navigator.setAppBadge) navigator.setAppBadge(count).catch(() => {});
+    else if (count === 0 && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+  } catch (_) {
+    /* sin insignias en este navegador */
   }
 }
 
@@ -2171,6 +2723,17 @@ function hideLoader() {
     setTimeout(() => loader.remove(), 900);
   }, remain);
 }
+
+// Secret testing shortcut: press 'E' to toggle Simulated EEG, 'M' to toggle Scientific Mode
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'e' || e.key === 'E') {
+    if (simulation && simulation.eeg) simulation.eeg.toggle();
+  }
+  if (e.key === 'm' || e.key === 'M') {
+    if (simulation) simulation.toggleScientificMode();
+  }
+});
+
 if (document.readyState === 'complete') hideLoader();
 else window.addEventListener('load', hideLoader);
 setTimeout(hideLoader, LOADER_MIN_MS + 2500); // seguridad: nunca quedarse colgado

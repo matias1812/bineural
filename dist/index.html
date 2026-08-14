@@ -49,7 +49,6 @@
 
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
 
     <!-- Datos estructurados: aplicación web -->
     <script type="application/ld+json">
@@ -66,10 +65,10 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" crossorigin src="/assets/main-gUGjP-LQ.js"></script>
+    <script type="module" crossorigin src="/assets/main-pLUUvOo6.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/site-Dl-2y_i-.js">
     <link rel="stylesheet" crossorigin href="/assets/site-DtLr7erG.css">
-    <link rel="stylesheet" crossorigin href="/assets/main-Dvmu0nsj.css">
+    <link rel="stylesheet" crossorigin href="/assets/main-D-1UR5xR.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -188,6 +187,27 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           <span id="alarm-badge" class="alarm-badge hidden"></span>
         </button>
+        <button id="more-btn" class="icon-btn more-btn" aria-label="Más opciones" aria-expanded="false" title="Más opciones">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
+        </button>
+        <div id="more-menu" class="more-menu hidden" role="menu" aria-label="Más opciones">
+          <button type="button" class="more-item" data-action="hud" role="menuitem">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Panel Bineural Engine<small>HUD científico (simulado/estimado)</small></span>
+          </button>
+          <button type="button" class="more-item" data-action="experiment" role="menuitem">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.5L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
+            <span>Modo experimental<small>Comparar condiciones de estímulo</small></span>
+          </button>
+          <button type="button" class="more-item" data-action="permissions" role="menuitem">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span>Permisos de la web<small>Notificaciones y audio en segundo plano</small></span>
+          </button>
+        </div>
+        <div class="viz-switch" id="viz-switch" role="group" aria-label="Elegí la simulación del visualizador">
+          <button type="button" class="viz-switch-btn active" data-viz="gotas" aria-pressed="true">💧 Gotas</button>
+          <button type="button" class="viz-switch-btn" data-viz="cimatica" aria-pressed="false">🔮 Cimática</button>
+        </div>
         <div class="visualizer-wrap">
           <canvas id="visualizer"></canvas>
           <!-- Controles individuales sobre las gotas: play abajo a la derecha,
@@ -488,6 +508,91 @@
           </div>
           <p id="backup-status" class="backup-status hidden" role="status"></p>
         </div>
+      </div>
+    </div>
+
+    <div id="experiment-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Modo experimental">
+      <div class="modal-card experiment-card">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.5L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
+            Modo experimental
+          </h3>
+          <button id="experiment-close" class="modal-close" aria-label="Cerrar modo experimental">✕</button>
+        </div>
+        <p class="exp-intro">
+          Compara la respuesta del modelo reducido a distintas condiciones de estímulo.
+          Todo es <b>simulación sintética</b> (etiquetada) y reproducible con semilla.
+        </p>
+
+        <div class="exp-field">
+          <span class="exp-label">Condición</span>
+          <div class="exp-conditions" id="exp-conditions" role="radiogroup" aria-label="Condición del estímulo">
+            <button type="button" class="exp-cond active" data-cond="binaural">Binaural</button>
+            <button type="button" class="exp-cond" data-cond="pure-tone">Tono puro</button>
+            <button type="button" class="exp-cond" data-cond="noise">Ruido</button>
+            <button type="button" class="exp-cond" data-cond="amplitude-modulation">AM</button>
+            <button type="button" class="exp-cond" data-cond="none">Sin estímulo</button>
+          </div>
+        </div>
+
+        <div class="exp-row">
+          <label class="exp-slider">
+            <span class="exp-label">Portadora</span>
+            <input id="exp-carrier" type="range" min="60" max="400" step="1" value="220" />
+            <b id="exp-carrier-v" class="exp-value">220 Hz</b>
+          </label>
+          <label class="exp-slider">
+            <span class="exp-label">Latido Δf</span>
+            <input id="exp-beat" type="range" min="0.5" max="40" step="0.5" value="6" />
+            <b id="exp-beat-v" class="exp-value">6 Hz</b>
+          </label>
+        </div>
+
+        <div class="exp-row">
+          <label class="exp-slider">
+            <span class="exp-label">Duración</span>
+            <select id="exp-duration" class="alarm-input">
+              <option value="60">1 min</option>
+              <option value="180">3 min</option>
+              <option value="300" selected>5 min</option>
+              <option value="600">10 min</option>
+            </select>
+          </label>
+          <label class="exp-slider">
+            <span class="exp-label">Semilla</span>
+            <input id="exp-seed" type="number" min="0" placeholder="aleatoria" class="alarm-input" />
+          </label>
+        </div>
+
+        <button id="exp-run" class="quick-start">Ejecutar simulación ▶</button>
+
+        <div id="exp-results" class="exp-results hidden"></div>
+        <button id="exp-export" class="exp-export hidden">⬇ Exportar JSON (reproducible)</button>
+      </div>
+    </div>
+
+    <div id="permissions-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Permisos de la web">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+            Permisos de la web
+          </h3>
+          <button id="permissions-close" class="modal-close" aria-label="Cerrar permisos">✕</button>
+        </div>
+        <p class="perm-intro">
+          Vyneural usa estos permisos para seguir sonando limpio fuera de la app
+          (pantalla bloqueada o en segundo plano) y para avisarte de los recordatorios.
+        </p>
+        <div class="perm-row"><span>Notificaciones</span><b id="perm-notif" class="perm-state">—</b></div>
+        <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
+        <div class="perm-row"><span>Permisos habilitados en Vyneural</span><b id="perm-enabled" class="perm-state">—</b></div>
+        <div class="perm-actions">
+          <button id="perm-on" class="quick-start">Activar permisos</button>
+          <button id="perm-off" class="perm-off">Desactivar</button>
+        </div>
+        <p id="perm-note" class="perm-note"></p>
       </div>
     </div>
 

@@ -36,6 +36,17 @@ export function notificationSupported() {
   return typeof Notification !== 'undefined';
 }
 
+// El usuario puede desactivar los permisos desde ⋯ → Permisos de la web.
+// Con permisos desactivados no se piden y los recordatorios solo suenan en
+// primer plano (campanita), sin notificación del sistema.
+export function permissionsDisabled() {
+  try {
+    return localStorage.getItem('vyneural_perms_disabled') === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export function isIos() {
   return (
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -80,6 +91,7 @@ export function getAlarmDeepLink(alarm) {
 
 // ---------------------------------------------------------------- Notificación
 export function showSessionAlarmNotification(alarm) {
+  if (permissionsDisabled()) return false;
   if (!notificationSupported() || Notification.permission !== 'granted') return false;
   try {
     const url = getAlarmDeepLink(alarm);
@@ -103,8 +115,10 @@ export function showSessionAlarmNotification(alarm) {
 
 // Dispara la alarma: notificación si la pestaña está oculta, sonido sutil si
 // está en primer plano. Devuelve 'background' | 'foreground' | null.
+// Con permisos desactivados, incluso en segundo plano solo suena la campanita
+// (el sonido del navegador, que no requiere permiso).
 export function fireAlarm(alarm) {
-  if (document.hidden) {
+  if (document.hidden && !permissionsDisabled()) {
     return showSessionAlarmNotification(alarm) ? 'background' : 'foreground';
   }
   playChime();

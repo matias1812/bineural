@@ -8,7 +8,7 @@ const COLORS = ['#ffffff', '#93c5fd', '#c4b5fd', '#f9a8d4', '#a5f3fc'];
 
 export function initStarfield() {
   const canvas = document.getElementById('starfield');
-  if (!canvas) return;
+  if (!canvas) return null;
   const ctx = canvas.getContext('2d');
   let w = 0;
   let h = 0;
@@ -163,8 +163,13 @@ export function initStarfield() {
       ctx.stroke();
     }
 
-    requestAnimationFrame(frame);
+    if (!paused) requestAnimationFrame(frame);
   }
+
+  // En modo cimática el fondo espacial se atenúa (solo CSS) y no aporta
+  // nada visual, así que se pausa su bucle para no gastar CPU junto a la
+  // simulación de la placa; al volver al modo gotas se reanuda.
+  let paused = false;
 
   resize();
   // Con retardo: en móvil la barra del navegador redimensiona la ventana
@@ -179,4 +184,11 @@ export function initStarfield() {
     { passive: true },
   );
   frame();
+  return {
+    setPaused(p) {
+      if (paused === !!p) return;
+      paused = !!p;
+      if (!paused) requestAnimationFrame(frame);
+    },
+  };
 }

@@ -63,6 +63,23 @@ export class BinauralEngine {
     }
   }
 
+  // RMS de la señal que sale al altavoz, tomada del analizador (0…1 aprox.).
+  // Devuelve null si no hay analizador todavía (antes del primer play). Lo usa
+  // el watchdog del SimulationEngine para detectar una sesión "en play pero
+  // muda" (contexto suspendido o ganancia muerta) y recuperarla.
+  getRms() {
+    if (!this.analyser) return null;
+    const fft = this.analyser.fftSize;
+    if (!this._tdBuf || this._tdBuf.length !== fft) this._tdBuf = new Uint8Array(fft);
+    this.analyser.getByteTimeDomainData(this._tdBuf);
+    let sum = 0;
+    for (let i = 0; i < fft; i++) {
+      const v = (this._tdBuf[i] - 128) / 128;
+      sum += v * v;
+    }
+    return Math.sqrt(sum / fft);
+  }
+
   start({ base = 200, beat = 10, volume = 0.5, wave = 'sine' }) {
     const ctx = this.ensure();
     this.stopInstant();
@@ -92,6 +109,8 @@ export class BinauralEngine {
     right.start();
     this.leftOsc = left;
     this.rightOsc = right;
+    // Volumen objetivo de la sesión (para restauraciones y el watchdog de audio).
+    this._volume = volume;
     // Época del primer latido: el primer pulso del timer se dispara a +100 ms.
     this._epoch = ctx.currentTime + 0.1;
 
@@ -105,6 +124,7 @@ export class BinauralEngine {
   }
 
   setVolume(v) {
+    this._volume = v;
     if (!this.ctx || !this.masterGain) return;
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
@@ -126,12 +146,20 @@ export class BinauralEngine {
 
   // Reajusta las frecuencias en marcha con una transición suave (ramp),
   // sin reiniciar los osciladores ni cortar el sonido: al cambiar de estado
-  // la portadora y el latido se deslizan hasta los valores nuevos.
+  // la portadora y el latido se deslizan hasta los valores nuevos en 1.5s.
   retune({ base, beat }) {
     if (!this.ctx || !this.leftOsc) return;
     const now = this.ctx.currentTime;
-    this.leftOsc.frequency.setTargetAtTime(base, now, 0.4);
-    this.rightOsc.frequency.setTargetAtTime(base + beat, now, 0.4);
+    
+    // Transición ultra-suave cancelando valores previos
+    this.leftOsc.frequency.cancelScheduledValues(now);
+    this.leftOsc.frequency.setValueAtTime(this.leftOsc.frequency.value, now);
+    this.leftOsc.frequency.linearRampToValueAtTime(base, now + 1.5);
+    
+    this.rightOsc.frequency.cancelScheduledValues(now);
+    this.rightOsc.frequency.setValueAtTime(this.rightOsc.frequency.value, now);
+    this.rightOsc.frequency.linearRampToValueAtTime(base + beat, now + 1.5);
+    
     this._base = base;
     this.beat = beat;
   }

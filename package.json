@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/run-diagnostics.mjs"
   },
   "devDependencies": {
     "vite": "^6.0.0"

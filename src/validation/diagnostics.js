@@ -1,0 +1,535 @@
+// src/validation/diagnostics.js
+// Scientific validation suite for Bineural V2 (Phase 11).
+// Run headless:  npm test   (node scripts/run-diagnostics.mjs)
+// Run in browser: window.runBineuralDiagnostics() in the console.
+// Documentación: docs/validation.md
+
+import { NeuralStateModel } from '../core/neural.js';
+import { CognitiveStateModel } from '../core/cognitive.js';
+import { EegInterface } from '../core/eeg.js';
+import { NeuralToVisualMapper } from '../core/visual.js';
+import { evaluateAudioHealth } from '../core/audio-health.js';
+import { ExperimentRunner, conditionProfile } from '../core/experiments.js';
+import { assertValidState, assertValidNeuralState, assertValidCognitiveState, assertPhysicalFrequency } from './assert.js';
+import { getProfileById, PROFILES } from '../models/profiles.js';
+import { SimulationConfig, SimulationSeed, buildExperimentRecord, MODEL_VERSION, mulberry32 } from '../core/reproducibility.js';
+import { WaveField } from '../wavefield.js';
+
+export function runBineuralDiagnostics() {
+  console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
+  console.log('Running Scientific Validation Suite...');
+  
+  let passed = 0;
+  let failed = 0;
+
+  function runTest(name, testFn) {
+    try {
+      testFn();
+      console.log(`%c[PASS] %c${name}`, 'color: #4ade80', 'color: inherit');
+      passed++;
+    } catch (err) {
+      console.error(`%c[FAIL] %c${name}`, 'color: #f87171', 'color: inherit', err.message);
+      failed++;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NEURAL MODEL TESTS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('NeuralStateModel: Bounds are strictly enforced under high fatigue', () => {
+    const model = new NeuralStateModel();
+    const profile = getProfileById('concentracion');
+    model.setProfile(profile.modelParams);
+    model.state.fatigue = 0.99; // Phase 1: state is a NeuralState object
+    for (let i = 0; i < 36000; i++) {
+      model.update(1.0, true);
+    }
+    const state = model.getState();
+    if (state.fatigue < 0 || state.fatigue > 1) {
+      throw new Error(`fatigue out of bounds: ${state.fatigue}`);
+    }
+    if (state.adaptation < 0 || state.adaptation > 1) {
+      throw new Error(`adaptation out of bounds: ${state.adaptation}`);
+    }
+  });
+
+  runTest('NeuralStateModel: Adaptation converges to near-zero (habituation)', () => {
+    const model = new NeuralStateModel();
+    const profile = getProfileById('meditacion');
+    model.setProfile(profile.modelParams);
+    // Entrainment branch (isPlaying=true, target beat=6 Hz) with realistic dt.
+    // Adaptation H(t)=exp(-t/tau); tau=300s → need t ≈ 1400s for H < 0.01.
+    for (let i = 0; i < 20000; i++) {
+      model.update(0.1, true, 1.0, 6);
+    }
+    const state = model.getState();
+    if (state.adaptation > 0.01) {
+      throw new Error(`Adaptation failed to converge near zero. Value: ${state.adaptation}`);
+    }
+  });
+
+  runTest('NeuralStateModel: deterministic under identical params and dt sequence', () => {
+    const profile = getProfileById('sueno');
+    const a = new NeuralStateModel();
+    const b = new NeuralStateModel();
+    a.setProfile(profile.modelParams);
+    b.setProfile(profile.modelParams);
+    for (let i = 0; i < 2000; i++) {
+      a.update(0.016, true, 0.9, 2);
+      b.update(0.016, true, 0.9, 2);
+    }
+    const sa = a.getState();
+    const sb = b.getState();
+    for (const k of ['delta', 'theta', 'alpha', 'beta', 'gamma', 'fatigue', 'adaptation', 'dominantFreq']) {
+      if (sa[k] !== sb[k]) {
+        throw new Error(`Neural model not deterministic on field ${k}: ${sa[k]} vs ${sb[k]}`);
+      }
+    }
+  });
+
+  runTest('NeuralStateModel: dominantFreq is published and bounded (4–40 Hz)', () => {
+    const model = new NeuralStateModel();
+    model.setProfile(getProfileById('meditacion').modelParams);
+    for (let i = 0; i < 5000; i++) model.update(0.016, true, 1.0, 6);
+    const f = model.getState().dominantFreq;
+    if (!isFinite(f) || f < 4 || f > 40) {
+      throw new Error(`dominantFreq out of plausible range: ${f}`);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // AUDIO / STIMULUS TESTS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Audio Physics: Carrier and Beat frequencies are strictly positive', () => {
+    const profile = getProfileById('sueno');
+    assertPhysicalFrequency(profile.stimulus.carrierBase, 'Carrier Base');
+    assertPhysicalFrequency(profile.stimulus.beat, 'Beat Frequency');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // WAVEFIELD PHYSICS TESTS (Phase 2)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('WaveField: CFL number is < 1 (numerically stable)', () => {
+    const wf = new WaveField(64, { c: 0.4 });
+    const { cfl } = wf.getPhysicsMetrics();
+    if (cfl >= 1) {
+      throw new Error(`CFL = ${cfl.toFixed(4)} ≥ 1. Grid is numerically UNSTABLE.`);
+    }
+  });
+
+  runTest('WaveField: CFL clamping fires when c > 1/√2', () => {
+    // Pass an unsafe c — constructor should clamp it to the stability limit.
+    const wf = new WaveField(64, { c: 0.9 });
+    if (wf.c !== 1 / Math.SQRT2) {
+      throw new Error(`Constructor did not clamp c. Got c=${wf.c}`);
+    }
+    const { cfl } = wf.getPhysicsMetrics();
+    // At the exact boundary cfl == 1 mathematically; allow float precision.
+    if (cfl > 1 + 1e-12) {
+      throw new Error(`CFL = ${cfl.toFixed(6)} > 1 even after clamping. Bug in constructor.`);
+    }
+  });
+
+  runTest('WaveField: Energy is zero in a quiescent grid', () => {
+    const wf = new WaveField(64, { c: 0.4 });
+    wf.setCircle(32, 32, 28);
+    const E = wf.computeEnergy();
+    if (E !== 0) {
+      throw new Error(`Expected E=0 in quiescent grid, got E=${E}`);
+    }
+  });
+
+  runTest('WaveField: Impulse creates positive energy', () => {
+    const wf = new WaveField(64, { c: 0.4 });
+    wf.setCircle(32, 32, 28);
+    wf.pokeDisc(32, 32, 1.0);
+    const E = wf.computeEnergy();
+    if (E <= 0) {
+      throw new Error(`Expected E > 0 after impulse, got E=${E}`);
+    }
+  });
+
+  runTest('WaveField: Energy decays monotonically under damping (no sources)', () => {
+    const wf = new WaveField(64, { c: 0.4, damp: 0.99 });
+    wf.setCircle(32, 32, 28);
+    wf.pokeDisc(32, 32, 1.0);
+
+    const samples = [];
+    // Run 200 steps and sample energy every 20 steps
+    for (let s = 0; s < 200; s++) {
+      wf.step();
+      if (s % 20 === 0) samples.push(wf.computeEnergy());
+    }
+
+    // Energy must be monotonically non-increasing (allow tiny float noise)
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i] > samples[i - 1] * 1.02) { // 2% tolerance for numerical noise
+        throw new Error(
+          `Energy increased from ${samples[i-1].toFixed(6)} to ${samples[i].toFixed(6)} ` +
+          `at sample ${i}. Damping is not working correctly.`
+        );
+      }
+    }
+  });
+
+  runTest('WaveField: No NaN or Infinity in field after 300 steps', () => {
+    const wf = new WaveField(64, { c: 0.4, damp: 0.995 });
+    wf.setCircle(32, 32, 28);
+    wf.pokeDisc(20, 20, 2.0);
+    wf.pokeDisc(44, 44, 1.5);
+    for (let s = 0; s < 300; s++) wf.step();
+    for (let i = 0; i < wf.n; i++) {
+      if (!isFinite(wf.u[i])) {
+        throw new Error(`NaN or Infinity found at cell ${i} after 300 steps.`);
+      }
+    }
+  });
+
+  runTest('WaveField: Amplitude stays within clamping limits after strong pulse', () => {
+    const AMP_LIMIT = 5.0;
+    const wf = new WaveField(64, { c: 0.4, damp: 0.995 });
+    wf.setCircle(32, 32, 28);
+    wf.pokeDisc(32, 32, 100.0); // Extreme pulse
+    for (let s = 0; s < 50; s++) wf.step();
+    for (let i = 0; i < wf.n; i++) {
+      if (Math.abs(wf.u[i]) > AMP_LIMIT + 1e-6) {
+        throw new Error(`Amplitude ${wf.u[i]} exceeds clamp limit at cell ${i}.`);
+      }
+    }
+  });
+
+  runTest('WaveField: Dirichlet BC — boundary cells remain zero', () => {
+    const SIZE = 64;
+    const wf = new WaveField(SIZE, { c: 0.4, damp: 0.995 });
+    wf.setCircle(32, 32, 28);
+    wf.pokeDisc(32, 32, 1.0);
+    for (let s = 0; s < 100; s++) wf.step();
+    // Cells at grid edge (row 0, row N-1, col 0, col N-1) must be 0
+    for (let x = 0; x < SIZE; x++) {
+      if (wf.u[x] !== 0)           throw new Error(`Top edge cell (${x},0) is non-zero.`);
+      if (wf.u[(SIZE - 1) * SIZE + x] !== 0) throw new Error(`Bottom edge cell (${x},N-1) is non-zero.`);
+    }
+    for (let y = 0; y < SIZE; y++) {
+      if (wf.u[y * SIZE] !== 0)          throw new Error(`Left edge cell (0,${y}) is non-zero.`);
+      if (wf.u[y * SIZE + SIZE - 1] !== 0) throw new Error(`Right edge cell (N-1,${y}) is non-zero.`);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // AUDIO / STIMULUS DERIVATION (Phase 4)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Audio Physics: ear frequencies derive correctly (L=carrier, R=carrier+beat, Δf=beat)', () => {
+    const cfg = new SimulationConfig({ carrier: 220, beat: 6 });
+    const ears = cfg.earFrequencies();
+    if (ears.left !== 220) throw new Error(`left ear: ${ears.left} ≠ 220`);
+    if (ears.right !== 226) throw new Error(`right ear: ${ears.right} ≠ 226`);
+    if (ears.difference !== 6) throw new Error(`Δf: ${ears.difference} ≠ 6`);
+  });
+
+  runTest('Audio Physics: all profiles carry physically valid carrier/beat', () => {
+    for (const p of PROFILES) {
+      assertPhysicalFrequency(p.stimulus.carrierBase, `Profile "${p.id}" carrier`);
+      assertPhysicalFrequency(p.stimulus.beat, `Profile "${p.id}" beat`);
+      if (p.modelParams) {
+        for (const k of ['targetArousal', 'targetAttention', 'targetRelaxation']) {
+          const v = p.modelParams[k];
+          if (typeof v !== 'number' || v < 0 || v > 1) {
+            throw new Error(`Profile "${p.id}" modelParams.${k} out of [0,1]: ${v}`);
+          }
+        }
+        if (!(p.modelParams.habituationTau > 0)) {
+          throw new Error(`Profile "${p.id}" habituationTau must be > 0`);
+        }
+      }
+      if (p.visualMetaphor) {
+        for (const k of ['complexity', 'coherence', 'velocityScale']) {
+          const v = p.visualMetaphor[k];
+          if (typeof v !== 'number' || v < 0 || v > 1) {
+            throw new Error(`Profile "${p.id}" visualMetaphor.${k} out of [0,1]: ${v}`);
+          }
+        }
+      }
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // REPRODUCIBILITY (Phase 12)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('SimulationConfig: rejects out-of-range parameters', () => {
+    let threw = false;
+    try { new SimulationConfig({ beat: 0.05 }); } catch { threw = true; }
+    if (!threw) throw new Error('beat=0.05 should be rejected');
+    threw = false;
+    try { new SimulationConfig({ waveform: 'superharsh' }); } catch { threw = true; }
+    if (!threw) throw new Error('unknown waveform should be rejected');
+  });
+
+  runTest('SimulationConfig: canonical JSON is stable regardless of key order', () => {
+    const a = new SimulationConfig({ carrier: 220, beat: 6, waveform: 'triangle' });
+    const b = new SimulationConfig({ waveform: 'triangle', beat: 6, carrier: 220 });
+    if (JSON.stringify(a.canonical()) !== JSON.stringify(b.canonical())) {
+      throw new Error('Canonical configs differ despite identical params');
+    }
+  });
+
+  runTest('mulberry32: deterministic and well-distributed', () => {
+    const r1 = mulberry32(12345);
+    const r2 = mulberry32(12345);
+    for (let i = 0; i < 1000; i++) {
+      const a = r1();
+      if (a !== r2()) throw new Error('same seed diverged');
+      if (a < 0 || a >= 1) throw new Error('PRNG out of [0,1)');
+    }
+    const r3 = mulberry32(999);
+    if (r1() === r3()) throw new Error('different seeds produced same first draw');
+  });
+
+  runTest('Reproducibility: EEG streams identical under the same seed', () => {
+    const neural = { delta: 0.3, theta: 0.2, alpha: 0.5, beta: 0.2, gamma: 0.1, fatigue: 0.1, adaptation: 0.9 };
+    const a = new EegInterface({ seed: 42 });
+    const b = new EegInterface({ seed: 42 });
+    for (let i = 0; i < 1000; i++) {
+      const sa = a.update(0.016, neural);
+      const sb = b.update(0.016, neural);
+      for (const k of ['delta', 'theta', 'alpha', 'beta', 'gamma', 'coherence', 'asymmetry']) {
+        if (sa[k] !== sb[k]) {
+          throw new Error(`EEG diverged on ${k} at step ${i}: ${sa[k]} vs ${sb[k]}`);
+        }
+      }
+    }
+  });
+
+  runTest('Reproducibility: EEG streams differ under different seeds', () => {
+    const neural = { delta: 0.3, theta: 0.2, alpha: 0.5, beta: 0.2, gamma: 0.1, fatigue: 0.1, adaptation: 0.9 };
+    const a = new EegInterface({ seed: 1 });
+    const b = new EegInterface({ seed: 2 });
+    let differed = false;
+    for (let i = 0; i < 500; i++) {
+      const sa = a.update(0.016, neural);
+      const sb = b.update(0.016, neural);
+      if (sa.theta !== sb.theta) { differed = true; break; }
+    }
+    if (!differed) throw new Error('different seeds produced identical streams');
+  });
+
+  runTest('ExperimentRecord: JSON includes modelVersion, seed and canonical config', () => {
+    const cfg = new SimulationConfig({ carrier: 220, beat: 6 });
+    const seed = new SimulationSeed(12345);
+    const rec = buildExperimentRecord({ config: cfg, seed, results: { neural: { alpha: 0.4 } } });
+    const json = JSON.parse(JSON.stringify(rec));
+    if (json.modelVersion !== MODEL_VERSION) throw new Error('missing modelVersion');
+    if (json.seed !== 12345) throw new Error('missing seed');
+    if (json.config.carrier !== 220 || json.config.beat !== 6) throw new Error('missing canonical config');
+    if (json.results.neural.alpha !== 0.4) throw new Error('missing results');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SYNTHETIC EEG VALIDITY (Phase 7)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('SyntheticEEG: band power stays finite and within [0,1] over 2000 steps', () => {
+    const eeg = new EegInterface();
+    const neural = { delta: 0.3, theta: 0.2, alpha: 0.5, beta: 0.2, gamma: 0.1, fatigue: 0.3, adaptation: 0.5 };
+    for (let i = 0; i < 2000; i++) {
+      const s = eeg.update(0.016, neural);
+      for (const k of ['delta', 'theta', 'alpha', 'beta', 'gamma', 'coherence']) {
+        if (!isFinite(s[k]) || s[k] < 0 || s[k] > 1) {
+          throw new Error(`EEG ${k} out of [0,1]: ${s[k]} at step ${i}`);
+        }
+      }
+    }
+  });
+
+  runTest('SyntheticEEG: 1/f background produces non-trivial fluctuation (no dead channels)', () => {
+    // Seeded for determinism. Zero neural drive: any fluctuation must come
+    // from the pink/white noise floor. Measured std ≈ 0.007 with seed 7.
+    const eeg = new EegInterface({ seed: 7 });
+    const neural = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0, fatigue: 0, adaptation: 0 };
+    const samples = [];
+    for (let i = 0; i < 500; i++) {
+      samples.push(eeg.update(0.016, neural).alpha);
+    }
+    const mean = samples.reduce((s, v) => s + v, 0) / samples.length;
+    const std = Math.sqrt(samples.reduce((s, v) => s + (v - mean) * (v - mean), 0) / samples.length);
+    if (!isFinite(std) || std < 0.004) {
+      throw new Error(`Expected pink-noise fluctuation (std ≥ 0.004), got std=${std.toFixed(5)}`);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // COGNITIVE MODEL (Phase 8)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('CognitiveStateModel: values and confidence stay in [0,1]', () => {
+    const m = new CognitiveStateModel();
+    m.setProfile(getProfileById('concentracion').modelParams);
+    const neural = { delta: 0.1, theta: 0.3, alpha: 0.4, beta: 0.8, gamma: 0.3, fatigue: 0.2, adaptation: 0.8, dominantFreq: 16 };
+    for (let i = 0; i < 6000; i++) {
+      m.update(0.016, true, neural);
+      const s = m.getState();
+      assertValidCognitiveState(s);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NEURAL → VISUAL MAPPING (Phase 9)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('VisualMapper: deterministic and provenance-tagged', () => {
+    const mapper = new NeuralToVisualMapper();
+    const neural = { fatigue: 0.2, theta: 0.4 };
+    const cognitive = { arousal: { value: 0.7 }, relaxation: { value: 0.6 } };
+    const vm = { complexity: 0.5, velocityScale: 0.6 };
+    const a = mapper.map({ neural, cognitive, baseFrequency: 220, visualMetaphor: vm });
+    const b = mapper.map({ neural, cognitive, baseFrequency: 220, visualMetaphor: vm });
+    if (a.coherence !== b.coherence || a.velocity !== b.velocity || a.complexity !== b.complexity) {
+      throw new Error('VisualMapper is not deterministic');
+    }
+    if (!a.provenance.coherence || a.provenance.coherence.tag !== 'visual metaphor') {
+      throw new Error('VisualState missing provenance tags');
+    }
+    assertValidNeuralState({ fatigue: 0.2, adaptation: 1 });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // AUDIO WATCHDOG (pure decision logic — src/core/audio-health.js)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('AudioWatchdog: contexto suspendido → resume al tercer chequeo', () => {
+    let health = 0;
+    let action = 'none';
+    for (let i = 0; i < 5; i++) {
+      const r = evaluateAudioHealth({ isPlaying: true, ctxState: 'suspended', gain: 0.5, rms: 0.4, prevHealth: health });
+      health = r.health;
+      action = r.action;
+      if (action === 'resume') break;
+    }
+    if (action !== 'resume') throw new Error('No resume tras 5 muestras suspendidas');
+    if (health !== 0) throw new Error('health no se resetea tras actuar');
+  });
+
+  runTest('AudioWatchdog: señal nula con ganancia → refade al tercer chequeo', () => {
+    let health = 0;
+    let action = 'none';
+    for (let i = 0; i < 5; i++) {
+      const r = evaluateAudioHealth({ isPlaying: true, ctxState: 'running', gain: 0.5, rms: 0.001, prevHealth: health });
+      health = r.health;
+      action = r.action;
+      if (action === 'refade') break;
+    }
+    if (action !== 'refade') throw new Error('No refade tras 5 muestras silenciosas');
+  });
+
+  runTest('AudioWatchdog: señal presente → nunca actúa y resetea contador', () => {
+    for (let i = 0; i < 10; i++) {
+      const r = evaluateAudioHealth({ isPlaying: true, ctxState: 'running', gain: 0.5, rms: 0.2, prevHealth: 2 });
+      if (r.action !== 'none' || r.health !== 0) {
+        throw new Error('Falsa alarma con señal presente');
+      }
+    }
+  });
+
+  runTest('AudioWatchdog: volumen del usuario a 0 → nunca actúa', () => {
+    for (let i = 0; i < 10; i++) {
+      const r = evaluateAudioHealth({ isPlaying: true, ctxState: 'running', gain: 0.0001, rms: 0, prevHealth: 2 });
+      if (r.action !== 'none' || r.health !== 0) {
+        throw new Error('El watchdog no debe pelear con el volumen a 0');
+      }
+    }
+  });
+
+  runTest('AudioWatchdog: sin sesión activa → nunca actúa', () => {
+    const r = evaluateAudioHealth({ isPlaying: false, ctxState: 'suspended', gain: 0.5, rms: 0 });
+    if (r.action !== 'none' || r.health !== 0) throw new Error('Actuó sin sesión activa');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // EXPERIMENTAL MODE (Phase 10)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Experiments: determinista bajo la misma semilla y config', () => {
+    const cfg = new SimulationConfig({ carrier: 220, beat: 6, condition: 'binaural', durationSec: 300 });
+    const a = new ExperimentRunner({ config: cfg, seed: 1234 }).run();
+    const b = new ExperimentRunner({ config: cfg, seed: 1234 }).run();
+    if (JSON.stringify(a.final) !== JSON.stringify(b.final)) {
+      throw new Error('Resultados finales no deterministas bajo la misma semilla');
+    }
+    if (JSON.stringify(a.psdBands) !== JSON.stringify(b.psdBands)) {
+      throw new Error('PSD no determinista bajo la misma semilla');
+    }
+  });
+
+  runTest('Experiments: binaural entraña hacia Δf; sin estímulo se relaja a línea base', () => {
+    const bin = new ExperimentRunner({
+      config: new SimulationConfig({ carrier: 220, beat: 6, condition: 'binaural' }),
+      seed: 7,
+    }).run();
+    const none = new ExperimentRunner({
+      config: new SimulationConfig({ carrier: 220, beat: 6, condition: 'none' }),
+      seed: 7,
+    }).run();
+    const fBin = bin.final.neural.dominantFreq;
+    const fNone = none.final.neural.dominantFreq;
+    if (!(Math.abs(fBin - 6) < Math.abs(fNone - 6))) {
+      throw new Error(`binaural debería acercar la dominante a 6 Hz (${fBin.toFixed(2)}) más que none (${fNone.toFixed(2)})`);
+    }
+  });
+
+  runTest('Experiments: PSD válida (finita y no negativa) y bandas integradas', () => {
+    const res = new ExperimentRunner({
+      config: new SimulationConfig({ carrier: 220, beat: 6, condition: 'binaural' }),
+      seed: 42,
+    }).run();
+    for (const p of res.psd) {
+      if (!isFinite(p.power) || p.power < 0) throw new Error('PSD inválida');
+    }
+    for (const v of Object.values(res.psdBands)) {
+      if (!isFinite(v) || v < 0) throw new Error('Band power PSD inválida');
+    }
+  });
+
+  runTest('Experiments: todas las condiciones producen estados finitos', () => {
+    for (const cond of ['binaural', 'pure-tone', 'noise', 'amplitude-modulation', 'none']) {
+      const res = new ExperimentRunner({
+        config: new SimulationConfig({ carrier: 220, beat: 8, condition: cond }),
+        seed: 5,
+      }).run({ durationSec: 60 });
+      for (const v of Object.values(res.final.neural)) if (!isFinite(v)) throw new Error(`neural NaN en ${cond}`);
+      for (const v of Object.values(res.final.eeg)) if (!isFinite(v)) throw new Error(`eeg NaN en ${cond}`);
+    }
+  });
+
+  runTest('Experiments: exporta registro JSON reproductible', () => {
+    const cfg = new SimulationConfig({ carrier: 220, beat: 10, condition: 'noise', durationSec: 60 });
+    const runner = new ExperimentRunner({ config: cfg, seed: 99 });
+    const results = runner.run({ durationSec: 60 });
+    const rec = runner.record(results);
+    if (rec.seed !== 99) throw new Error('seed no persistida');
+    if (rec.config.condition !== 'noise') throw new Error('config no persistida');
+    if (rec.results.psdBands.alpha === undefined) throw new Error('resultados ausentes');
+  });
+
+  runTest('Experiments: conditionProfile rechaza condiciones desconocidas', () => {
+    let threw = false;
+    try {
+      conditionProfile('klingon', new SimulationConfig({}));
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error('Condición desconocida no rechazada');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SUMMARY
+  // ──────────────────────────────────────────────────────────────────────────
+
+  console.log(`\n%cResults: ${passed} Passed, ${failed} Failed`, failed > 0 ? 'color: #f87171' : 'color: #4ade80');
+  console.groupEnd();
+  
+  return { passed, failed };
+}

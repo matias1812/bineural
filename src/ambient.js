@@ -155,16 +155,47 @@ export class AmbientEngine {
     const layer = {
       syncGain: this.ctx.createGain(),
       gain: this.ctx.createGain(), // volumen individual de esta capa
+      panner: this.ctx.createPanner(), // PHASE 5: HRTF spatializer
       lfo: null,
       lfoGain: null,
       nodes: [],
       timers: [],
     };
+    
+    // PHASE 5: Spatialization of ambient sound using HRTF
+    // We position the sound source in a 3D sphere around the user.
+    layer.panner.panningModel = 'HRTF';
+    layer.panner.distanceModel = 'inverse';
+    layer.panner.refDistance = 1;
+    layer.panner.maxDistance = 10000;
+    layer.panner.rolloffFactor = 1;
+
+    // Distribute randomly in a hemisphere around the user, at a distance of 2-5 meters.
+    const theta = Math.random() * Math.PI * 2; // azimuth
+    const phi = (Math.random() - 0.2) * Math.PI * 0.5; // elevation (-10 to 45 deg)
+    const r = 2 + Math.random() * 3;
+    const x = r * Math.sin(phi) * Math.cos(theta);
+    const y = r * Math.sin(phi) * Math.sin(theta);
+    const z = r * Math.cos(phi);
+    
+    // Older browsers might need setPosition, but positionX/Y/Z are standard now.
+    if (layer.panner.positionX) {
+      layer.panner.positionX.value = x;
+      layer.panner.positionY.value = y;
+      layer.panner.positionZ.value = z;
+    } else {
+      layer.panner.setPosition(x, y, z);
+    }
+
     layer.syncGain.gain.value = 1;
     layer.gain.gain.value = this.layerVolumes[type] ?? 1;
+    
+    // Route: syncGain -> gain -> panner -> ambientGain
     layer.syncGain.connect(layer.gain);
-    layer.gain.connect(this.ambientGain || this.output);
-    layer.nodes.push(layer.gain);
+    layer.gain.connect(layer.panner);
+    layer.panner.connect(this.ambientGain || this.output);
+    
+    layer.nodes.push(layer.gain, layer.panner);
     this.layers.set(type, layer);
     if (!this._dropBuf) this._dropBuf = makeNoise(this.ctx, 'white', 0.25);
     this._build(type, layer);

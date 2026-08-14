@@ -2,7 +2,7 @@
 // Estrategia: cache-first con revalidación en segundo plano para los assets
 // estáticos (los nombres llevan hash, así un deploy nuevo trae URLs nuevas),
 // y red-al-cache para las navegaciones (con fallback al index).
-const CACHE = 'vyneural-v1';
+const CACHE = 'vyneural-v2';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
