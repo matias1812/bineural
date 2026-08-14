@@ -709,6 +709,15 @@ a:hover {
   display: none !important;
 }
 
+/* En pantalla completa la sección de "instalar la APK" estorba: el usuario
+   ya está inmerso en la sesión. Se oculta en fullscreen (web) y en el modo
+   inmersivo CSS de la home. Dentro de la APK ya se oculta por .in-app. */
+html:fullscreen .apk-cta,
+html:-webkit-full-screen .apk-cta,
+body.immersive .apk-cta {
+  display: none !important;
+}
+
 .cmp-table {
   width: 100%;
   border-collapse: collapse;
