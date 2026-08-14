@@ -4,14 +4,18 @@ Shell Android (Kotlin + WebView) que envuelve la web Bineural. **Mismo core
 científico**: la simulación matemática es la del repo raíz y no se toca; la
 plataforma se adapta al core.
 
-> **Estado honesto: P1 = SOURCE DELIVERED, NOT VERIFIED.** El código está
-> listo para compilar en Android Studio, pero **no fue compilado ni probado en
-> dispositivo** (el SDK no existe en el entorno de desarrollo de la web). No
-> se puede declarar P1 PASS sin una prueba física en Android.
+> **Estado honesto: P1 = COMPILED, NOT DEVICE-TESTED.** La APK debug se
+> compiló correctamente en este entorno (JDK 17 + Gradle 8.2 + Android SDK
+> 34) → `app-debug.apk` (3,5 MB, SHA-256
+> `c53c1dce149416264bbefc1636e1b6aa3f65194346147076509342cb236f5a40`).
+> **Falta la prueba física en dispositivo** — no se puede declarar P1 PASS
+> sin correr el checklist TEST 01–16 en un Android real.
 
 ## Requisitos
 
-- Android Studio (Hedgehog o posterior) — trae JDK 17.
+- JDK 17 + Gradle 8.2 + Android SDK (platform 34, build-tools 34.0.0).
+  Instalados en este entorno en `~/.local/opt/jdk-17.0.20+8`,
+  `~/.local/opt/gradle-8.2` y `~/.local/android-sdk` (variables en `~/.bashrc`).
 - Ningún backend: la app funciona offline con los assets locales.
 
 ## Build
@@ -19,9 +23,10 @@ plataforma se adapta al core.
 ```bash
 # 1. (opcional) refrescar la web empaquetada:
 #    npm run build && rm -rf app/src/main/assets/bineural && cp -r ../dist app/src/main/assets/bineural
-# 2. Abrir la carpeta android/ en Android Studio y Run ▶ (o:)
+# 2. Compilar (o abrir android/ en Android Studio y Run ▶):
 cd android
-./gradlew assembleDebug     # genera app/build/outputs/apk/debug/app-debug.apk
+./gradlew.bat assembleDebug    # Windows (./gradlew en Linux/mac)
+# → app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
