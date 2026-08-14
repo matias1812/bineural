@@ -13,6 +13,7 @@ export default defineConfig({
         'como-usar': resolve(__dirname, 'como-usar.html'),
         'sobre-nosotros': resolve(__dirname, 'sobre-nosotros.html'),
         privacidad: resolve(__dirname, 'privacidad.html'),
+        descargar: resolve(__dirname, 'descargar.html'),
       },
     },
   },

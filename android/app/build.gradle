@@ -3,6 +3,17 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Credenciales de firma RELEASE: nunca en el repo. Se leen de local.properties
+// (gitignored) o de variables de entorno (CI). El keystore vive fuera del
+// repositorio (p. ej. ~/.local/bineural-release.keystore).
+def ksProps = new Properties()
+def ksFile = rootProject.file('local.properties')
+if (ksFile.exists()) ksFile.withInputStream { ksProps.load(it) }
+def ksStore = ksProps.getProperty('bineural.storeFile', System.getenv('BINEURAL_STORE_FILE') ?: '')
+def ksPass = ksProps.getProperty('bineural.storePassword', System.getenv('BINEURAL_STORE_PASS') ?: '')
+def ksAlias = ksProps.getProperty('bineural.keyAlias', System.getenv('BINEURAL_KEY_ALIAS') ?: 'bineural')
+def ksKeyPass = ksProps.getProperty('bineural.keyPassword', System.getenv('BINEURAL_KEY_PASS') ?: '')
+
 android {
     namespace 'com.vyneural.bineural'
     compileSdk 34
@@ -20,10 +31,23 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            if (ksStore && ksPass && ksKeyPass) {
+                storeFile file(ksStore)
+                storePassword ksPass
+                keyAlias ksAlias
+                keyPassword ksKeyPass
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Firma RELEASE real (requiere credenciales en local.properties/env).
+            signingConfig signingConfigs.release
         }
     }
     compileOptions {
