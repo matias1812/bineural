@@ -6,6 +6,7 @@
 // AudioContext.currentTime (AudioClock), nunca de timers JS, para que no
 // haya drift aunque la pestaña pase minutos en segundo plano.
 import { AudioClock } from './core/audio-clock.js';
+import { AudioTransport } from './core/audio-transport.js';
 
 export class BinauralEngine {
   constructor() {
@@ -25,6 +26,10 @@ export class BinauralEngine {
     this._epoch = null; // tiempo del AudioContext del último latido (fase 0)
     // Reloj maestro de la sesión (fase del latido, tiempo transcurrido).
     this.clock = new AudioClock(() => (this.ctx ? this.ctx.currentTime : 0));
+    // Transporte de salida (P0.5): 'element' (MediaStreamDestination → <audio>
+    // real) o 'direct' (ctx.destination, fallback iOS). Se asigna desde
+    // main.js antes del primer play.
+    this.transport = null;
   }
 
   get isPlaying() {
@@ -55,7 +60,13 @@ export class BinauralEngine {
       this.compressor.release.value = 0.25;
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.analyser);
-      this.analyser.connect(this.ctx.destination);
+      // Salida: el transporte decide dónde llega la señal (elemento real o
+      // destination directa). Sin transporte (antes de asignarlo): directa.
+      if (this.transport) {
+        this.transport.attach(this.ctx, this.analyser);
+      } else {
+        this.analyser.connect(this.ctx.destination);
+      }
       // Estado real del contexto como fuente de verdad del ciclo de vida:
       // iOS al bloquear, pérdida de audio focus o congelación de la pestaña
       // suspenden el contexto sin disparar visibilitychange.
@@ -162,6 +173,9 @@ export class BinauralEngine {
     right.start();
     this.leftOsc = left;
     this.rightOsc = right;
+    // En modo 'element', arranca el elemento real dentro del gesto de play:
+    // es ÉL el que el SO ve como reproducción (MediaSession, audio focus).
+    if (this.transport) this.transport.play();
     // Volumen objetivo de la sesión (para restauraciones y el watchdog de audio).
     this._volume = volume;
     // Época del primer latido: el primer pulso del timer se dispara a +100 ms.
@@ -298,6 +312,7 @@ export class BinauralEngine {
   stop(fade = true) {
     if (!this.ctx || !this.leftOsc) return;
     const oscs = [this.leftOsc, this.rightOsc];
+    if (this.transport) this.transport.pause();
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);

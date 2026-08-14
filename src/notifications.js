@@ -6,8 +6,6 @@
 // de calendario para cuando el navegador está cerrado o el SO suspende la PWA.
 
 const LS_ALARMS = 'vyneural_alarms';
-const ALARM_GRACE_MS = 5 * 60 * 1000; // 5 minutos de tolerancia si se abre tarde
-const CHECK_INTERVAL_MS = 15000; // revisar alarmas cada 15 s
 
 // ---------------------------------------------------------------- Almacenamiento
 export function getAlarms() {
@@ -95,21 +93,35 @@ export function swReady() {
   return typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
 }
 
+// ¿El navegador soporta Web Push? (PushManager + SW). Que sea "soporta" no
+// significa que funcione: sin backend configurado nunca llega ningún push.
+export function pushSupported() {
+  return (
+    typeof window !== 'undefined' &&
+    'PushManager' in window &&
+    'serviceWorker' in navigator
+  );
+}
+
 // ¿La plataforma soporta acciones en las notificaciones (botones)?
 // Android sí; Safari iOS no; no mostrar botones que no pueden funcionar.
 export function notificationActionsSupported() {
   return typeof Notification !== 'undefined' && 'actions' in Notification.prototype;
 }
 
-// Notificación de alarma "de sistema". Preferencia:
-//   1. registration.showNotification() → click y acciones gestionados por
-//      el Service Worker (notificationclick), incluso si la pestaña está
-//      congelada en ese momento.
-//   2. new Notification() (fallback sin SW) con onclick en la página.
-// Limitación honesta: ninguna de las dos dispara con la app cerrada; para
-// eso hace falta Web Push con backend (docs/system-robustness.md) o el
-// respaldo de calendario (Google Calendar / .ics).
-export function showSessionAlarmNotification(alarm) {
+// ── Providers de notificación (NotificationManager, P0) ─────────────────────
+// Se separan los dos caminos para que NotificationManager elija por
+// capacidad: el Service Worker tiene prioridad; sin SW se usa el camino local.
+//
+// Limitación honesta (compartida por ambos): ninguna de las dos dispara con
+// la app cerrada; para eso hace falta Web Push con backend
+// (docs/system-robustness.md) o el respaldo de calendario (Google Calendar /
+// .ics).
+
+// Notificación vía Service Worker (registration.showNotification). Preferida:
+// el click y las acciones los gestiona el SW (notificationclick), incluso si
+// la pestaña está congelada en ese momento.
+export function showSwNotification(alarm) {
   if (permissionsDisabled()) return false;
   if (!notificationSupported() || Notification.permission !== 'granted') return false;
   try {
@@ -121,30 +133,30 @@ export function showSessionAlarmNotification(alarm) {
         ]
       : [];
 
-    if (swReady()) {
-      navigator.serviceWorker.ready
-        .then((reg) => {
-          if (!reg.showNotification) throw new Error('sin showNotification');
-          reg.showNotification('¡Hora de tu sesión en Vyneural!', {
-            body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
-            tag: `vyneural-alarm-${alarm.id}`,
-            icon: '/icons/icon-192.png',
-            badge: '/icons/icon-192.png',
-            renotify: true,
-            data: { url },
-            actions,
-          });
-        })
-        .catch(() => fallbackNotification(alarm, url));
-      return true;
-    }
-    return fallbackNotification(alarm, url);
+    navigator.serviceWorker.ready
+      .then((reg) => {
+        if (!reg.showNotification) throw new Error('sin showNotification');
+        reg.showNotification('¡Hora de tu sesión en Vyneural!', {
+          body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
+          tag: `vyneural-alarm-${alarm.id}`,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/icon-192.png',
+          renotify: true,
+          data: { url },
+          actions,
+        });
+      })
+      .catch(() => showLocalNotification(alarm, url));
+    return true;
   } catch {
     return false;
   }
 }
 
-function fallbackNotification(alarm, url) {
+// Camino local: new Notification() con onclick en la página (fallback sin SW).
+export function showLocalNotification(alarm, url = getAlarmDeepLink(alarm)) {
+  if (permissionsDisabled()) return false;
+  if (!notificationSupported() || Notification.permission !== 'granted') return false;
   try {
     const n = new Notification('¡Hora de tu sesión en Vyneural!', {
       body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
@@ -162,6 +174,12 @@ function fallbackNotification(alarm, url) {
   } catch {
     return false;
   }
+}
+
+// Comodín con prioridad al Service Worker (compatibilidad con fireAlarm y
+// con la documentación previa).
+export function showSessionAlarmNotification(alarm) {
+  return showSwNotification(alarm);
 }
 
 // Dispara la alarma: notificación si la pestaña está oculta, sonido sutil si
@@ -285,44 +303,4 @@ export function downloadIcs(alarm) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-// ---------------------------------------------------------------- Watcher
-// Revisa las alarmas guardadas y dispara las vencidas (con tolerancia de 5
-// minutos si la app se abrió tarde). Las alarmas son de un solo disparo:
-// se eliminan al dispararse o al quedar obsoletas. Cada vez que el watcher
-// cambia el almacenamiento llama a onSync para que la UI se mantenga al día.
-export function startAlarmWatcher(onFire, onSync) {
-  let running = true;
-  function tick() {
-    if (!running) return;
-    const now = Date.now();
-    let changed = false;
-    for (const alarm of getAlarms()) {
-      if (now >= alarm.nextAt) {
-        changed = true;
-        if (now - alarm.nextAt <= ALARM_GRACE_MS) {
-          try {
-            onFire(alarm);
-          } catch {
-            /* el callback no debe romper el ciclo */
-          }
-        }
-      }
-    }
-    if (changed) {
-      saveAlarms(getAlarms().filter((a) => a.nextAt > now));
-      if (typeof onSync === 'function') {
-        try {
-          onSync();
-        } catch {
-          /* no romper el ciclo */
-        }
-      }
-    }
-  }
-  tick();
-  const iv = setInterval(tick, CHECK_INTERVAL_MS);
-  return () => {
-    running = false;
-    clearInterval(iv);
-  };
-}
+

@@ -1,20 +1,16 @@
 // src/core/media-anchor.js
-// "Ancla de medios": un elemento <audio> mudo que se reproduce en bucle junto
-// a la sesión binaural. Su único propósito es registrar la pestaña como
-// reproducción de medios ante el sistema operativo:
+// "Ancla de medios": un elemento <audio> mudo que se reproduce en bucle.
 //
-//   - Android (Chrome): el navegador trata la pestaña como un reproductor en
-//     marcha → aparece el controlador del reproductor en las notificaciones
-//     (Media Session) y NO suspende el AudioContext al cambiar de app o
-//     bloquear la pantalla (fuente de la "interferencia" al moverse por el
-//     teléfono: cada suspensión/reanudación produce clics o cortes).
-//   - iOS: sin un elemento <audio> reproduciéndose, Safari no muestra los
-//     controles del reproductor en la pantalla de bloqueo aunque el sonido
-//     real salga por Web Audio. Con la PWA instalada, el ancla habilita el
-//     control del reproductor y el audio en segundo plano.
+// ESTADO ACTUAL (P0.5): es un FALLBACK LEGACY, no la vía principal. Desde el
+// refactor de transporte (src/core/audio-transport.js), en Android/desktop el
+// audio REAL sale por AudioContext → MediaStreamDestination → <audio> real, y
+// ese elemento es el que el SO ve como reproducción (MediaSession, audio
+// focus, lock screen). El ancla solo se usa en modo 'direct' (iOS, que no
+// reproduce streams de Web Audio en un <audio>): ahí reclama la MediaSession
+// para que aparezcan los controles en la pantalla de bloqueo (PWA instalada).
 //
-// La pista es silencio real (muestras a cero), así que no aporta sonido:
-// todo el audio sigue saliendo por el AudioContext del motor binaural.
+// La pista es silencio real (muestras a cero), así que no aporta sonido; no
+// se usa volume=0 para que el navegador no la clasifique como "no audible".
 
 /** Construye un WAV PCM 16-bit mono de 8 kHz con muestras a cero (silencio). */
 export function buildSilentWav(seconds = 8) {

@@ -3364,3 +3364,14 @@ body.immersive .controls {
   margin-top: 14px;
   line-height: 1.5;
 }
+
+.alarm-honest-note {
+  font-size: 12px;
+  color: var(--warn, #fbbf24);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 10px 0;
+  line-height: 1.5;
+}

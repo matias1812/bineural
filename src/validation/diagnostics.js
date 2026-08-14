@@ -25,23 +25,35 @@ import { AudioClock } from '../core/audio-clock.js';
 import { AppLifecycle } from '../core/lifecycle.js';
 import { ExperimentEventLog } from '../core/experiment-events.js';
 import { probeCapabilities } from '../core/capabilities.js';
+import { AudioTransport } from '../core/audio-transport.js';
+import { planRecovery, RECOVERY } from '../core/audio-health.js';
+import { AlarmManager, inMemoryAlarmStore, alarmStateOnTick } from '../core/alarm-manager.js';
+import { detectNotificationCapabilities, capabilitySummary } from '../core/notification-capabilities.js';
+import { createNotificationManager } from '../core/notification-manager.js';
 
-export function runBineuralDiagnostics() {
+export async function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
   console.log('Running Scientific Validation Suite...');
   
   let passed = 0;
   let failed = 0;
+  const pending = [];
 
-  function runTest(name, testFn) {
-    try {
-      testFn();
-      console.log(`%c[PASS] %c${name}`, 'color: #4ade80', 'color: inherit');
-      passed++;
-    } catch (err) {
-      console.error(`%c[FAIL] %c${name}`, 'color: #f87171', 'color: inherit', err.message);
-      failed++;
-    }
+  // Soportar tests síncronos y asíncronos: los asíncronos (p. ej. AlarmManager
+  // con IndexedDB/memoria) resuelven después; el resumen espera a todos.
+  async function runTest(name, testFn) {
+    const p = (async () => {
+      try {
+        await testFn();
+        console.log(`%c[PASS] %c${name}`, 'color: #4ade80', 'color: inherit');
+        passed++;
+      } catch (err) {
+        console.error(`%c[FAIL] %c${name}`, 'color: #f87171', 'color: inherit', err.message);
+        failed++;
+      }
+    })();
+    pending.push(p);
+    return p;
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -771,9 +783,362 @@ export function runBineuralDiagnostics() {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // AUDIO TRANSPORT TESTS (P0.5 — pipeline único)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  function fakeCtx() {
+    const destination = { connected: false };
+    const streamDest = { stream: {} };
+    return {
+      destination,
+      streamDest,
+      createGain: () => ({
+        targets: [],
+        connect(n) { this.targets.push(n); if (n === destination) destination.connected = true; },
+        disconnect(n) { this.targets = this.targets.filter((t) => t !== n); },
+      }),
+      createMediaStreamDestination: () => streamDest,
+    };
+  }
+
+  function fakeElement() {
+    return {
+      srcObject: null,
+      paused: true,
+      currentTime: 0,
+      readyState: 0,
+      error: null,
+      onerror: null,
+      attrs: {},
+      playCalls: 0,
+      pauseCalls: 0,
+      setAttribute(k, v) { this.attrs[k] = v; },
+      play() { this.paused = false; this.playCalls++; return Promise.resolve(); },
+      pause() { this.paused = true; this.pauseCalls++; },
+    };
+  }
+
+  runTest('AudioTransport: iOS usa salida directa (sin MediaStream a <audio>)', () => {
+    const ctx = fakeCtx();
+    const t = new AudioTransport({ isIos: true, createElement: fakeElement });
+    const mode = t.attach(ctx, { connect: () => {} });
+    if (mode !== 'direct') throw new Error(`iOS debería ser direct, fue ${mode}`);
+    if (!ctx.destination.connected) throw new Error('debe conectar a ctx.destination');
+  });
+
+  runTest('AudioTransport: el audio REAL viaja por un único <audio> (modo element)', () => {
+    const ctx = fakeCtx();
+    const el = fakeElement();
+    const t = new AudioTransport({ isIos: false, createElement: () => el });
+    const mode = t.attach(ctx, { connect: () => {} });
+    if (mode !== 'element') throw new Error(`esperaba element, fue ${mode}`);
+    if (el.srcObject == null) throw new Error('el elemento debe recibir el stream real');
+    t.play();
+    if (el.paused || el.playCalls !== 1) throw new Error('play() debe arrancar el elemento');
+    t.pause();
+    if (!el.paused || el.pauseCalls !== 1) throw new Error('pause() debe pausar el elemento');
+    // reaffirm: si el SO lo pausó, vuelve a reproducir UNA vez.
+    el.paused = true;
+    if (!t.reaffirm()) throw new Error('reaffirm debe re-producir el elemento pausado');
+    if (t.reaffirm()) throw new Error('reaffirm no debe re-producir un elemento activo');
+  });
+
+  runTest('AudioTransport: si el <audio> falla, se degrada UNA vez a salida directa', () => {
+    const ctx = fakeCtx();
+    const el = fakeElement();
+    let fallback = 0;
+    const t = new AudioTransport({ isIos: false, createElement: () => el, onFallback: () => fallback++ });
+    t.attach(ctx, { connect: () => {} });
+    if (t.mode !== 'element') throw new Error('esperaba element');
+    el.onerror();
+    if (t.mode !== 'direct' || !t.fallbackApplied) throw new Error('fallback a direct no aplicado');
+    if (fallback !== 1) throw new Error('onFallback debe llamarse una vez');
+    if (!ctx.destination.connected) throw new Error('debe conectar a destination tras el fallback');
+    // Segundo error: el transporte anula onerror tras el fallback (no debe
+    // volver a intentar); si aún estuviera asignado, tampoco debe re-fallback.
+    if (typeof el.onerror === 'function') el.onerror();
+    if (fallback !== 1) throw new Error('no debe volver a hacer fallback');
+  });
+
+  runTest('PlanRecovery: decide UNA recuperación según el estado real (P0.5.9)', () => {
+    const r1 = planRecovery({ wasSuspended: true, ctxState: 'suspended' });
+    if (r1.action !== 'recover' || r1.state !== RECOVERY.REQUIRED) throw new Error('suspendido → recover');
+    const r2 = planRecovery({ wasSuspended: true, ctxState: 'running' });
+    if (r2.action !== 'none' || r2.state !== RECOVERY.SUCCESS) throw new Error('ya corriendo → success');
+    const r3 = planRecovery({ wasSuspended: false, transportMode: 'element', elementPaused: true });
+    if (r3.action !== 'reaffirm-element' || r3.state !== RECOVERY.RUNNING) throw new Error('elemento pausado → reaffirm');
+    const r4 = planRecovery({ wasSuspended: false });
+    if (r4.action !== 'none' || r4.state !== RECOVERY.NONE) throw new Error('nada que recuperar');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NOTIFICATION SYSTEM TESTS (P0 — AlarmManager / NotificationManager)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('AlarmManager: alarmStateOnTick decide wait/fire/miss/skip (estados reales)', async () => {
+    const now = 1_000_000;
+    if (alarmStateOnTick({ id: 'a', nextAt: now + 1000 }, now) !== 'wait') throw new Error('futuro → wait');
+    if (alarmStateOnTick({ id: 'a', nextAt: now - 1000 }, now) !== 'fire') throw new Error('dentro de la gracia → fire');
+    if (alarmStateOnTick({ id: 'a', nextAt: now - 10 * 60 * 1000 }, now) !== 'miss') throw new Error('pasó la gracia → miss');
+    if (alarmStateOnTick({ id: 'a', nextAt: now - 1000, state: 'CANCELLED' }, now) !== 'skip') throw new Error('cancelada → skip');
+    if (alarmStateOnTick({ id: 'a', nextAt: now - 1000, state: 'TRIGGERED' }, now) !== 'skip') throw new Error('disparada → skip');
+    if (alarmStateOnTick({ id: 'a' }, now) !== 'skip') throw new Error('sin nextAt → skip');
+  });
+
+  runTest('AlarmManager: dispara UNA vez y nunca duplica (one-shot + store durable)', async () => {
+    let fired = 0;
+    const store = inMemoryAlarmStore();
+    const am = new AlarmManager({ store, now: () => 1000, tickMs: 60000, onFire: () => fired++ });
+    await am.init();
+    await am.create({ id: 'al-1', nextAt: 1000 });
+    if (am.list().length !== 1) throw new Error('debe listar la alarma');
+    await am.tick();
+    if (fired !== 1) throw new Error('debe disparar exactamente una vez');
+    if (am.list().length !== 0) throw new Error('one-shot: fuera de la lista');
+    const stored = await store.getAll();
+    if (stored.length !== 0) throw new Error('one-shot: fuera del store durable');
+    await am.tick(); // segundo tick: no debe volver a disparar
+    if (fired !== 1) throw new Error('no debe duplicar');
+    am.dispose();
+  });
+
+  runTest('AlarmManager: cancelada nunca se ejecuta', async () => {
+    let fired = 0;
+    const am = new AlarmManager({ store: inMemoryAlarmStore(), now: () => 5000, tickMs: 60000, onFire: () => fired++ });
+    await am.init();
+    const a = await am.create({ id: 'al-x', nextAt: 5000 });
+    await am.cancel(a.id);
+    if (am.list().length !== 0) throw new Error('cancelada fuera de la lista');
+    await am.tick();
+    if (fired !== 0) throw new Error('cancelada no debe disparar');
+    am.dispose();
+  });
+
+  runTest('AlarmManager: alarma vencida se marca MISSED, no se ejecuta tarde', async () => {
+    let fired = 0;
+    const am = new AlarmManager({
+      store: inMemoryAlarmStore(),
+      now: () => 1_000_000,
+      graceMs: 5 * 60 * 1000,
+      onFire: () => fired++,
+      onSync: () => {},
+    });
+    await am.init();
+    await am.create({ id: 'al-old', nextAt: 1_000_000 - 30 * 60 * 1000 }); // 30 min atrás
+    await am.tick();
+    if (fired !== 0) throw new Error('no debe ejecutar una alarma vieja');
+    if (!am.lastNotification || am.lastNotification.state !== 'MISSED') throw new Error('debe marcarse MISSED');
+    if (am.list().length !== 0) throw new Error('la vencida no queda pendiente');
+    am.dispose();
+  });
+
+  runTest('AlarmManager: recarga recupera la alarma desde el store durable (Fase 5)', async () => {
+    const store = inMemoryAlarmStore();
+    const a1 = new AlarmManager({ store, now: () => 1000, tickMs: 60000 });
+    await a1.init();
+    await a1.create({ id: 'al-reload', nextAt: 999_999_999 });
+    const a2 = new AlarmManager({ store, now: () => 2000, tickMs: 60000 });
+    await a2.init();
+    const list = a2.list();
+    if (list.length !== 1 || list[0].id !== 'al-reload') throw new Error('debe restaurarse desde el store');
+    a1.dispose();
+    a2.dispose();
+  });
+
+  runTest('AlarmManager: al arrancar descarta (EXPIRED) lo que venció hace mucho', async () => {
+    const store = inMemoryAlarmStore();
+    await store.put({ id: 'al-exp', nextAt: 1000 });
+    let fired = 0;
+    const am = new AlarmManager({ store, now: () => 999_999_999, tickMs: 60000, onFire: () => fired++ });
+    await am.init();
+    if (am.list().length !== 0) throw new Error('la vencida debe descartarse al arrancar');
+    if (fired !== 0) throw new Error('no debe ejecutarse');
+    am.dispose();
+  });
+
+  runTest('AlarmManager: solo la pestaña PRIMARIA dispara (Web Locks, Fase 15)', async () => {
+    // Secundaria: el lock no se concede → no dispara jamás.
+    const denied = new AlarmManager({
+      store: inMemoryAlarmStore(),
+      now: () => 1000,
+      tickMs: 60000,
+      onFire: () => {
+        throw new Error('secundaria no debe disparar');
+      },
+      locks: { request: (_n, _o, cb) => cb(null) },
+    });
+    await denied.init();
+    await denied.create({ id: 'al-2', nextAt: 1000 });
+    await denied.tick();
+    if (denied.fires !== 0) throw new Error('secundaria no dispara');
+    denied.dispose();
+    // Primaria: el lock se concede → dispara una vez.
+    let fired = 0;
+    const primary = new AlarmManager({
+      store: inMemoryAlarmStore(),
+      now: () => 1000,
+      tickMs: 60000,
+      onFire: () => fired++,
+      locks: { request: (_n, _o, cb) => cb({}) },
+    });
+    await primary.init();
+    await primary.create({ id: 'al-3', nextAt: 1000 });
+    await primary.tick();
+    if (fired !== 1) throw new Error('primaria debe disparar');
+    primary.dispose();
+  });
+
+  runTest('AlarmManager: sin Web Locks, el BroadcastChannel elige UNA primaria', async () => {
+    const bus = {
+      subs: [],
+      // Entrega asíncrona, como BroadcastChannel real (si fuera síncrona, la
+      // respuesta llegaría antes de registrar el handler de la segunda pestaña).
+      postMessage(msg) {
+        queueMicrotask(() => this.subs.forEach((fn) => fn({ data: msg })));
+      },
+      set onmessage(fn) {
+        this.subs.push(fn);
+      },
+      get onmessage() {
+        return null;
+      },
+    };
+    const store = inMemoryAlarmStore();
+    let firedA = 0;
+    let firedB = 0;
+    const amA = new AlarmManager({
+      store,
+      now: () => 1000,
+      tickMs: 60000,
+      channel: bus,
+      instanceId: '00000000000001aaaa',
+      onFire: () => firedA++,
+    });
+    const amB = new AlarmManager({
+      store,
+      now: () => 1000,
+      tickMs: 60000,
+      channel: bus,
+      instanceId: '00000000000002bbbb',
+      onFire: () => firedB++,
+    });
+    await amA.init();
+    await amB.init();
+    if (amA._primary !== true || amB._primary !== false) {
+      throw new Error(`elección incorrecta: A=${amA._primary} B=${amB._primary}`);
+    }
+    await amA.create({ id: 'al-mt', nextAt: 1000 });
+    await amA.tick();
+    await amB.tick();
+    if (firedA !== 1 || firedB !== 0) throw new Error('solo la primaria dispara (sin duplicados)');
+    amA.dispose();
+    amB.dispose();
+  });
+
+  runTest('NotificationManager: el provider SW tiene prioridad; sin SW cae al local', () => {
+    let swShown = 0;
+    let localShown = 0;
+    const nm = createNotificationManager({
+      notificationSupported: () => true,
+      permissionState: () => 'granted',
+      swReady: () => true,
+      showSwNotification: () => {
+        swShown++;
+        return true;
+      },
+      showLocalNotification: () => {
+        localShown++;
+        return true;
+      },
+    });
+    const r = nm.notify({ id: 'n1', freq: 220 });
+    if (r.provider !== 'serviceWorker' || !r.shown) throw new Error('debe elegir el provider SW');
+    if (swShown !== 1 || localShown !== 0) throw new Error('SW primero, local no');
+    const nm2 = createNotificationManager({
+      notificationSupported: () => true,
+      permissionState: () => 'granted',
+      swReady: () => false,
+      showSwNotification: () => {
+        swShown++;
+        return true;
+      },
+      showLocalNotification: () => {
+        localShown++;
+        return true;
+      },
+    });
+    const r2 = nm2.notify({ id: 'n2', freq: 220 });
+    if (r2.provider !== 'local' || !r2.shown) throw new Error('sin SW → local');
+    if (localShown !== 1) throw new Error('local debe usarse una vez');
+  });
+
+  runTest('NotificationManager: sin permiso no muestra y no finge (denegado → null)', () => {
+    const nm = createNotificationManager({
+      notificationSupported: () => true,
+      permissionState: () => 'denied',
+      swReady: () => true,
+      showSwNotification: () => true,
+      showLocalNotification: () => true,
+    });
+    const r = nm.notify({ id: 'n3', freq: 220 });
+    if (r.provider !== null || r.shown !== false) throw new Error('denegado → no mostrar, no fingir');
+  });
+
+  runTest('NotificationManager: Push desactivado y Calendar manual (honestidad, Fase 13)', () => {
+    const nm = createNotificationManager({
+      notificationSupported: () => true,
+      permissionState: () => 'granted',
+    });
+    const st = nm.status();
+    const push = st.providers.find((p) => p.name === 'push');
+    const cal = st.providers.find((p) => p.name === 'calendar');
+    if (!push || push.enabled !== false || push.configured !== false) throw new Error('Push desactivado sin backend');
+    if (!cal || cal.manual !== true) throw new Error('Calendar es manual, nunca automático');
+  });
+
+  runTest('NotificationCapabilities: detección honesta (API disponible ≠ garantizado, Fase 12)', () => {
+    const caps = detectNotificationCapabilities({});
+    if (caps.backgroundScheduling !== 'NOT_GUARANTEED') throw new Error('no existe scheduler persistente sin Push');
+    if (caps.calendar !== 'AVAILABLE') throw new Error('calendario disponible como respaldo');
+    if (caps.push.configured !== false) throw new Error('push sin backend no está configurado');
+    const granted = detectNotificationCapabilities({
+      window: { PushManager: {}, mediaSession: {} },
+      navigator: { serviceWorker: {} },
+      Notification: { permission: 'granted', prototype: { actions: true } },
+      pushConfigured: false,
+      swRegistered: true,
+    });
+    if (!granted.notifications.supported || granted.notifications.permission !== 'granted') throw new Error('permiso concedido');
+    if (!granted.notifications.actions) throw new Error('acciones soportadas en esta plataforma');
+    if (!granted.push.supported || granted.push.configured) throw new Error('push: soportado pero NO configurado');
+    if (!granted.mediaSession.supported) throw new Error('media session detectada');
+    const rows = capabilitySummary(granted);
+    const pushRow = rows.find((r) => r.key === 'push');
+    if (!pushRow || !/requiere servidor/i.test(pushRow.status)) throw new Error('fila push honesta');
+  });
+
+  runTest('CalendarProvider: el .ics y Google Calendar son eventos reales (Fase 10)', async () => {
+    const prev = globalThis.location;
+    globalThis.location = { origin: 'https://vyneural.test', pathname: '/' };
+    try {
+      const { buildIcs, buildGoogleCalendarUrl } = await import('../notifications.js');
+      const alarm = { id: 'al-test-1', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
+      const ics = buildIcs(alarm);
+      for (const needle of ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:al-test-1@vyneural.cl', 'DTSTART:', 'DTEND:', 'SUMMARY:']) {
+        if (!ics.includes(needle)) throw new Error(`.ics sin ${needle}`);
+      }
+      const gcal = buildGoogleCalendarUrl(alarm);
+      if (!gcal.startsWith('https://calendar.google.com/calendar/render?')) throw new Error('url de Google Calendar');
+    } finally {
+      globalThis.location = prev;
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ──────────────────────────────────────────────────────────────────────────
 
+  await Promise.all(pending);
   console.log(`\n%cResults: ${passed} Passed, ${failed} Failed`, failed > 0 ? 'color: #f87171' : 'color: #4ade80');
   console.groupEnd();
   

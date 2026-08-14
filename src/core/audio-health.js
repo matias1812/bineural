@@ -13,6 +13,40 @@
 
 export const HEALTH_THRESHOLD = 3; // consecutive bad samples before acting
 
+// Estados del ciclo de recuperación al volver de segundo plano (P0.5.9).
+export const RECOVERY = {
+  NONE: 'NONE',
+  REQUIRED: 'REQUIRED',
+  RUNNING: 'RUNNING',
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED',
+};
+
+/**
+ * Decide qué recuperación hace falta al volver de segundo plano (P0.5.9).
+ * Se ejecuta UNA SOLA vez al volver; nunca reinicia la sesión completa.
+ * @param {object} s
+ * @param {boolean} s.wasSuspended   El AudioContext estaba suspendido al volver.
+ * @param {string} s.ctxState        'running' | 'suspended' | null
+ * @param {string} [s.transportMode] 'element' | 'direct'
+ * @param {boolean} [s.elementPaused] ¿El <audio> real está pausado?
+ * @returns {{action: string, state: string}}
+ *   action: 'none' | 'recover' | 'reaffirm-element'
+ */
+export function planRecovery({ wasSuspended, ctxState, transportMode = 'direct', elementPaused = null }) {
+  if (!wasSuspended && transportMode === 'element' && elementPaused === true) {
+    // El contexto nunca se suspendió pero el SO pausó el elemento: re-afirmar.
+    return { action: 'reaffirm-element', state: RECOVERY.RUNNING };
+  }
+  if (wasSuspended && ctxState === 'suspended') {
+    return { action: 'recover', state: RECOVERY.REQUIRED };
+  }
+  if (wasSuspended && ctxState === 'running') {
+    return { action: 'none', state: RECOVERY.SUCCESS };
+  }
+  return { action: 'none', state: RECOVERY.NONE };
+}
+
 /**
  * @param {object} s
  * @param {boolean} s.isPlaying    Is the session supposed to be playing?

@@ -3,8 +3,8 @@
 ## Cómo ejecutar
 
 ```bash
-npm test                       # suite headless (Node) — 54 tests, < 2 s
-window.runBineuralDiagnostics()# misma suite en el navegador (consola)
+npm test                       # suite headless (Node) — 71 tests, < 2 s
+window.runBineuralDiagnostics()# misma suite en el navegador (consola; async → await)
 npm run build                  # build de producción
 ```
 
@@ -46,6 +46,27 @@ perezosa para permitirlo).
 | Integridad con interrupciones del SO | 10 s + 2 s suspendido + 8 s → integridad 0.9 y texto honesto |
 | Pausa voluntaria ≠ interrupción | La integridad no baja por pausar (solo por fallos del audio) |
 | PlatformCapabilities | Cada capacidad con su función real; Push honesto sin backend |
+| AudioTransport: iOS → direct | Sin MediaStream a <audio> en iOS (limitación real) |
+| AudioTransport: modo element | El audio real viaja por UN único <audio> (srcObject) |
+| AudioTransport: fallback único | Si el <audio> falla, degrada UNA vez a salida directa |
+| PlanRecovery (P0.5.9) | Decide una recuperación según el estado real, sin reiniciar |
+
+### Sistema de notificaciones (P0 — AlarmManager / NotificationManager)
+
+| Test | Qué valida |
+|---|---|
+| `alarmStateOnTick` | wait/fire/miss/skip según estado real (gracia 5 min) |
+| Disparo único + anti-duplicado | One-shot en memoria y store durable; 2º tick no duplica |
+| Cancelada nunca se ejecuta | CANCELLED fuera de la lista y del store |
+| Vencida → MISSED | No se ejecuta una alarma vieja (pasada la gracia) |
+| Recarga desde store durable | La alarma sobrevive a una recarga (Fase 5) |
+| EXPIRED al arrancar | Lo que venció hace mucho se descarta sin ejecutarse |
+| Multi-tab (Web Locks) | Solo la pestaña PRIMARIA dispara (Fase 15) |
+| Multi-tab sin Web Locks | BroadcastChannel elige UNA primaria (instancia menor) |
+| NotificationManager providers | SW primero, local como fallback; denegado → no finge |
+| Push desactivado / Calendar manual | Honestidad: sin backend, nada automático |
+| NotificationCapabilities | API disponible ≠ garantizado; push "requiere servidor" |
+| CalendarProvider | `.ics` válido (UID/DTSTART/DTEND) + URL Google Calendar |
 
 ### Física de ondas (WaveField)
 
@@ -128,8 +149,8 @@ perezosa para permitirlo).
 | # | Ítem | Estado (2026-08-14) |
 |---|---|---|
 | 1 | `npm run build` | ✅ 6 páginas, 150 kB JS (gzip 48 kB) |
-| 2 | `npm test` (diagnósticos) | ✅ 54/54 (Node) |
-| 3 | Suite en el navegador | ✅ 54/54 (`window.runBineuralDiagnostics()`) |
+| 2 | `npm test` (diagnósticos) | ✅ 71/71 (Node) |
+| 3 | Suite en el navegador | ✅ 71/71 (`window.runBineuralDiagnostics()`, async) |
 | 4 | GPU (WebGL2) | ✅ contexto GL2 detectado; fallback GL1 (GLSL ES 1.00) + `OES_texture_float`; fallback CPU |
 | 5 | CPU fallback | ✅ presente en el código (`buildGLProgram` → null → rasterizador) |
 | 6 | Móvil | ⚠️ sin dispositivo físico disponible; canvas adaptativo (`devicePixelRatio`), rotación forzada en vertical |
@@ -143,8 +164,9 @@ perezosa para permitirlo).
 
 - **Entorno**: Windows (Git Bash), Node ≥ 18, Chrome (runtime del preview).
 - **Build**: `✓ built in ~1.3 s` — `dist/` regenerado (6 páginas + assets).
-- **Tests**: 54/54 en Node y 54/54 en el navegador (corridas consecutivas, sin
-  flakiness tras fijar semilla del test 1/f).
+- **Tests**: 71/71 en Node y 71/71 en el navegador (corridas consecutivas, sin
+  flakiness tras fijar semilla del test 1/f; la suite ahora soporta tests async
+  para AlarmManager).
 - **Robustez de sistema** (fase P0–P40, núcleo implementado): `AudioClock`
   (reloj maestro), `AppLifecycle` (máquina de estados), `ExperimentEventLog`
   (eventos + integridad de sesión), `PlatformCapabilities` (etiquetas

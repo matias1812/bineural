@@ -12,17 +12,23 @@ import { PROFILES, getProfileById } from './models/profiles.js';
 import { initStarfield } from './starfield.js';
 import {
   getAlarms,
-  saveAlarms,
-  removeAlarm,
   notificationSupported,
+  permissionsDisabled,
   iosNeedsInstall,
   requestPermission,
-  fireAlarm,
+  playChime,
   nextAlarmAt,
   buildGoogleCalendarUrl,
   downloadIcs,
-  startAlarmWatcher,
+  swReady,
+  pushSupported,
+  showSwNotification,
+  showLocalNotification,
+  isIos,
 } from './notifications.js';
+import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
+import { createNotificationManager } from './core/notification-manager.js';
+import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 
 import { runBineuralDiagnostics } from './validation/diagnostics.js';
 import {
@@ -34,6 +40,8 @@ import {
 import { AppLifecycle } from './core/lifecycle.js';
 import { ExperimentEventLog } from './core/experiment-events.js';
 import { probeCapabilities } from './core/capabilities.js';
+import { AudioTransport } from './core/audio-transport.js';
+import { planRecovery } from './core/audio-health.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -49,6 +57,14 @@ const simulation = new SimulationEngine(cymatics);
 const ambient = new AmbientEngine();
 simulation.ambient = ambient; // Link for auditory masking model
 
+// ── Transporte de audio (P0.5) ───────────────────────────────────────────────
+// Pipeline único: AudioContext → master → compressor → analyser →
+// MediaStreamDestination → <audio> real (el que el SO ve como reproducción)
+// en Android/desktop; en iOS (que no reproduce streams de Web Audio en un
+// <audio>) el sonido sale directo por ctx.destination y el ancla muda queda
+// como fallback legacy SOLO para reclamar la MediaSession.
+simulation.audio.transport = new AudioTransport({ isIos: isIos() });
+
 // ── Monitor de ciclo de vida e integridad de sesión (P5/P19/P20) ────────────
 // El estado del ciclo de vida lo decide la máquina pura AppLifecycle a partir
 // de eventos reales (visibilitychange + ctx.onstatechange), nunca de
@@ -61,10 +77,12 @@ const sessionLog = new ExperimentEventLog({
 window.__lifecycle = lifecycle;
 window.__sessionLog = sessionLog;
 // Hook de diagnóstico (solo lectura): estado real del motor para CI y para
-// verificación en dispositivo (conteo de osciladores, contexto, RMS…).
+// verificación en dispositivo (conteo de osciladores, contexto, RMS,
+// transporte y elemento).
 window.__audioProbe = () => ({
   ctx: simulation.audio.ctx,
   stats: simulation.audio.getAudioStats(),
+  transport: simulation.audio.transport ? simulation.audio.transport.getState() : null,
 });
 // Estado real del AudioContext como fuente de verdad: iOS al bloquear y la
 // pérdida de audio focus suspenden el contexto sin disparar visibilitychange.
@@ -506,9 +524,15 @@ function start() {
 // sigue saliendo por el AudioContext; el ancla es silencio.
 let audioAnchor = null;
 function startAnchor() {
+  // Fallback legacy SOLO para el transporte 'direct' (iOS): cuando el audio
+  // real sale por ctx.destination no hay elemento que reclame la MediaSession,
+  // así que el ancla muda lo hace. En modo 'element' el propio <audio> real
+  // es la reproducción: añadir un ancla sería duplicar la vía de medios.
+  const transport = simulation.audio.transport;
+  if (transport && transport.mode === 'element') return;
   if (!audioAnchor) {
     try {
-      audioAnchor = createSilentAudio(1);
+      audioAnchor = createSilentAudio(); // pista larga (ANCHOR_SECONDS=8 s)
       // Adjunto al DOM (oculto) por robustez: algunos navegadores exigen que
       // el elemento esté en el documento para reproducir de forma fiable.
       audioAnchor.style.display = 'none';
@@ -1448,22 +1472,32 @@ function restoreFromBackground() {
   const audio = simulation.audio;
   const ctx = audio.ctx;
   const wasSuspended = !!(ctx && ctx.state === 'suspended');
+  const ts = audio.transport ? audio.transport.getState() : null;
+  // Plan de recuperación UNA SOLA VEZ (P0.5.9): decidir qué hay que hacer
+  // según el estado real; nunca se reinicia la sesión completa.
+  const plan = planRecovery({
+    wasSuspended,
+    ctxState: ctx ? ctx.state : null,
+    transportMode: ts ? ts.mode : 'direct',
+    elementPaused: ts ? ts.elementPaused : null,
+  });
   // Máquina de ciclo de vida: visible + suspendido → RETURNING; la llegada
   // real a 'running' (ctx.onstatechange) completa la transición a FOREGROUND.
   lifecycle.transition('visibility', { visible: true, ctxState: ctx ? ctx.state : null, playing });
   sessionLog.foreground();
-  // Reanudación sin clics: si el SO suspendió el contexto (iOS al bloquear,
-  // pérdida de audio focus en Android), se baja la ganancia al piso, se
-  // reanuda y se sube con una rampa (recoverFade). Si el contexto siguió
-  // corriendo, solo se re-afirma el nivel de la sesión.
-  if (wasSuspended) {
+  if (plan.action === 'recover') {
+    // Reanudación sin clics: ganancia al piso, resume, rampa (recoverFade).
     audio.recoverFade(volumeLevel, 0.8);
-  } else {
+  } else if (plan.action !== 'reaffirm-element') {
+    // Contexto siguió corriendo: solo se re-afirma el nivel de la sesión.
     audio.fadeTo(volumeLevel, 0.4);
   }
-  // Re-afirma el ancla de medios si el sistema la pausó en segundo plano
-  // (iOS lo hace a veces al suspender la pestaña).
-  if (audioAnchor && audioAnchor.paused) {
+  // Re-afirma el transporte: en modo 'element', el <audio> real (si el SO lo
+  // pausó en segundo plano); en modo 'direct', el ancla legacy.
+  const transport = audio.transport;
+  if (transport && transport.mode === 'element') {
+    transport.reaffirm();
+  } else if (audioAnchor && audioAnchor.paused) {
     const p = audioAnchor.play();
     if (p && typeof p.catch === 'function') p.catch(() => {});
   }
@@ -1475,10 +1509,13 @@ function restoreFromBackground() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // iOS Safari (sin PWA instalada) suspende el AudioContext al salir de la
-    // pestaña: un duck rápido a 0 enmascara el clic de la suspensión del SO.
-    // En Android y en la PWA instalada el audio sigue sonando sin tocarlo.
+    // MITIGACIÓN DE INTERRUPCIÓN DE PLATAFORMA (no es comportamiento normal
+    // de background): en iOS Safari sin PWA instalada el SO suspende el
+    // AudioContext al salir; un duck rápido a 0 enmascara el clic de esa
+    // suspensión. En Android y en la PWA instalada el audio sigue sonando y
+    // NO se toca. El modo experimental lo registra para no ocultar nada.
     if (playing && iosNeedsInstall() && simulation.audio.ctx) {
+      sessionLog.note('duckOnBackground', { reason: 'ios-suspension-mitigation' });
       simulation.audio.fadeTo(0, 0.35);
     }
     const ctx = simulation.audio.ctx;
@@ -2610,9 +2647,7 @@ alarmSave.addEventListener('click', async () => {
     ...cfg,
     nextAt: nextAlarmAt(time).getTime(),
   };
-  const list = getAlarms();
-  list.push(alarm);
-  saveAlarms(list);
+  await alarmManager.create(alarm);
   renderAlarms();
   showToast(`Recordatorio guardado para las ${time}`);
   const perm = await requestPermission();
@@ -2644,7 +2679,7 @@ function renderAlarms() {
     del.setAttribute('aria-label', 'Eliminar recordatorio');
     del.textContent = '✕';
     del.addEventListener('click', () => {
-      removeAlarm(a.id);
+      alarmManager.cancel(a.id);
       renderAlarms();
     });
     li.append(info, del);
@@ -2669,7 +2704,7 @@ function renderAlarms() {
       del.setAttribute('aria-label', 'Eliminar recordatorio');
       del.textContent = '✕';
       del.addEventListener('click', () => {
-        removeAlarm(a.id);
+        alarmManager.cancel(a.id);
         renderAlarms();
       });
       li.append(info, del);
@@ -2710,37 +2745,174 @@ alarmIcs.addEventListener('click', () => {
   downloadIcs({ ...cfg, time, nextAt: nextAlarmAt(time).getTime() });
 });
 
-// Watcher de alarmas: al llegar la hora, notificación si la pestaña está
-// oculta o sonido + arranque de la sesión si está en primer plano. Al
-// disparar o descartar una alarma, re-renderiza la vista y el badge.
-startAlarmWatcher(
-  (alarm) => {
-    if (fireAlarm(alarm) === 'foreground') {
-      showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
-      // Configura la frecuencia exacta del recordatorio y arranca.
-      const custom = STATES.find((s) => s.custom);
-      customBase.value = String(Math.round(alarm.freq * 10) / 10);
-      customBeat.value = String(alarm.beat);
-      selectedWave = alarm.wave || 'sine';
-      selectState(custom);
-      updateCustomLabels();
-      syncWaveButtons();
-      updateCustomPanel();
-      updateCarrierWarning();
-      updateStatus();
-      if (alarm.minutes > 0) {
-        timerMinutes = alarm.minutes;
-        timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
-          btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
-        );
-      }
-      if (!playing) start();
+// ── Sistema de recordatorios (P0: AlarmManager + NotificationManager) ────────
+// AlarmManager es la ÚNICA autoridad: scheduler único, persistencia durable
+// (IndexedDB + espejo localStorage), multi-tab (Web Locks / BroadcastChannel)
+// y estados que impiden disparos duplicados. NotificationManager elige el
+// provider real (Service Worker → Local → respaldo de calendario); Push está
+// desactivado (sin backend) y la UI lo declara honestamente.
+const notificationManager = createNotificationManager({
+  notificationSupported,
+  permissionsDisabled,
+  swReady,
+  permissionState: () =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'denied',
+  showSwNotification,
+  showLocalNotification,
+});
+
+const alarmManager = new AlarmManager({
+  onFire: (alarm) => {
+    if (document.hidden) {
+      // Notificación de sistema solo si el permiso está concedido; si no se
+      // pudo (denegado/sin soporte), chime best-effort. NUNCA arranca una
+      // sesión en segundo plano: una notificación no crea audio (Fase 21).
+      const res = notificationManager.notify(alarm);
+      if (!res.shown) playChime();
+      return;
     }
+    // Primer plano: chime + arranque de la sesión con la frecuencia exacta.
+    playChime();
+    showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
+    const custom = STATES.find((s) => s.custom);
+    customBase.value = String(Math.round(alarm.freq * 10) / 10);
+    customBeat.value = String(alarm.beat);
+    selectedWave = alarm.wave || 'sine';
+    selectState(custom);
+    updateCustomLabels();
+    syncWaveButtons();
+    updateCustomPanel();
+    updateCarrierWarning();
+    updateStatus();
+    if (alarm.minutes > 0) {
+      timerMinutes = alarm.minutes;
+      timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
+        btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
+      );
+    }
+    if (!playing) start();
   },
-  renderAlarms,
-);
+  onSync: renderAlarms,
+  channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vyneural-alarms') : null,
+  locks: typeof navigator !== 'undefined' && navigator.locks ? navigator.locks : null,
+});
+window.__alarmManager = alarmManager;
+window.__notificationManager = notificationManager;
+
+// Persistencia durable sin bloquear el arranque: el scheduler ya corre con el
+// espejo localStorage; al abrir IndexedDB se migra y se re-sincroniza.
+createDurableStore()
+  .then((store) => {
+    alarmManager.store = store;
+    return alarmManager.init();
+  })
+  .then(renderAlarms)
+  .catch(() => {});
+
+// Diagnóstico honesto de notificaciones (Fase 24): expone el estado REAL de
+// cada capacidad, no etiquetas. Depurable en window.__notificationDiagnostics().
+window.__notificationDiagnostics = async () => {
+  const caps = detectNotificationCapabilities({ pushConfigured: false });
+  const am = window.__alarmManager;
+  const reg = typeof navigator !== 'undefined' && navigator.serviceWorker
+    ? await navigator.serviceWorker.getRegistration().catch(() => null)
+    : null;
+  return {
+    permission: caps.notifications.permission,
+    notificationSupport: caps.notifications.supported,
+    notificationActions: caps.notifications.actions,
+    serviceWorker: caps.serviceWorker.supported,
+    swRegistered: !!reg,
+    pushSupport: caps.push.supported,
+    pushConfigured: caps.push.configured,
+    calendarSupport: caps.calendar,
+    backgroundScheduling: caps.backgroundScheduling,
+    alarmCount: am ? am.list().length : 0,
+    activeScheduler: am ? am.activeScheduler : 'none',
+    lastAlarm: am ? am.lastAlarm : null,
+    lastNotification: am ? am.lastNotification : null,
+    lastError: am ? am.lastError : null,
+    providerStatus: window.__notificationManager ? window.__notificationManager.status() : null,
+    summary: capabilitySummary(caps),
+  };
+};
+
+// Sonda de plataforma para la matriz de compatibilidad en dispositivo real
+// (docs/compatibility-matrix.md). Recoge TODO lo que la matriz necesita desde
+// el propio dispositivo: abrir la consola, correr `await window.__platformProbe()`
+// y pegar el JSON como evidencia de cada celda de la fila del dispositivo.
+window.__platformProbe = async () => {
+  const nav = typeof navigator !== 'undefined' ? navigator : null;
+  const ua = nav ? nav.userAgent : null;
+  const uaData = nav && nav.userAgentData
+    ? {
+        platform: nav.userAgentData.platform,
+        mobile: nav.userAgentData.mobile,
+        brands: nav.userAgentData.brands ? nav.userAgentData.brands.map((b) => `${b.brand} ${b.version}`) : null,
+      }
+    : null;
+  let displayMode = 'browser';
+  try {
+    if (window.matchMedia('(display-mode: standalone)').matches) displayMode = 'standalone';
+    else if (window.matchMedia('(display-mode: fullscreen)').matches) displayMode = 'fullscreen';
+    else if (window.matchMedia('(display-mode: minimal-ui)').matches) displayMode = 'minimal-ui';
+  } catch {
+    /* sin matchMedia */
+  }
+  const caps = detectNotificationCapabilities({ pushConfigured: false });
+  const probe = typeof window.__audioProbe === 'function' ? window.__audioProbe() : null;
+  const stats = probe && probe.stats;
+  const transport = probe && probe.transport;
+  const swReg = nav && nav.serviceWorker ? await nav.serviceWorker.getRegistration().catch(() => null) : null;
+  const am = window.__alarmManager;
+  return {
+    capturedAt: new Date().toISOString(),
+    device: {
+      ua,
+      platform: uaData ? uaData.platform : null,
+      mobile: uaData ? uaData.mobile : null,
+      isIOS: isIos(),
+      isAndroid: /Android/i.test(ua || ''),
+      touch: nav ? nav.maxTouchPoints > 0 : false,
+      displayMode,
+      standalone: displayMode === 'standalone' || nav.standalone === true,
+    },
+    audio: stats
+      ? {
+          ctxState: stats.ctxState,
+          sampleRate: stats.sampleRate,
+          rms: stats.rms,
+          gain: stats.gain,
+          oscillatorCount: stats.oscillatorCount,
+          transportMode: transport ? transport.mode : null,
+          fallbackApplied: transport ? transport.fallbackApplied : null,
+          elementPaused: transport ? transport.elementPaused : null,
+          elementCurrentTime: transport ? transport.elementCurrentTime : null,
+          elementError: transport ? transport.elementError : null,
+          hasMediaStreamDestination: transport ? transport.hasMediaStreamDestination : null,
+        }
+      : null,
+    mediaSession: {
+      supported: caps.mediaSession.supported,
+      playbackState: nav && nav.mediaSession ? nav.mediaSession.playbackState : null,
+    },
+    wakeLock: {
+      supported: !!(nav && 'wakeLock' in nav),
+      active: !!(_wakeLock && !_wakeLock.released),
+    },
+    notifications: {
+      permission: caps.notifications.permission,
+      actions: caps.notifications.actions,
+    },
+    serviceWorker: { registered: !!swReg, scope: swReg ? swReg.scope : null },
+    push: { supported: caps.push.supported, configured: caps.push.configured },
+    badges: { setAppBadge: !!(nav && nav.setAppBadge) },
+    alarms: am ? { count: am.list().length, scheduler: am.activeScheduler } : null,
+  };
+};
+
 // Vista inicial: sincroniza la lista y el badge con las alarmas guardadas
-// (después del primer tick del watcher, que descarta las vencidas).
+// (el primer tick del manager descarta las vencidas).
 renderAlarms();
 
 // ---------------------------------------------------------------- Arranque

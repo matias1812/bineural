@@ -112,3 +112,54 @@ self.addEventListener('notificationclick', (e) => {
 self.addEventListener('notificationclose', (e) => {
   /* sin telemetría local */
 });
+
+// ── Web Push (P1) ───────────────────────────────────────────────────────────
+// Recibe un push enviado por un backend y muestra la notificación. Sin
+// backend configurado este handler nunca se dispara; la UI lo declara
+// honestamente ("No configurado — requiere servidor"). El payload esperado:
+// { title, body, url, tag, actions }.
+self.addEventListener('push', (e) => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch (_) {
+    /* payload vacío o no JSON */
+  }
+  const actions = Array.isArray(data.actions) && data.actions.length ? data.actions : [];
+  const payload = {
+    body: data.body || 'Vyneural',
+    tag: data.tag || 'vyneural-push',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    renotify: true,
+    data: { url: data.url || '/' },
+  };
+  if (actions.length) payload.actions = actions;
+  e.waitUntil(self.registration.showNotification(data.title || 'Vyneural', payload));
+});
+
+// ── Message bus página ⇄ SW (P0, Fase 17) ───────────────────────────────────
+// Solo se aceptan mensajes con schema conocido; el resto se ignora. El SW no
+// es un scheduler persistente: aquí solo responde al diagnóstico y ejecuta
+// comandos válidos que la página no puede hacer sola.
+self.addEventListener('message', (e) => {
+  const m = e && e.data;
+  if (!m || typeof m.type !== 'string') return;
+  switch (m.type) {
+    case 'DIAGNOSTICS':
+      // Ping de estado: la página pregunta si el SW está activo.
+      if (e.source && e.source.postMessage) {
+        e.source.postMessage({
+          type: 'SW_STATUS',
+          active: true,
+          cache: CACHE,
+          hasPush: 'PushManager' in self,
+          pushConfigured: false, // sin backend
+        });
+      }
+      break;
+    default:
+      // Tipo no reconocido: no procesar (validación de schema).
+      break;
+  }
+});

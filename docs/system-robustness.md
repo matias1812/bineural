@@ -81,6 +81,41 @@ El resumen de sesión muestra la integridad: `100%` o
 `92% — Interrupción de audio 24.8 s`. Registro de eventos en
 `window.__sessionLog` y máquina en `window.__lifecycle` (para depuración).
 
+## P0.5 — Transporte de audio (pipeline único, sin "audio falso")
+
+La arquitectura de reproducción es ahora un **solo pipeline**:
+
+```text
+AudioContext → masterGain → compressor → analyser → outputTap
+                                                        │
+                                     ┌──────────────────┴──────────┐
+                                'element' (Android/desktop)    'direct' (iOS)
+                                     │                            │
+                          MediaStreamDestination            ctx.destination
+                                     │
+                              <audio srcObject>  ← la reproducción REAL
+                                     │              (MediaSession, audio
+                                     ▼              focus, lock screen)
+                                    OS
+```
+
+- **`src/core/audio-transport.js`**: decide el modo por plataforma. En
+  `element`, el `<audio>` real reproduce la sesión (nunca `muted`/`volume=0`);
+  es ÉL quien reclama la MediaSession. Si el elemento falla en runtime, se
+  degrada UNA vez a `direct` (`fallbackApplied`) y main.js añade el ancla
+  legacy.
+- **El ancla muda quedó como fallback legacy** (solo modo `direct`, iOS): ya
+  no es el mecanismo principal.
+- **Sin modificar el estímulo por estar en background**: el duck a 0 solo
+  existe como *mitigación de interrupción de plataforma* en iOS Safari sin
+  PWA (el SO suspende sí o sí) y queda registrado en el log de eventos
+  (`duckOnBackground`). No es comportamiento normal de background.
+- **Recuperación UNA sola vez** (`planRecovery`, P0.5.9): al volver, decide
+  `recover` / `reaffirm-element` / `none` según el estado real; nunca
+  reinicia la sesión. Estados NONE/REQUIRED/RUNNING/SUCCESS/FAILED.
+- **Diagnóstico**: `window.__audioProbe()` incluye transporte y elemento
+  (modo, paused, readyState, currentTime, error) — P0.5.5.
+
 ## P12/P14/P15 — Notificaciones de alarma y Service Worker
 
 - `public/sw.js` implementa `notificationclick` (cerrar, enfocar ventana
@@ -112,21 +147,29 @@ añadir `push` → `showNotification` en `sw.js` y suscripción VAPID.
   `dt` acumulado (la simulación avanza en tiempo real; los integradores
   dt-lineales siguen siendo estables).
 
-## P33 — Matriz de compatibilidad (a validar en dispositivo real)
+## P33 — Matriz de compatibilidad (verificación en dispositivo real)
 
-| Capacidad | Chrome Android | Chrome Desktop | Safari iOS | Safari iOS PWA | Firefox Android | Samsung Internet |
-|---|---|---|---|---|---|---|
-| Audio en segundo plano | Depende del ancla de medios (tab audible) | n/a (pestaña oculta suspende) | ❌ sin PWA | ✅ 16.4+ | Depende de ajuste "audio en segundo plano" | Igual que Chrome |
-| Controles en notificaciones/lock | ✅ (MediaSession) | ✅ (controles de medios del navegador) | ❌ sin PWA | ✅ | ✅ | ✅ |
-| Notificaciones | ✅ | ✅ | ❌ sin PWA | ✅ 16.4+ | ✅ | ✅ |
-| Acciones en notificaciones | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| Wake Lock | ✅ | ✅ (Chrome 84+) | ❌ | ❌ | ❌ | ✅ |
-| Service Worker | ✅ | ✅ | ❌ sin PWA | ✅ | ✅ | ✅ |
-| Push | ✅ (requiere servidor) | ✅ | ❌ sin PWA | ✅ | ✅ | ✅ |
-| Fullscreen | ✅ | ✅ | ❌ (Safari no expone API estándar) | ✅ | ✅ | ✅ |
+Matriz completa con estados (WORKS / LIMITED / NOT GUARANTEED / UNSUPPORTED /
+NOT TESTED), base de evidencia con fuentes, protocolo de verificación T1–T6,
+plantilla de evidencia y limitaciones conocidas:
 
-No marcar "compatible" solo porque la API exista: cada fila debe probarse
-en el dispositivo real (ver tests de tortura).
+**→ [`docs/compatibility-matrix.md`](compatibility-matrix.md)**
+
+Resumen de lo verificado (2026):
+
+| Capacidad | Chrome Android | Android PWA | iOS Safari (sin instalar) | iOS PWA (instalada) |
+|---|---|---|---|---|
+| Audio en segundo plano | WORKS (elemento audible) | WORKS | NOT GUARANTEED (suspende) | LIMITED · NOT TESTED (ancla legacy) |
+| Controles lock screen | WORKS | WORKS | NOT GUARANTEED | LIMITED · NOT TESTED |
+| Notificaciones | WORKS | WORKS | UNSUPPORTED | WORKS (16.4+, Push) |
+| Acciones en notificaciones | WORKS | WORKS | UNSUPPORTED | UNSUPPORTED |
+| Wake Lock | WORKS | WORKS | WORKS (16.4+) | LIMITED (roto 16.4–18.3; OK 18.4+) |
+| Service Worker | WORKS | WORKS | UNSUPPORTED | WORKS |
+| Push | NOT CONFIGURED | NOT CONFIGURED | UNSUPPORTED | NOT CONFIGURED (soportado 16.4+) |
+
+El dispositivo real se captura con `await window.__platformProbe()` (consola)
++ los hooks `__audioProbe`, `__lifecycle`, `__sessionLog` y
+`__notificationDiagnostics`; el JSON se pega como evidencia en la matriz.
 
 ## P34 — Tests de tortura (manuales, checklist)
 

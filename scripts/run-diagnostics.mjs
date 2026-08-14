@@ -16,7 +16,7 @@ if (isNode) {
   console.warn = (...a) => orig[1](...a.map((x) => (typeof x === 'string' ? x.replace(/%c/g, '') : x)));
 }
 
-const { passed, failed } = runBineuralDiagnostics();
+const { passed, failed } = await runBineuralDiagnostics();
 
 if (isNode) {
   if (failed > 0) {

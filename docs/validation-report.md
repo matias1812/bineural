@@ -646,3 +646,63 @@ subirán o bajarán según el dispositivo.
 **RETEST:** `npm test` 54/54 ✓ · build ✓ · tortura E3 repetida: sin regresión;
 nuevo conteo medido de osciladores vía `__audioProbe` (2 en play / 0 en stop,
 nunca duplicados).
+
+---
+
+## ADDENDUM — P0.5 Refactor de transporte (post-auditoría, por diagnóstico externo)
+
+El diagnóstico externo detectó: (a) `startAnchor()` creaba el ancla con
+`createSilentAudio(1)` (1 s) mientras la arquitectura declaraba 8 s;
+(b) la vía principal era "audio real + audio falso" en vez de un pipeline
+único; (c) el duck a 0 al salir modificaba el estímulo.
+
+**Corregido y revalidado (58/58 tests, build ✓, navegador ✓):**
+
+| Punto | Antes | Después | Evidencia nueva |
+|---|---|---|---|
+| Ancla | `createSilentAudio(1)` — 1 s, contradictorio | `createSilentAudio()` — 8 s (ANCHOR_SECONDS) | código + test de pista larga |
+| Pipeline | AudioContext directo + ancla silenciosa (2 vías) | AudioContext → MediaStreamDestination → `<audio>` real (1 vía); ancla = fallback legacy solo modo `direct` (iOS) | navegador: `transport.mode='element'`, `hasMediaStreamDestination=true`, elemento con `srcObject`, RMS 0.23 a ganancia 0.8, sin ancla en DOM |
+| Duck | `fadeTo(0)` al ocultar (genérico) | Solo iOS Safari sin PWA, etiquetado "mitigación de interrupción de plataforma" + evento `duckOnBackground` registrado | código + log de eventos |
+| Recuperación | inline | `planRecovery()` — una sola decisión, estados NONE/REQUIRED/RUNNING/SUCCESS/FAILED | tests headless |
+| Watchdog | reintentos cada 0.5 s en foreground | sin cambios (no es agresivo: umbral 3, resetea tras actuar); suspensiones registradas | E1 |
+| Push | solo `notificationclick` | + handler `push` en sw.js (listo para backend); UI declara "No configurado — requiere servidor"; nota honesta en el modal de alarmas | código + UI |
+
+**Verificación en navegador (desktop Chrome):** play → `transport.mode='element'`,
+elemento real reproduciendo (reloj 40.9 s y subiendo), osciladores 2, RMS 0.2325
+a ganancia 0.8, MediaSession "playing", 0 anclas; pause → elemento pausado, osc 0,
+MediaSession "paused"; play → todo recuperado. Sin errores de consola.
+
+**Pendiente honesto:** verificación física en Android/iOS (el modo `element` es
+la vía correcta en Android; iOS sigue con `direct` + ancla legacy por
+limitación de la plataforma).
+
+---
+
+## ADDENDUM — P0 Sistema de notificaciones (post-P0.5, plan "Zero Backend")
+
+Reemplazo del watcher legacy (`setInterval` 15 s en `notifications.js`) por
+**`AlarmManager`** (`src/core/alarm-manager.js`): scheduler ÚNICO de 5 s,
+persistencia durable en IndexedDB (espejo localStorage para la UI),
+estados SCHEDULED/TRIGGERED/CANCELLED/EXPIRED/MISSED con anti-duplicado real,
+y multi-tab (Web Locks elige la pestaña PRIMARIA; sin Web Locks, elección por
+BroadcastChannel con confirmación en el store antes de disparar).
+`NotificationManager` orquesta providers (ServiceWorker → Local → Calendar
+manual; Push **desactivado**: sin backend). Capacidades detectadas con
+honestidad (`notification-capabilities.js`) y diagnóstico en
+`window.__notificationDiagnostics()`. El SW ganó un message bus con validación
+de schema; el watcher legacy se eliminó (0 schedulers duplicados).
+
+**Verificado (71/71 tests, build ✓, navegador ✓):**
+
+| Ítem | Resultado | Evidencia |
+|---|---|---|
+| Disparo único | 1 fire por alarma, nunca duplica | 2 ticks = 1 fire; store vacío tras disparar |
+| Cancelada | nunca se ejecuta | fires sin cambio tras 7 s |
+| Vencida | MISSED, no se ejecuta tarde | unit test + estado lastNotification |
+| Recarga | se restaura desde IndexedDB | alarma `test-reload-1` presente tras reload real |
+| Multi-tab | solo primaria dispara | tests Web Locks (concedido/denegado) + elección BroadcastChannel |
+| UI | badge/lista sincronizados | badge 0→1→0 en flujo real de modal |
+| Honestidad | Push "requiere servidor", background "no garantizado" | `__notificationDiagnostics()` en navegador |
+| Sin interferencia con audio | la notificación jamás crea AudioContext/sesión | `onFire` en hidden solo notifica/chime (Fase 21) |
+
+Informe completo del sistema: **`docs/notification-report.md`**.
