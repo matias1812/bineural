@@ -43,6 +43,11 @@ class MainActivity : ComponentActivity() {
         s.mediaPlaybackRequiresUserGesture = false
         s.allowFileAccess = true
         s.useWideViewPort = true
+        // Los módulos ES del build de Vite se cargan en modo CORS y el origen
+        // file:// es opaco: sin esto Chromium bloquea los .js en silencio y la
+        // app se queda en la pantalla de carga. Solo habilita file→file (la
+        // app es 100% offline; nada externo necesita acceso universal).
+        s.allowFileAccessFromFileURLs = true
 
         webView.addJavascriptInterface(AndroidBridge(this, scheduler, permissions), "AndroidBridgeNative")
 
