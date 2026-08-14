@@ -145,7 +145,7 @@ a:hover {
   justify-content: center;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 920px) {
   .nav-toggle {
     display: inline-flex;
   }
@@ -170,6 +170,20 @@ a:hover {
 
   .site-links a {
     padding: 12px 14px;
+  }
+}
+
+/* Entre 920 px y ~1100 px los 6 enlaces no caben en una fila y el navbar se
+   rompe en dos líneas. En ese rango el menú se compacta: fuente menor y
+   padding más corto para que quepa en una sola fila. */
+@media (min-width: 921px) and (max-width: 1150px) {
+  .site-links a {
+    font-size: 13px;
+    padding: 7px 9px;
+  }
+
+  .site-nav {
+    padding: 12px 18px;
   }
 }
 
@@ -715,6 +729,17 @@ a:hover {
 html:fullscreen .apk-cta,
 html:-webkit-full-screen .apk-cta,
 body.immersive .apk-cta {
+  display: none !important;
+}
+
+/* Fullscreen sin distracciones: en la sesión inmersiva se ocultan el navbar
+   y el HUD (que no aportan nada con las gotas a pantalla completa). */
+html:fullscreen .site-nav,
+html:-webkit-full-screen .site-nav,
+body.immersive .site-nav,
+html:fullscreen #hud,
+html:-webkit-full-screen #hud,
+body.immersive #hud {
   display: none !important;
 }
 

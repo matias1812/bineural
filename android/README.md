@@ -41,7 +41,7 @@ La firma release lee las credenciales de `local.properties` (gitignored) o de
 las variables `BINEURAL_STORE_FILE/BINEURAL_STORE_PASS/BINEURAL_KEY_ALIAS/
 BINEURAL_KEY_PASS`. El keystore vive FUERA del repositorio
 (`~/.local/bineural-release.keystore`); nunca se sube. La APK release actual:
-SHA-256 `2a4bc7b5f34122f0beb1763f05c88b706fd7367438463ce50f3168705f933ef5`
+SHA-256 `fe164eeb1bc92f81713d6da6321898a68fbb7581c886dab76a02534629411e61`
 (se sirve en la web en `/vyneural.apk`).
 
 ## Qué implementa

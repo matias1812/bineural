@@ -149,7 +149,13 @@ class MainActivity : ComponentActivity() {
               window.AndroidBridge = {
                 version: AndroidBridgeNative.getVersion(),
                 postMessage: function (m) {
-                  try { return JSON.parse(AndroidBridgeNative.postMessage(JSON.stringify(m))); } catch (e) { return null; }
+                  try {
+                    // El adapter ya manda un JSON string (el objeto nativo solo
+                    // acepta String): si m es string se pasa tal cual, si es
+                    // objeto se serializa. Idempotente, sin doble stringify.
+                    var raw = (typeof m === 'string') ? m : JSON.stringify(m);
+                    return JSON.parse(AndroidBridgeNative.postMessage(raw));
+                  } catch (e) { return null; }
                 },
                 getPlatformInfo: function () {
                   try { return JSON.parse(AndroidBridgeNative.getPlatformInfo()); } catch (e) { return null; }

@@ -3,9 +3,12 @@ package com.vyneural.bineural.bridge
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
+import java.io.File
 import android.webkit.JavascriptInterface
 import com.vyneural.bineural.BuildConfig
 import com.vyneural.bineural.MainActivity
@@ -73,7 +76,19 @@ class AndroidBridge(
                 "START_BACKGROUND_AUDIO" -> {
                     val base = payload?.optDouble("base", 220.0) ?: 220.0
                     val beat = payload?.optDouble("beat", 6.0) ?: 6.0
+                    val wave = payload?.optString("wave", "sine") ?: "sine"
                     AudioForegroundService.start(context, base, beat)
+                    if (wave.isNotEmpty()) AudioForegroundService.setWave(context, wave)
+                    respond("OK", command, null)
+                }
+                "SET_WAVE" -> {
+                    val wave = payload?.optString("wave", "sine") ?: "sine"
+                    AudioForegroundService.setWave(context, wave)
+                    respond("OK", command, null)
+                }
+                "SET_AUDIO_LEVEL" -> {
+                    val level = payload?.optDouble("level", -1.0) ?: -1.0
+                    if (level in 0.0..1.0) AudioForegroundService.setVolume(context, level)
                     respond("OK", command, null)
                 }
                 "PAUSE_BACKGROUND_AUDIO" -> {
@@ -148,6 +163,29 @@ class AndroidBridge(
                 "TEST_NOTIFICATION" -> {
                     NotificationHelper.showAlarm(context, "Vyneural · Prueba", "Notificaciones funcionando (diagnóstico).")
                     respond("OK", command, null)
+                }
+                "SAVE_ICS" -> {
+                    // Guarda el .ics del recordatorio en Descargas. El DownloadManager
+                    // no puede bajar blob: URLs (son internas del renderer), así que
+                    // la web manda el contenido por el bridge y se escribe directo.
+                    val name = payload?.optString("fileName", "vyneural-recordatorio.ics") ?: "vyneural-recordatorio.ics"
+                    val content = payload?.optString("content", "") ?: ""
+                    if (content.isEmpty()) return respond("INVALID", command, null)
+                    val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "vyneural-recordatorio.ics" }
+                    try {
+                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                        val file = File(dir, safeName)
+                        file.parentFile?.mkdirs()
+                        file.writeText(content, Charsets.UTF_8)
+                        // Notificar a la galería/gestor de archivos y al usuario.
+                        MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), arrayOf("text/calendar"), null)
+                        BineuralLog.d("bridge", "ICS guardado: ${file.absolutePath}")
+                        val data = JSONObject().put("path", file.absolutePath).put("fileName", safeName)
+                        respond("OK", command, data)
+                    } catch (e: Exception) {
+                        BineuralLog.e("bridge", "no se pudo guardar el .ics", e)
+                        respond("BRIDGE_ERROR", command, null)
+                    }
                 }
                 else -> respond("DENIED", command, null)
             }

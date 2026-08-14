@@ -22,6 +22,9 @@ object BridgeCommands {
         "SET_FULLSCREEN",
         "SET_ORIENTATION",
         "TEST_NOTIFICATION",
+        "SAVE_ICS",
+        "SET_WAVE",
+        "SET_AUDIO_LEVEL",
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

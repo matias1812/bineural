@@ -28,6 +28,8 @@ class BinauralToneEngine {
     private val targetBeat = AtomicReference(6.0)
     private val gain = AtomicReference(0.0)
     private val targetGain = AtomicReference(0.6)
+    private val volume = AtomicReference(0.6)
+    private val wave = AtomicReference(0) // 0 sine · 1 triangle · 2 sawtooth · 3 square
     private val playing = AtomicBoolean(false)
     private var phaseL = 0.0
     private var phaseR = 0.0
@@ -45,7 +47,13 @@ class BinauralToneEngine {
     }
 
     fun resume() {
-        if (playing.get()) targetGain.set(0.6)
+        if (playing.get()) targetGain.set(volume.get())
+    }
+
+    /** Nivel de volumen de la sesión (0..1); se aplica al reanudar/retomar. */
+    fun setVolume(level: Double) {
+        volume.set(level.coerceIn(0.0, 1.0))
+        if (playing.get()) targetGain.set(level.coerceIn(0.0, 1.0))
     }
 
     fun retune(newBase: Double, newBeat: Double) {
@@ -53,9 +61,35 @@ class BinauralToneEngine {
         targetBeat.set(newBeat)
     }
 
+    /** Forma de onda: sine / triangle / sawtooth / square (mismo set que la web). */
+    fun setWave(waveId: String) {
+        val w = when (waveId.lowercase()) {
+            "triangle" -> 1
+            "sawtooth" -> 2
+            "square" -> 3
+            else -> 0
+        }
+        wave.set(w)
+    }
+
+    private fun waveform(phase: Double, type: Int): Double {
+        return when (type) {
+            1 -> { // triangle
+                val p = phase / (2 * PI)
+                2.0 * kotlin.math.abs(2.0 * (p - kotlin.math.floor(p + 0.5))) - 1.0
+            }
+            2 -> { // sawtooth
+                val p = phase / (2 * PI)
+                2.0 * (p - kotlin.math.floor(p + 0.5))
+            }
+            3 -> if (phase % (2 * PI) < PI) 1.0 else -1.0 // square
+            else -> sin(phase) // sine
+        }
+    }
+
     /** Audio focus: duck baja el volumen sin cortar; restore lo recupera. */
     fun duck(down: Boolean) {
-        targetGain.set(if (down) 0.12 else 0.6)
+        targetGain.set(if (down) 0.12 else volume.get())
     }
 
     fun stop() {
@@ -111,13 +145,14 @@ class BinauralToneEngine {
             val g = gain.get() + (targetGain.get() - gain.get()) * 0.05
             gain.set(g)
             val amp = (g * 32767 * 0.6).toInt()
+            val wv = wave.get()
             for (i in samples.indices step 2) {
                 phaseL += 2 * PI * f1 * dt
                 phaseR += 2 * PI * f2 * dt
                 if (phaseL > 2 * PI) phaseL -= 2 * PI
                 if (phaseR > 2 * PI) phaseR -= 2 * PI
-                samples[i] = (sin(phaseL) * amp).toInt().toShort()
-                samples[i + 1] = (sin(phaseR) * amp).toInt().toShort()
+                samples[i] = (waveform(phaseL, wv) * amp).toInt().toShort()
+                samples[i + 1] = (waveform(phaseR, wv) * amp).toInt().toShort()
             }
             try {
                 var off = 0

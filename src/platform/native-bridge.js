@@ -31,15 +31,36 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'SET_FULLSCREEN',
   'SET_ORIENTATION',
   'TEST_NOTIFICATION',
+  'SAVE_ICS',
+  'SET_WAVE',
+  'SET_AUDIO_LEVEL',
 ]);
 
 /**
  * Detecta el bridge nativo inyectado por el shell Android.
+ *
+ * El WebView inyecta `AndroidBridgeNative` (addJavascriptInterface) ANTES de
+ * cargar la página, pero el wrapper `window.AndroidBridge` lo crea Kotlin en
+ * `onPageFinished` — DESPUÉS de que main.js corre. Por eso el adapter lee
+ * ambos: si el wrapper aún no existe usa el objeto nativo directamente
+ * (misma interfaz: version, postMessage, getPlatformInfo).
  * @param {object} [env] { bridge } — para tests headless.
  * @returns {null | { present:true, platform:'android', version:string }}
  */
 export function detectNativeBridge(env = {}) {
-  const bridge = env.bridge || (typeof window !== 'undefined' ? window.AndroidBridge : null);
+  if (env.bridge !== undefined) {
+    const b = env.bridge;
+    if (!b || typeof b.postMessage !== 'function') return null;
+    return {
+      present: true,
+      platform: 'android',
+      version: typeof b.version === 'string' && b.version ? b.version : 'unknown',
+    };
+  }
+  if (typeof window === 'undefined') return null;
+  const w = window.AndroidBridge;
+  const raw = window.AndroidBridgeNative;
+  const bridge = w && typeof w.postMessage === 'function' ? w : raw;
   if (!bridge || typeof bridge.postMessage !== 'function') return null;
   return {
     present: true,
@@ -76,7 +97,13 @@ export function validateCommand(command, payload) {
  * devuelve el estado honesto de "no disponible" (la web sigue funcionando).
  */
 export function createNativeBridgeAdapter(env = {}) {
-  const raw = env.bridge || (typeof window !== 'undefined' ? window.AndroidBridge : null);
+  // Lee el bridge (wrapper o nativo) de forma viva: el wrapper se inyecta
+  // después de que main.js corre, así que no se captura una sola vez.
+  const raw = env.bridge !== undefined
+    ? env.bridge
+    : typeof window !== 'undefined'
+      ? (window.AndroidBridge || window.AndroidBridgeNative || null)
+      : null;
   const bridge = detectNativeBridge(env);
   // Aislamiento de fallos: un getPlatformInfo que lance NO debe impedir
   // crear el adaptador (la web sigue funcionando).
@@ -96,7 +123,12 @@ export function createNativeBridgeAdapter(env = {}) {
     if (!v.ok) return { ok: false, error: v.error };
     if (!bridge) return { ok: false, error: 'NOT_SUPPORTED', platform: 'web' };
     try {
-      const res = raw.postMessage({ command, payload: payload || null });
+      // SIEMPRE stringificar: el objeto nativo (addJavascriptInterface) recibe
+      // solo String; pasarle un objeto lo convierte en "undefined" y el Kotlin
+      // lanza JSONException. El wrapper de Kotlin stringifica igual, así que
+      // doble stringify no rompe nada (postMessage(JSON.parse(s))).
+      const msg = JSON.stringify({ command, payload: payload || null });
+      const res = raw.postMessage(msg);
       // El puente puede responder síncronamente o prometer (respuesta async
       // por events). Nunca asumimos el resultado: `pending` = entregado al
       // sistema, el resultado real llega por evento nativo.
@@ -148,6 +180,8 @@ export function createNativeBridgeAdapter(env = {}) {
     stopBackgroundAudio: () => send('STOP_BACKGROUND_AUDIO'),
     pauseBackgroundAudio: () => send('PAUSE_BACKGROUND_AUDIO'),
     resumeBackgroundAudio: () => send('RESUME_BACKGROUND_AUDIO'),
+    setWave: (wave) => send('SET_WAVE', typeof wave === 'string' ? { wave } : null),
+    setAudioLevel: (level) => send('SET_AUDIO_LEVEL', typeof level === 'object' && level !== null ? level : null),
 
     // ---- Alarmas exactas (Fase 8) ----
     scheduleAlarm: (alarm) => send('SCHEDULE_ALARM', alarm),
@@ -165,6 +199,8 @@ export function createNativeBridgeAdapter(env = {}) {
     setFullscreen: (payload) => send('SET_FULLSCREEN', typeof payload === 'object' ? payload : null),
     setOrientation: (payload) => send('SET_ORIENTATION', typeof payload === 'object' ? payload : null),
     testNotification: () => send('TEST_NOTIFICATION'),
+    saveIcs: (fileName, content) =>
+      send('SAVE_ICS', { fileName: String(fileName || ''), content: String(content || '') }),
 
     // ---- Diagnóstico ----
     getState() {

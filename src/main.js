@@ -76,6 +76,57 @@ simulation.audio.transport = new AudioTransport({ isIos: isIos() });
 // y la web usa sus capacidades nativas sin tocar el core.
 const nativeBridge = createNativeBridgeAdapter();
 window.__nativeBridge = nativeBridge;
+
+// ── Sincronización con el servicio de audio nativo (APK) ────────────────────
+// En la APK el servicio foreground (con audio focus + notificación de
+// control) es el transporte persistente: la WebView le manda base/beat/onda
+// y nivel, y él sostiene el sonido aunque la app navegue o la pantalla se
+// bloquee. En la web (sin bridge) no se hace nada.
+function nativeAudio() {
+  // Consulta en vivo: el wrapper window.AndroidBridge se inyecta en
+  // onPageFinished, después de que main.js corre. La detección estática
+  // (capturada al crear el adaptador) puede ser stale.
+  if (typeof window !== 'undefined' && (window.AndroidBridge || window.AndroidBridgeNative)) {
+    return nativeBridge;
+  }
+  return null;
+}
+// Arranca/retunea el servicio nativo con los parámetros actuales de sesión.
+function syncNativeAudioStart() {
+  const b = nativeAudio();
+  if (!b) return;
+  syncNativeAudioRetune();
+  if (b.setAudioLevel) b.setAudioLevel({ level: volumeLevel });
+  // En la APK el sonido lo genera el servicio nativo (audio focus + notif de
+  // control); la web queda muda pero su AudioContext sigue corriendo para el
+  // visualizador (el analyser se alimenta antes de masterGain). Así nunca hay
+  // doble tono (interferencia de fase entre dos motores iguales).
+  if (simulation.audio && simulation.audio.masterGain) {
+    try {
+      simulation.audio.masterGain.gain.value = 0;
+    } catch (_) {
+      /* contexto cerrado */
+    }
+  }
+}
+function syncNativeAudioRetune() {
+  const b = nativeAudio();
+  if (!b) return;
+  const p = currentParams();
+  b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
+}
+function syncNativeAudioStop() {
+  const b = nativeAudio();
+  if (b) b.stopBackgroundAudio();
+  // Al volver a la web (no-APK) o al pausar, restaura el nivel web.
+  if (simulation.audio && simulation.audio.masterGain && !b) {
+    try {
+      simulation.audio.masterGain.gain.value = volumeLevel;
+    } catch (_) {
+      /* contexto cerrado */
+    }
+  }
+}
 // Capacidades fusionadas (web + nativo) para la UI de permisos y diagnóstico.
 function mergedCapabilities() {
   return mergePlatformCapabilities({
@@ -566,6 +617,11 @@ function start() {
   // Android solo lo muestran si el metadata ya estaba asignado al empezar.
   updateMediaSession();
   applyAudio();
+  // APK: arranca el servicio nativo (audio focus + notificación de control).
+  // La web y el servicio generan las mismas frecuencias; el servicio sostiene
+  // el sonido al navegar o bloquear (la WebView no puede reproducir sin su
+  // documento). En la web esto es no-op.
+  syncNativeAudioStart();
   // Ancla de medios: registra la pestaña como reproducción ante el SO para que
   // el controlador del reproductor aparezca y el AudioContext no se suspenda
   // al cambiar de app o bloquear la pantalla (mismo gesto de usuario que play).
@@ -633,6 +689,7 @@ function stopAnchor() {
 }
 
 function stop(withSummary) {
+  syncNativeAudioStop();
   stopAnchor();
   simulation.stop();
   ambient.stopAll();
@@ -927,7 +984,14 @@ function setVolume(v) {
   volumeLevel = parseFloat(v);
   volume.value = String(volumeLevel);
   if (volumeLabel) volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
-  simulation.setVolume(volumeLevel);
+  // APK: el nivel real lo aplica el servicio nativo (la web está muda); no
+  // tocar el masterGain web o se desmutea y suena doble tono.
+  const b = nativeAudio();
+  if (b) {
+    if (b.setAudioLevel) b.setAudioLevel({ level: volumeLevel });
+  } else {
+    simulation.setVolume(volumeLevel);
+  }
   saveSession();
 }
 volume.addEventListener('input', () => {
@@ -1081,7 +1145,8 @@ function updateCustomLabels() {
 customBase.addEventListener('input', () => {
   updateCustomLabels();
   if ((selected.custom || carrier === 'personalizado') && playing) {
-    engine.retune(currentParams());
+    simulation.audio.retune(currentParams());
+    syncNativeAudioRetune();
     applyAmbient();
   }
   // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
@@ -1094,7 +1159,8 @@ customBase.addEventListener('input', () => {
 customBeat.addEventListener('input', () => {
   updateCustomLabels();
   if (selected.custom && playing) {
-    engine.retune(currentParams());
+    simulation.audio.retune(currentParams());
+    syncNativeAudioRetune();
     applyAmbient();
   }
   // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
@@ -1149,6 +1215,9 @@ function applyWave(wave) {
   syncWaveButtons();
   // El tipo del oscilador es mutable: se cambia en vivo sin cortar el sonido.
   if (playing) simulation.audio.setWave(selectedWave);
+  // APK: mismo set de ondas en el servicio nativo.
+  const nb = nativeAudio();
+  if (nb && nb.setWave) nb.setWave(selectedWave);
   updateStatus();
   if (playing) sessionLog.note('stimulusChanged', { wave: selectedWave });
   saveSession();
@@ -1173,6 +1242,7 @@ function applyCarrier(c) {
   updateCustomPanel();
   if (playing) {
     simulation.audio.retune(currentParams());
+    syncNativeAudioRetune();
     applyAmbient();
   }
   updateStatus();
@@ -1560,7 +1630,18 @@ function restoreFromBackground() {
   // real a 'running' (ctx.onstatechange) completa la transición a FOREGROUND.
   lifecycle.transition('visibility', { visible: true, ctxState: ctx ? ctx.state : null, playing });
   sessionLog.foreground();
-  if (plan.action === 'recover') {
+  // APK: el sonido lo sostiene el servicio nativo; la web queda muda siempre
+  // (si se desmutea al volver, suenan dos motores a la vez).
+  const nb = nativeAudio();
+  if (nb) {
+    if (audio.masterGain) {
+      try {
+        audio.masterGain.gain.value = 0;
+      } catch (_) {
+        /* contexto cerrado */
+      }
+    }
+  } else if (plan.action === 'recover') {
     // Reanudación sin clics: ganancia al piso, resume, rampa (recoverFade).
     audio.recoverFade(volumeLevel, 0.8);
   } else if (plan.action !== 'reaffirm-element') {

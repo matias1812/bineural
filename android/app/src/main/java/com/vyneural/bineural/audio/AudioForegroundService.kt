@@ -53,6 +53,16 @@ class AudioForegroundService : Service() {
                 val base = intent.getDoubleExtra(EXTRA_BASE, 0.0)
                 val beat = intent.getDoubleExtra(EXTRA_BEAT, 0.0)
                 if (base > 0.0) engine.retune(base, beat)
+                val wave = intent.getStringExtra(EXTRA_WAVE)
+                if (!wave.isNullOrEmpty()) engine.setWave(wave)
+            }
+            ACTION_WAVE -> {
+                val wave = intent.getStringExtra(EXTRA_WAVE)
+                if (!wave.isNullOrEmpty()) engine.setWave(wave)
+            }
+            ACTION_VOLUME -> {
+                val level = intent?.getDoubleExtra(EXTRA_LEVEL, 0.6) ?: 0.6
+                engine.setVolume(level)
             }
             ACTION_STOP -> {
                 focus?.abandon()
@@ -102,8 +112,12 @@ class AudioForegroundService : Service() {
         const val ACTION_RESUME = "com.vyneural.bineural.action.RESUME"
         const val ACTION_STOP = "com.vyneural.bineural.action.STOP"
         const val ACTION_FREQ = "com.vyneural.bineural.action.FREQ"
+        const val ACTION_WAVE = "com.vyneural.bineural.action.WAVE"
+        const val ACTION_VOLUME = "com.vyneural.bineural.action.VOLUME"
         const val EXTRA_BASE = "base"
         const val EXTRA_BEAT = "beat"
+        const val EXTRA_WAVE = "wave"
+        const val EXTRA_LEVEL = "level"
         private const val NOTIF_ID = 1001
 
         // Callback hacia MainActivity para reenviar al JS los cambios de audio
@@ -131,12 +145,29 @@ class AudioForegroundService : Service() {
             context.startService(Intent(context, AudioForegroundService::class.java).setAction(ACTION_RESUME))
         }
 
-        fun retune(context: Context, base: Double, beat: Double) {
+        fun retune(context: Context, base: Double, beat: Double, wave: String? = null) {
             context.startService(
                 Intent(context, AudioForegroundService::class.java)
                     .setAction(ACTION_FREQ)
                     .putExtra(EXTRA_BASE, base)
-                    .putExtra(EXTRA_BEAT, beat),
+                    .putExtra(EXTRA_BEAT, beat)
+                    .putExtra(EXTRA_WAVE, wave ?: ""),
+            )
+        }
+
+        fun setWave(context: Context, wave: String) {
+            context.startService(
+                Intent(context, AudioForegroundService::class.java)
+                    .setAction(ACTION_WAVE)
+                    .putExtra(EXTRA_WAVE, wave),
+            )
+        }
+
+        fun setVolume(context: Context, level: Double) {
+            context.startService(
+                Intent(context, AudioForegroundService::class.java)
+                    .setAction(ACTION_VOLUME)
+                    .putExtra(EXTRA_LEVEL, level),
             )
         }
 
