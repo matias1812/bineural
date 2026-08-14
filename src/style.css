@@ -2850,13 +2850,22 @@ body.immersive .controls {
 /* El panel científico se oculta por defecto con la clase .hidden (utilidad
    global display:none !important) y se abre con el botón hud-btn. */
 .scientific-hud {
-  position: absolute;
-  top: 10px;
-  left: 10px;
+  /* Fijo: acompaña al usuario al hacer scroll y en pantalla completa, en vez
+     de quedarse pegado a la cabecera de la página. */
+  position: fixed;
+  top: 12px;
+  left: 12px;
   width: 250px;
-  background: rgba(10, 10, 15, 0.85);
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  background: rgba(10, 10, 15, 0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px;
   font-family: 'Space Mono', monospace, sans-serif;
   font-size: 11px;
@@ -2866,6 +2875,26 @@ body.immersive .controls {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* En pantallas pequeñas el panel se compacta para no tapar los controles. */
+@media (max-width: 480px) {
+  .scientific-hud {
+    top: 10px;
+    left: 10px;
+    width: 225px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    padding: 10px;
+    font-size: 10px;
+    border-radius: 8px;
+  }
+  .scientific-hud .hud-title {
+    font-size: 8px;
+  }
+  .scientific-hud .hud-prov {
+    font-size: 7px;
+  }
 }
 
 .hud-header {

@@ -14,6 +14,7 @@ import { assertValidState, assertValidNeuralState, assertValidCognitiveState, as
 import { getProfileById, PROFILES } from '../models/profiles.js';
 import { SimulationConfig, SimulationSeed, buildExperimentRecord, MODEL_VERSION, mulberry32 } from '../core/reproducibility.js';
 import { WaveField } from '../wavefield.js';
+import { buildSilentWav } from '../core/media-anchor.js';
 
 export function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
@@ -522,6 +523,35 @@ export function runBineuralDiagnostics() {
       threw = true;
     }
     if (!threw) throw new Error('Condición desconocida no rechazada');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // MEDIA ANCHOR TESTS (silent WAV used to register Media Session on mobile)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Media anchor: WAV silencioso con cabecera válida (RIFF/WAVE/fmt/data)', () => {
+    const wav = buildSilentWav(1);
+    const v = new DataView(wav);
+    const str = (off, n) => {
+      let s = '';
+      for (let i = 0; i < n; i++) s += String.fromCharCode(v.getUint8(off + i));
+      return s;
+    };
+    if (str(0, 4) !== 'RIFF') throw new Error('sin marcador RIFF');
+    if (str(8, 4) !== 'WAVE') throw new Error('sin marcador WAVE');
+    if (str(12, 4) !== 'fmt ') throw new Error('sin chunk fmt');
+    if (str(36, 4) !== 'data') throw new Error('sin chunk data');
+    if (v.getUint16(22, true) !== 1) throw new Error('no es mono');
+    if (v.getUint32(24, true) !== 8000) throw new Error('sample rate != 8000');
+    if (v.getUint16(34, true) !== 16) throw new Error('no es 16-bit');
+  });
+
+  runTest('Media anchor: las muestras son silencio real (todo a cero)', () => {
+    const wav = buildSilentWav(0.5);
+    const v = new DataView(wav);
+    for (let i = 44; i < wav.byteLength; i += 2) {
+      if (v.getInt16(i, true) !== 0) throw new Error(`muestra no nula en offset ${i}`);
+    }
   });
 
   // ──────────────────────────────────────────────────────────────────────────

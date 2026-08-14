@@ -3,7 +3,7 @@
 ## Cómo ejecutar
 
 ```bash
-npm test                       # suite headless (Node) — 36 tests, < 2 s
+npm test                       # suite headless (Node) — 38 tests, < 2 s
 window.runBineuralDiagnostics()# misma suite en el navegador (consola)
 npm run build                  # build de producción
 ```
@@ -13,6 +13,13 @@ La suite importa exactamente los mismos módulos en Node y en el navegador
 perezosa para permitirlo).
 
 ## Inventario de la suite (src/validation/diagnostics.js)
+
+### Ancla de medios (Media Session en móvil)
+
+| Test | Qué valida |
+|---|---|
+| WAV silencioso con cabecera válida | RIFF/WAVE/fmt/data, 8 kHz, mono, 16-bit |
+| Muestras a cero (silencio real) | El ancla no aporta sonido |
 
 ### Física de ondas (WaveField)
 
@@ -95,8 +102,8 @@ perezosa para permitirlo).
 | # | Ítem | Estado (2026-08-14) |
 |---|---|---|
 | 1 | `npm run build` | ✅ 6 páginas, 150 kB JS (gzip 48 kB) |
-| 2 | `npm test` (diagnósticos) | ✅ 36/36 (Node) |
-| 3 | Suite en el navegador | ✅ 36/36 (`window.runBineuralDiagnostics()`) |
+| 2 | `npm test` (diagnósticos) | ✅ 38/38 (Node) |
+| 3 | Suite en el navegador | ✅ 38/38 (`window.runBineuralDiagnostics()`) |
 | 4 | GPU (WebGL2) | ✅ contexto GL2 detectado; fallback GL1 (GLSL ES 1.00) + `OES_texture_float`; fallback CPU |
 | 5 | CPU fallback | ✅ presente en el código (`buildGLProgram` → null → rasterizador) |
 | 6 | Móvil | ⚠️ sin dispositivo físico disponible; canvas adaptativo (`devicePixelRatio`), rotación forzada en vertical |
@@ -110,7 +117,7 @@ perezosa para permitirlo).
 
 - **Entorno**: Windows (Git Bash), Node ≥ 18, Chrome (runtime del preview).
 - **Build**: `✓ built in ~1.3 s` — `dist/` regenerado (6 páginas + assets).
-- **Tests**: 36/36 en Node y 36/36 en el navegador (corridas consecutivas, sin
+- **Tests**: 38/38 en Node y 38/38 en el navegador (corridas consecutivas, sin
   flakiness tras fijar semilla del test 1/f).
 - **Runtime**: la app arranca sin errores de consola; HUD científico poblado
   (STIMULUS con frecuencias reales, NEURAL con arrastre 12→16 Hz, EEG SIMULATED,

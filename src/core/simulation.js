@@ -217,7 +217,10 @@ export class SimulationEngine {
     // se quedaría "en play" con la sesión muda. Cada ~0.5 s se muestrea el
     // estado real y se aplica la decisión de src/core/audio-health.js (pura y
     // testeada). Nunca actúa si el usuario puso el volumen en 0.
-    if (this.isPlaying && this.audio && this.audio.ctx) {
+    // En segundo plano no hay nada que recuperar audiblemente: actuar ahí solo
+    // consume batería y, si el SO vuelve a suspender, produce clics al volver.
+    // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
+    if (this.isPlaying && this.audio && this.audio.ctx && !document.hidden) {
       this._healthFrames++;
       if (this._healthFrames % 30 === 0) {
         const health = evaluateAudioHealth({
@@ -234,7 +237,8 @@ export class SimulationEngine {
         } else if (health.action === 'refade') {
           console.warn('[SimulationEngine] Sesión en play sin señal de audio — reaplicando volumen.');
           this.audio.resume();
-          this.audio.fadeTo(this.audio._volume ?? 0.6, 0.3);
+          // Rampa larga: el salto silencio→volumen en 0.3 s se oía como un clic.
+          this.audio.fadeTo(this.audio._volume ?? 0.6, 0.8);
         }
       }
     }

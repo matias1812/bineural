@@ -6,6 +6,7 @@ import { WaveField } from './wavefield.js';
 import { CymaticsRenderer } from './cymatics.js';
 import { SimulationEngine } from './core/simulation.js';
 import { ExperimentRunner } from './core/experiments.js';
+import { createSilentAudio } from './core/media-anchor.js';
 import { SimulationConfig, experimentToJson } from './core/reproducibility.js';
 import { PROFILES, getProfileById } from './models/profiles.js';
 import { initStarfield } from './starfield.js';
@@ -405,6 +406,10 @@ function start() {
   sessionStartTime = Date.now();
   sessionAmbient = [...ambientTypes];
   applyAudio();
+  // Ancla de medios: registra la pestaña como reproducción ante el SO para que
+  // el controlador del reproductor aparezca y el AudioContext no se suspenda
+  // al cambiar de app o bloquear la pantalla (mismo gesto de usuario que play).
+  startAnchor();
   playBtn.classList.add('playing');
   playBtn.innerHTML = ICONS.pause;
   playBtn.setAttribute('aria-label', 'Pausar sesión');
@@ -425,7 +430,44 @@ function start() {
 
 // stop(withSummary): el resumen se muestra cuando la sesión termina por el
 // temporizador (endSession), no al pausar manualmente.
+// ---- Ancla de medios --------------------------------------------------------
+// Elemento <audio> mudo en bucle que registra la pestaña como reproducción de
+// medios ante el SO: en Android hace que Chrome muestre el controlador del
+// reproductor en las notificaciones y NO suspenda el AudioContext al cambiar
+// de app (evita la interferencia al moverse por el celular); en iOS (PWA
+// instalada) habilita los controles en la pantalla de bloqueo. El sonido real
+// sigue saliendo por el AudioContext; el ancla es silencio.
+let audioAnchor = null;
+function startAnchor() {
+  if (!audioAnchor) {
+    try {
+      audioAnchor = createSilentAudio(1);
+      // Adjunto al DOM (oculto) por robustez: algunos navegadores exigen que
+      // el elemento esté en el documento para reproducir de forma fiable.
+      audioAnchor.style.display = 'none';
+      audioAnchor.setAttribute('aria-hidden', 'true');
+      audioAnchor.setAttribute('tabindex', '-1');
+      document.body.appendChild(audioAnchor);
+    } catch (_) {
+      audioAnchor = null;
+    }
+  }
+  if (!audioAnchor) return;
+  const p = audioAnchor.play();
+  if (p && typeof p.catch === 'function') p.catch(() => {});
+}
+function stopAnchor() {
+  if (audioAnchor) {
+    try {
+      audioAnchor.pause();
+    } catch (_) {
+      /* sin ancla */
+    }
+  }
+}
+
 function stop(withSummary) {
+  stopAnchor();
   simulation.stop();
   ambient.stopAll();
   releaseWakeLock(); // liberar pantalla activa al pausar
@@ -1322,6 +1364,12 @@ function restoreFromBackground() {
   if (!playing) return;
   simulation.audio.resume();
   simulation.audio.fadeTo(volumeLevel, 0.4);
+  // Re-afirma el ancla de medios si el sistema la pausó en segundo plano
+  // (iOS lo hace a veces al suspender la pestaña).
+  if (audioAnchor && audioAnchor.paused) {
+    const p = audioAnchor.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }
   // Re-afirma la sesión de medios al volver: algunos navegadores (iOS) la
   // pierden al suspender la pestaña y el controlador de notificaciones
   // desaparece hasta el siguiente play. Es barato y no molesta.
@@ -1818,6 +1866,12 @@ const permNote = document.getElementById('perm-note');
 function openPermissions() {
   renderPermissionState();
   if (permissionsModal) permissionsModal.classList.remove('hidden');
+  // Permisos reales: si aún no se decidió y no están desactivados, se piden
+  // en este mismo gesto (el clic en el menú ⋯ es válido). En Android el
+  // navegador muestra el diálogo del sistema; en iOS requiere la PWA.
+  if (!permsDisabled() && notificationSupported() && Notification.permission === 'default') {
+    requestAllPermissions().then(() => renderPermissionState());
+  }
 }
 function closePermissions() {
   if (permissionsModal) permissionsModal.classList.add('hidden');
@@ -1827,6 +1881,8 @@ function permissionStateText() {
   if (!notificationSupported()) return 'No soportado en este navegador';
   if (Notification.permission === 'granted') return 'Concedido ✓';
   if (Notification.permission === 'denied') return 'Denegado en el navegador';
+  // iOS 16.4+ solo muestra notificaciones web con la PWA instalada.
+  if (iosNeedsInstall()) return 'Requiere instalar la app (iOS)';
   return 'Sin decidir';
 }
 
@@ -1843,7 +1899,9 @@ function renderPermissionState() {
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
   permNote.textContent = disabled
     ? 'Permisos desactivados: la app no volverá a pedirlos y los recordatorios solo sonarán en primer plano. Reactívalos cuando quieras.'
-    : 'Las notificaciones del sistema solo pueden revocarse en los ajustes del navegador; aquí solo se desactiva su uso en Vyneural (incluye liberar el Wake Lock).';
+    : iosNeedsInstall()
+      ? 'En iOS las notificaciones y el control del reproductor requieren la app instalada: Compartir → Añadir a pantalla de inicio. En Android se piden al tocar “Activar permisos” o al pulsar play.'
+      : 'Las notificaciones del sistema solo pueden revocarse en los ajustes del navegador; aquí solo se desactiva su uso en Vyneural (incluye liberar el Wake Lock).';
 }
 
 if (permissionsModal) {
