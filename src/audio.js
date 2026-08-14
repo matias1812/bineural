@@ -63,6 +63,43 @@ export class BinauralEngine {
     }
   }
 
+  // Reanudación sin clics: si el SO suspendió el contexto (iOS al bloquear,
+  // pérdida de audio focus en Android), al volver el audio arranca a plena
+  // ganancia en mitad de un ciclo y suena un clic/pop. Aquí se baja la
+  // ganancia al piso ANTES de reanudar, se reanuda y se sube con una rampa
+  // suave hasta el volumen de la sesión: el reinicio queda inaudible.
+  recoverFade(volume = 0.6, seconds = 0.8) {
+    if (!this.ctx || !this.masterGain) return;
+    const ctx = this.ctx;
+    const wasSuspended = ctx.state === 'suspended';
+    const now = ctx.currentTime;
+    try {
+      this.masterGain.gain.cancelScheduledValues(now);
+      // Piso inmediato: evita que el primer bloque renderizado tras resume()
+      // salte a plena ganancia.
+      this.masterGain.gain.setValueAtTime(0.0001, now);
+    } catch (_) {
+      /* contexto cerrado */
+    }
+    this.resume();
+    if (wasSuspended) {
+      // Rampa desde el piso: el fade de entrada enmascara la reanudación.
+      try {
+        this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, volume), now + seconds);
+      } catch (_) {
+        /* contexto cerrado */
+      }
+    } else if (this.masterGain.gain.value < 0.02) {
+      // Contexto ya corriendo pero mudo (watchdog): subir con suavidad.
+      try {
+        this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, volume), now + seconds);
+      } catch (_) {
+        /* contexto cerrado */
+      }
+    }
+    this._volume = volume;
+  }
+
   // RMS de la señal que sale al altavoz, tomada del analizador (0…1 aprox.).
   // Devuelve null si no hay analizador todavía (antes del primer play). Lo usa
   // el watchdog del SimulationEngine para detectar una sesión "en play pero

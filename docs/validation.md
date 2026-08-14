@@ -3,7 +3,7 @@
 ## Cómo ejecutar
 
 ```bash
-npm test                       # suite headless (Node) — 38 tests, < 2 s
+npm test                       # suite headless (Node) — 47 tests, < 2 s
 window.runBineuralDiagnostics()# misma suite en el navegador (consola)
 npm run build                  # build de producción
 ```
@@ -20,6 +20,20 @@ perezosa para permitirlo).
 |---|---|
 | WAV silencioso con cabecera válida | RIFF/WAVE/fmt/data, 8 kHz, mono, 16-bit |
 | Muestras a cero (silencio real) | El ancla no aporta sonido |
+| Pista por defecto ≥ 6 s | Línea de tiempo de medios estable (no reinicia cada segundo) |
+
+### Lógica de permisos (src/core/permissions.js — decisiones reales)
+
+| Test | Qué valida |
+|---|---|
+| Sin decidir y activados → pedir + adquirir | El diálogo se pide de verdad (no es adorno) |
+| Concedido → no se vuelve a pedir | No molesta dos veces |
+| Denegado → no se vuelve a pedir | No molesta dos veces |
+| Desactivados manualmente → no se pide nada | El toggle del modal es un gate real |
+| iOS sin PWA instalada → no se llama a un diálogo inexistente | Honestidad por plataforma |
+| Wake Lock activo → no se re-adquiere | Sin duplicados |
+| Sin soporte de Wake Lock → se omite | Degradación limpia |
+| Textos de estado por plataforma | Modal honesto (concedido/denegado/iOS/unsupported) |
 
 ### Física de ondas (WaveField)
 
@@ -102,8 +116,8 @@ perezosa para permitirlo).
 | # | Ítem | Estado (2026-08-14) |
 |---|---|---|
 | 1 | `npm run build` | ✅ 6 páginas, 150 kB JS (gzip 48 kB) |
-| 2 | `npm test` (diagnósticos) | ✅ 38/38 (Node) |
-| 3 | Suite en el navegador | ✅ 38/38 (`window.runBineuralDiagnostics()`) |
+| 2 | `npm test` (diagnósticos) | ✅ 47/47 (Node) |
+| 3 | Suite en el navegador | ✅ 47/47 (`window.runBineuralDiagnostics()`) |
 | 4 | GPU (WebGL2) | ✅ contexto GL2 detectado; fallback GL1 (GLSL ES 1.00) + `OES_texture_float`; fallback CPU |
 | 5 | CPU fallback | ✅ presente en el código (`buildGLProgram` → null → rasterizador) |
 | 6 | Móvil | ⚠️ sin dispositivo físico disponible; canvas adaptativo (`devicePixelRatio`), rotación forzada en vertical |
@@ -117,8 +131,34 @@ perezosa para permitirlo).
 
 - **Entorno**: Windows (Git Bash), Node ≥ 18, Chrome (runtime del preview).
 - **Build**: `✓ built in ~1.3 s` — `dist/` regenerado (6 páginas + assets).
-- **Tests**: 38/38 en Node y 38/38 en el navegador (corridas consecutivas, sin
+- **Tests**: 47/47 en Node y 47/47 en el navegador (corridas consecutivas, sin
   flakiness tras fijar semilla del test 1/f).
+
+## Auditoría Lighthouse (2026-08-14)
+
+Ejecutada con Chrome headless (Lighthouse vía `npx`) sobre la web desplegada
+(`https://vyneural-six.vercel.app`) y el build local. Reportes JSON completos en
+`docs/lighthouse/`.
+
+| Página | Perf | Accesibilidad | Prácticas | SEO | Notas |
+|---|---|---|---|---|---|
+| `/` (home, build local con cambios) | 79 | 100 | 96* | 100 | TBT 766 ms; FCP 1.43 s; LCP 2.1 s; CLS ~0 |
+| `/privacidad` | 100 | 100 | 100 | 100 | — |
+| `/que-son-las-ondas-binaurales` | 100 | 100 | 100 | 100 | 98→100 tras corregir jerarquía de encabezados del footer |
+| `/como-usar` | 100 | 98 | 100 | 100 | heading-order del footer (corregido, pendiente de deploy) |
+
+*Los 2 "errores de consola" de la home en local son los scripts de Vercel
+Analytics (`/_vercel/*`), que solo existen en producción — artefacto local, no
+un defecto real.
+
+**Mejoras aplicadas por la auditoría**:
+- Cadencia del pipeline científico (SimulationEngine): 30 Hz en sesión,
+  10 Hz en reposo en vez de 60 fps constantes → TBT 1113 → 766 ms, TTI
+  5180 → 4182 ms (la simulación sigue avanzando en tiempo real con dt
+  acumulado).
+- Jerarquía de encabezados del footer (`h4` → `h3`) en las 5 páginas de
+  contenido + home: accesibilidad 98 → 100.
+- `docs/lighthouse/*.json` guardados como artefacto reproducible.
 - **Runtime**: la app arranca sin errores de consola; HUD científico poblado
   (STIMULUS con frecuencias reales, NEURAL con arrastre 12→16 Hz, EEG SIMULATED,
   VISUAL con base de metáfora).

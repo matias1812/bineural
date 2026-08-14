@@ -14,7 +14,13 @@ import { assertValidState, assertValidNeuralState, assertValidCognitiveState, as
 import { getProfileById, PROFILES } from '../models/profiles.js';
 import { SimulationConfig, SimulationSeed, buildExperimentRecord, MODEL_VERSION, mulberry32 } from '../core/reproducibility.js';
 import { WaveField } from '../wavefield.js';
-import { buildSilentWav } from '../core/media-anchor.js';
+import { buildSilentWav, ANCHOR_SECONDS } from '../core/media-anchor.js';
+import {
+  evaluatePermissions,
+  notifStateText,
+  wakeStateText,
+  enabledStateText,
+} from '../core/permissions.js';
 
 export function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
@@ -552,6 +558,84 @@ export function runBineuralDiagnostics() {
     for (let i = 44; i < wav.byteLength; i += 2) {
       if (v.getInt16(i, true) !== 0) throw new Error(`muestra no nula en offset ${i}`);
     }
+  });
+
+  runTest('Media anchor: la pista por defecto es larga (≥ 6 s) para un reloj de medios estable', () => {
+    const wav = buildSilentWav();
+    // 44 bytes de cabecera + 2 bytes por muestra a 8000 Hz.
+    const seconds = (wav.byteLength - 44) / 2 / 8000;
+    if (seconds < 6) throw new Error(`pista demasiado corta: ${seconds.toFixed(2)} s`);
+    if (seconds !== ANCHOR_SECONDS) throw new Error(`ANCHOR_SECONDS (${ANCHOR_SECONDS}) no coincide con buildSilentWav()`);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PERMISSIONS TESTS (lógica pura: decisiones reales, no adornos)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Permisos: sin decidir y activados → se pide el diálogo y se adquiere Wake Lock', () => {
+    const d = evaluatePermissions({
+      notificationSupported: true,
+      notifPermission: 'default',
+      wakeLockSupported: true,
+      wakeLockHeld: false,
+    });
+    if (!d.shouldRequestNotifications) throw new Error('debería querer pedir notificaciones');
+    if (!d.willPromptNotifications) throw new Error('debería mostrar el diálogo (no iOS)');
+    if (!d.shouldAcquireWakeLock) throw new Error('debería adquirir Wake Lock');
+  });
+
+  runTest('Permisos: ya concedido → nunca se vuelve a pedir', () => {
+    const d = evaluatePermissions({ notificationSupported: true, notifPermission: 'granted' });
+    if (d.shouldRequestNotifications) throw new Error('no se debe re-pedir un permiso concedido');
+    if (d.willPromptNotifications) throw new Error('no debe mostrar diálogo');
+  });
+
+  runTest('Permisos: denegado → no se vuelve a molestar', () => {
+    const d = evaluatePermissions({ notificationSupported: true, notifPermission: 'denied' });
+    if (d.shouldRequestNotifications) throw new Error('no se debe re-pedir un permiso denegado');
+  });
+
+  runTest('Permisos: desactivados manualmente → no se pide nada (gate real)', () => {
+    const d = evaluatePermissions({
+      disabled: true,
+      notificationSupported: true,
+      notifPermission: 'default',
+      wakeLockSupported: true,
+      wakeLockHeld: false,
+    });
+    if (d.shouldRequestNotifications || d.willPromptNotifications || d.shouldAcquireWakeLock) {
+      throw new Error('con permisos desactivados no se debe pedir ni adquirir nada');
+    }
+  });
+
+  runTest('Permisos: iOS sin PWA instalada → no se llama a un diálogo inexistente', () => {
+    const d = evaluatePermissions({
+      notificationSupported: true,
+      notifPermission: 'default',
+      iosNeedsInstall: true,
+    });
+    if (!d.shouldRequestNotifications) throw new Error('quiere notificaciones...');
+    if (d.willPromptNotifications) throw new Error('...pero no debe llamar al diálogo (iOS sin PWA)');
+  });
+
+  runTest('Permisos: Wake Lock ya activo → no se re-adquiere', () => {
+    const d = evaluatePermissions({ wakeLockSupported: true, wakeLockHeld: true });
+    if (d.shouldAcquireWakeLock) throw new Error('Wake Lock ya activo no se re-adquiere');
+  });
+
+  runTest('Permisos: sin soporte de Wake Lock → se omite sin error', () => {
+    const d = evaluatePermissions({ wakeLockSupported: false, wakeLockHeld: false });
+    if (d.shouldAcquireWakeLock) throw new Error('sin soporte no se adquiere');
+  });
+
+  runTest('Permisos: textos de estado honestos por plataforma', () => {
+    if (notifStateText({ notificationSupported: false }) !== 'No soportado en este navegador') throw new Error('unsupported');
+    if (notifStateText({ notificationSupported: true, notifPermission: 'granted' }) !== 'Concedido ✓') throw new Error('granted');
+    if (notifStateText({ notificationSupported: true, notifPermission: 'denied' }) !== 'Denegado en el navegador') throw new Error('denied');
+    if (notifStateText({ notificationSupported: true, notifPermission: 'default', iosNeedsInstall: true }) !== 'Requiere instalar la app (iOS)') throw new Error('ios');
+    if (wakeStateText({ wakeLockSupported: true, wakeLockHeld: true }) !== 'Activo ✓') throw new Error('wake on');
+    if (wakeStateText({ wakeLockSupported: false }) !== 'No soportado') throw new Error('wake unsupported');
+    if (enabledStateText(true) !== 'Desactivados' || enabledStateText(false) !== 'Activados') throw new Error('enabled toggle');
   });
 
   // ──────────────────────────────────────────────────────────────────────────

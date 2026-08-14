@@ -140,8 +140,25 @@ export class SimulationEngine {
     this.animFrame = requestAnimationFrame(this.loop);
     
     const now = performance.now();
-    const dt = (now - this.lastTime) / 1000.0;
+    const dt = Math.min(0.25, (now - this.lastTime) / 1000.0);
     this.lastTime = now;
+
+    // ── Cadencia de la simulación científica ─────────────────────────────────
+    // El pipeline (auditivo → neural → EEG → cognitivo → visual) es una
+    // simulación continua basada en dt, pero sin sesión activa no hay nada
+    // real que medir: ejecutarla a 60 fps solo quema main-thread (TBT de
+    // Lighthouse, batería). Se actualiza a 30 Hz durante la sesión y a 10 Hz
+    // en reposo, pasando SIEMPRE el dt acumulado real para que la simulación
+    // avance en tiempo real y los modelos (integradores dt-lineales) sigan
+    // siendo estables. El watchdog de audio se muestrea en cada frame aparte.
+    this._modelAcc = (this._modelAcc || 0) + dt;
+    const cadence = this.isPlaying ? 1 / 30 : 1 / 10;
+    if (this._modelAcc < cadence) {
+      this._audioWatchdog();
+      return;
+    }
+    const modelDt = Math.min(0.25, this._modelAcc);
+    this._modelAcc = 0;
 
     // 1. STIMULUS LAYER (Implicit in audio engine)
     const currentBase = this.audio._base || (this.currentProfile ? this.currentProfile.stimulus.carrierBase : 220);
@@ -153,7 +170,7 @@ export class SimulationEngine {
     const ambientVol = (this.ambient && this.ambient.active) ? this.ambient.volume : 0;
 
     // 2. AUDITORY MODEL (Phase 5)
-    this.auditory.update(dt, {
+    this.auditory.update(modelDt, {
       baseFreq: currentBase,
       binauralVolume: binauralVol,
       ambientVolume: ambientVol
@@ -163,14 +180,14 @@ export class SimulationEngine {
     // 3. NEURAL MODEL
     // Modulate the neural entrainment effectiveness by the perceptual strength 
     // of the auditory stimulus (accounting for masking and Fletcher-Munson).
-    this.neural.update(dt, this.isPlaying, auditoryState.perceptualStrength, currentBeat);
+    this.neural.update(modelDt, this.isPlaying, auditoryState.perceptualStrength, currentBeat);
     const neuralState = this.neural.getState();
 
     // 4. EEG MODEL (Simulated Measurement)
-    const eegState = this.eeg.update(dt, neuralState);
+    const eegState = this.eeg.update(modelDt, neuralState);
 
     // 5. COGNITIVE MODEL
-    this.cognitive.update(dt, this.isPlaying, neuralState);
+    this.cognitive.update(modelDt, this.isPlaying, neuralState);
     const cognitiveState = this.cognitive.getState();
 
     // 6. VISUAL METAPHOR LAYER (Phase 9: explicit Neural → Visual mapping)
@@ -210,16 +227,20 @@ export class SimulationEngine {
       });
     }
 
-    // ── Audio watchdog ────────────────────────────────────────────────────────
-    // Si la sesión está en play pero el sistema suspende el AudioContext sin
-    // disparar visibilitychange (iOS al bloquear, pérdida de audio focus en
-    // Android, entrada/salida de fullscreen en algunos dispositivos), el botón
-    // se quedaría "en play" con la sesión muda. Cada ~0.5 s se muestrea el
-    // estado real y se aplica la decisión de src/core/audio-health.js (pura y
-    // testeada). Nunca actúa si el usuario puso el volumen en 0.
-    // En segundo plano no hay nada que recuperar audiblemente: actuar ahí solo
-    // consume batería y, si el SO vuelve a suspender, produce clics al volver.
-    // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
+    this._audioWatchdog();
+  }
+
+  // ── Audio watchdog ────────────────────────────────────────────────────────
+  // Si la sesión está en play pero el sistema suspende el AudioContext sin
+  // disparar visibilitychange (iOS al bloquear, pérdida de audio focus en
+  // Android, entrada/salida de fullscreen en algunos dispositivos), el botón
+  // se quedaría "en play" con la sesión muda. Cada ~0.5 s se muestrea el
+  // estado real y se aplica la decisión de src/core/audio-health.js (pura y
+  // testeada). Nunca actúa si el usuario puso el volumen en 0.
+  // En segundo plano no hay nada que recuperar audiblemente: actuar ahí solo
+  // consume batería y, si el SO vuelve a suspender, produce clics al volver.
+  // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
+  _audioWatchdog() {
     if (this.isPlaying && this.audio && this.audio.ctx && !document.hidden) {
       this._healthFrames++;
       if (this._healthFrames % 30 === 0) {
@@ -231,14 +252,14 @@ export class SimulationEngine {
           prevHealth: this._audioHealth,
         });
         this._audioHealth = health.health;
-        if (health.action === 'resume') {
-          console.warn('[SimulationEngine] AudioContext suspendido con sesión activa — reanudando.');
-          this.audio.resume();
-        } else if (health.action === 'refade') {
-          console.warn('[SimulationEngine] Sesión en play sin señal de audio — reaplicando volumen.');
-          this.audio.resume();
-          // Rampa larga: el salto silencio→volumen en 0.3 s se oía como un clic.
-          this.audio.fadeTo(this.audio._volume ?? 0.6, 0.8);
+        if (health.action !== 'none') {
+          // recoverFade: baja la ganancia al piso, reanuda el contexto y sube
+          // con rampa. Reanudar a plena ganancia en mitad de un ciclo sonaba
+          // a clic/pop (la "interferencia" al volver al celular).
+          console.warn(
+            `[SimulationEngine] ${health.action === 'resume' ? 'AudioContext suspendido con sesión activa' : 'Sesión en play sin señal de audio'} — recuperando sin clics.`,
+          );
+          this.audio.recoverFade(this.audio._volume ?? 0.6, 0.8);
         }
       }
     }

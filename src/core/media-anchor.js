@@ -17,7 +17,7 @@
 // todo el audio sigue saliendo por el AudioContext del motor binaural.
 
 /** Construye un WAV PCM 16-bit mono de 8 kHz con muestras a cero (silencio). */
-export function buildSilentWav(seconds = 1) {
+export function buildSilentWav(seconds = 8) {
   const sr = 8000;
   const sampleCount = Math.max(1, Math.round(seconds * sr));
   const dataBytes = sampleCount * 2;
@@ -43,12 +43,26 @@ export function buildSilentWav(seconds = 1) {
   return buf;
 }
 
-/** Crea el elemento <audio> mudo y en bucle (solo navegador). */
-export function createSilentAudio(seconds = 1) {
+// Duración por defecto de la pista del ancla. Una pista de 1 s en bucle hace
+// que el reloj de medios del SO reinicie cada segundo (parece "media que
+// termina"); con 8 s la línea de tiempo del reproductor es estable.
+export const ANCHOR_SECONDS = 8;
+
+/**
+ * Crea el elemento <audio> en bucle con la pista muda (solo navegador).
+ *
+ * Importante: NO se pone volume = 0 ni muted. Aunque la pista es silencio
+ * digital (muestras a cero), el navegador clasifica el elemento como
+ * "reproduciendo audio" por su estado (paused=false) y nivel de volumen;
+ * un elemento con volumen 0 o muted se considera no-audible y Chrome puede
+ * NO reclamar el MediaSession (desaparece el controlador en Android) y
+ * sentirse libre de suspender el AudioContext en segundo plano (fuente de
+ * la interferencia al moverse por el celular).
+ */
+export function createSilentAudio(seconds = ANCHOR_SECONDS) {
   const url = URL.createObjectURL(new Blob([buildSilentWav(seconds)], { type: 'audio/wav' }));
   const a = new Audio(url);
   a.loop = true;
-  a.volume = 0; // la pista ya es silencio; el volumen a 0 es una red de seguridad
   a.preload = 'auto';
   a.setAttribute('playsinline', '');
   return a;

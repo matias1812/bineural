@@ -25,6 +25,12 @@ import {
 } from './notifications.js';
 
 import { runBineuralDiagnostics } from './validation/diagnostics.js';
+import {
+  evaluatePermissions,
+  notifStateText,
+  wakeStateText,
+  enabledStateText,
+} from './core/permissions.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -405,6 +411,10 @@ function start() {
   playing = true;
   sessionStartTime = Date.now();
   sessionAmbient = [...ambientTypes];
+  // Reclama la Media Session ANTES de que suene el audio: el navegador
+  // asocia el controlador de notificaciones a la sesión en marcha y algunos
+  // Android solo lo muestran si el metadata ya estaba asignado al empezar.
+  updateMediaSession();
   applyAudio();
   // Ancla de medios: registra la pestaña como reproducción ante el SO para que
   // el controlador del reproductor aparezca y el AudioContext no se suspenda
@@ -1362,8 +1372,17 @@ updateRotateOverlay();
 // suavidad, sin cortes ni interferencias externas.
 function restoreFromBackground() {
   if (!playing) return;
-  simulation.audio.resume();
-  simulation.audio.fadeTo(volumeLevel, 0.4);
+  const audio = simulation.audio;
+  const ctx = audio.ctx;
+  // Reanudación sin clics: si el SO suspendió el contexto (iOS al bloquear,
+  // pérdida de audio focus en Android), se baja la ganancia al piso, se
+  // reanuda y se sube con una rampa (recoverFade). Si el contexto siguió
+  // corriendo, solo se re-afirma el nivel de la sesión.
+  if (ctx && ctx.state === 'suspended') {
+    audio.recoverFade(volumeLevel, 0.8);
+  } else {
+    audio.fadeTo(volumeLevel, 0.4);
+  }
   // Re-afirma el ancla de medios si el sistema la pausó en segundo plano
   // (iOS lo hace a veces al suspender la pestaña).
   if (audioAnchor && audioAnchor.paused) {
@@ -1377,7 +1396,16 @@ function restoreFromBackground() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) restoreFromBackground();
+  if (document.hidden) {
+    // iOS Safari (sin PWA instalada) suspende el AudioContext al salir de la
+    // pestaña: un duck rápido a 0 enmascara el clic de la suspensión del SO.
+    // En Android y en la PWA instalada el audio sigue sonando sin tocarlo.
+    if (playing && iosNeedsInstall() && simulation.audio.ctx) {
+      simulation.audio.fadeTo(0, 0.35);
+    }
+  } else {
+    restoreFromBackground();
+  }
 });
 window.addEventListener('pageshow', restoreFromBackground);
 window.addEventListener('focus', restoreFromBackground);
@@ -1458,19 +1486,29 @@ function permsDisabled() {
 }
 
 async function requestAllPermissions() {
-  // Permisos desactivados manualmente → no pedir nada.
-  if (permsDisabled()) return;
+  // La decisión (pura y testeada en src/core/permissions.js) dice QUÉ hay que
+  // pedir en este momento: nada si están desactivados, nada si ya se decidió,
+  // nada en iOS sin PWA instalada (no existe diálogo), y Wake Lock solo si
+  // hay soporte y no está ya activo.
+  const decision = evaluatePermissions({
+    disabled: permsDisabled(),
+    notificationSupported: notificationSupported(),
+    notifPermission: notificationSupported() ? Notification.permission : null,
+    wakeLockSupported: 'wakeLock' in navigator,
+    wakeLockHeld: !!(_wakeLock && !_wakeLock.released),
+    iosNeedsInstall: iosNeedsInstall(),
+  });
 
   // 1. Notificaciones: necesarias para la MediaSession en algunos Android
   //    y para las alarmas cuando la pestaña está oculta.
-  if (notificationSupported() && Notification.permission === 'default') {
+  if (decision.willPromptNotifications) {
     try {
       await Notification.requestPermission();
     } catch (_) { /* denegado o no soportado */ }
   }
 
   // 2. WakeLock: mantiene el audio sin interferencias al bloquear la pantalla.
-  await acquireWakeLock();
+  if (decision.shouldAcquireWakeLock) await acquireWakeLock();
 
   // 3. Marcar como solicitado para no volver a preguntar
   lsSet(LS_PERM_ASKED, true);
@@ -1878,24 +1916,24 @@ function closePermissions() {
 }
 
 function permissionStateText() {
-  if (!notificationSupported()) return 'No soportado en este navegador';
-  if (Notification.permission === 'granted') return 'Concedido ✓';
-  if (Notification.permission === 'denied') return 'Denegado en el navegador';
-  // iOS 16.4+ solo muestra notificaciones web con la PWA instalada.
-  if (iosNeedsInstall()) return 'Requiere instalar la app (iOS)';
-  return 'Sin decidir';
+  return notifStateText({
+    notificationSupported: notificationSupported(),
+    notifPermission: notificationSupported() ? Notification.permission : null,
+    iosNeedsInstall: iosNeedsInstall(),
+  });
 }
 
 function renderPermissionState() {
   if (!permNotif) return;
+  const notifPerm = notificationSupported() ? Notification.permission : null;
   permNotif.textContent = permissionStateText();
-  permNotif.className = 'perm-state' + (Notification && Notification.permission === 'granted' ? ' ok' : ' warn');
+  permNotif.className = 'perm-state' + (notifPerm === 'granted' ? ' ok' : ' warn');
   const hasWake = 'wakeLock' in navigator;
   const wakeActive = !!(hasWake && _wakeLock && !_wakeLock.released);
-  permWakelock.textContent = hasWake ? (wakeActive ? 'Activo ✓' : 'Inactivo') : 'No soportado';
+  permWakelock.textContent = wakeStateText({ wakeLockSupported: hasWake, wakeLockHeld: wakeActive });
   permWakelock.className = 'perm-state' + (wakeActive ? ' ok' : ' warn');
   const disabled = permsDisabled();
-  permEnabled.textContent = disabled ? 'Desactivados' : 'Activados';
+  permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
   permNote.textContent = disabled
     ? 'Permisos desactivados: la app no volverá a pedirlos y los recordatorios solo sonarán en primer plano. Reactívalos cuando quieras.'
