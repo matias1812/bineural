@@ -1,0 +1,156 @@
+# BINEURAL → APK ANDROID — ROADMAP (arquitectura híbrida)
+
+Estrategia: **no convertir la web en APK**. Darle un **sistema operativo nativo
+alrededor**: la interfaz y las simulaciones siguen siendo web; Android controla
+las capacidades que una pestaña/PWA no puede garantizar (audio en segundo
+plano, lock screen, alarmas exactas, notificaciones con la app cerrada,
+permisos, lifecycle).
+
+```text
+                         BINEURAL
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+        WEB / UI                       ANDROID
+             │                             │
+     JS / WebGL / simulación         Kotlin (WebView shell)
+             │                             │
+             │                   ┌─────────┼──────────┐
+             │                   │         │          │
+             │                Audio     Alarmas    Permisos
+             │                Service   Scheduler   Android
+             │                   │         │          │
+             └──────────┬────────┴─────────┴──────────┘
+                        │
+                 BRIDGE NATIVO (window.AndroidBridge)
+                        │
+                 Android WebView (assets locales, offline-first)
+```
+
+## Estado por fase (honesto)
+
+| Fase | Qué | Estado | Dónde |
+|---|---|---|---|
+| P0 | Separar Core / Platform | ✅ **Implementado y testeado (75/75)** | `src/platform/` — ver abajo |
+| P1 | Android Studio + WebView local | ⬜ Requiere Android SDK (tu máquina) | — |
+| P2 | Bridge JS ↔ Kotlin | 🟡 Contrato definido en `native-bridge.js`; falta el Kotlin | `docs/android-roadmap.md` §Contrato |
+| P3 | Foreground Audio Service nativo | ⬜ Requiere APK | — |
+| P4 | MediaSession nativa | ⬜ Requiere APK | — |
+| P5 | Audio Focus (duck/pause/resume) | ⬜ Requiere APK | — |
+| P6 | AlarmScheduler nativo | ⬜ Requiere APK | — |
+| P7 | Notificaciones nativas | ⬜ Requiere APK | — |
+| P8 | PermissionManager nativo | ⬜ Requiere APK | — |
+| P9 | APK firmada (release keystore) | ⬜ Requiere APK | — |
+| P10 | Web → Descargar APK (página /download) | ⬜ Tras P9 | — |
+| P11 | Tests reales Android (tortura) | ⬜ Tras P9 | — |
+| P12 | Validación experimental comparada Web vs APK | ⬜ Tras P11 | — |
+
+## P0 — Separación Core / Platform (ya en el repo)
+
+```
+/src
+   /core      → AudioEngine, SimulationEngine, ExperimentEngine, AlarmEngine (pura, headless)
+   /platform  → WebPlatform + AndroidPlatform (nuevo)
+   main.js    → UI (sigue siendo la única capa de presentación)
+```
+
+- **`src/platform/native-bridge.js`**: contrato del bridge + adaptador seguro.
+  - `detectNativeBridge()` — detecta `window.AndroidBridge` (lo inyecta la APK).
+  - `validateCommand(command, payload)` — whitelist + validación de payload
+    (Fase 24: comandos arbitrarios → `DENIED`).
+  - `createNativeBridgeAdapter()` — métodos `startBackgroundAudio`,
+    `scheduleAlarm`, `requestNotificationPermission`, `openExperiment`, …
+    **Sin bridge**: cada comando responde `{ ok:false, error:'NOT_SUPPORTED' }`
+    → la web/PWA actual funciona idéntica.
+- **`src/platform/platform-capabilities.js`**: `mergePlatformCapabilities()` —
+  matriz única y honesta con proveedor (`web` | `native`) y estados
+  separados **supported ≠ granted ≠ active**. La web no promete background
+  audio; la APK sí (si el sistema lo permite), y "autorizada" es un estado
+  distinto de "soportada".
+- **UI**: el modal de permisos muestra una fila **Plataforma** (solo visible
+  dentro de la APK) y las etiquetas cambian a "Nativa — concedido ✓" etc.
+- **Diagnóstico**: `window.__platformProbe().platform` expone el estado real
+  del bridge; `window.__nativeBridge` para depurar desde la consola.
+
+## Contrato del bridge (lo que debe implementar el Kotlin)
+
+La APK inyecta en la WebView (antes de `loadUrl` del contenido local):
+
+```js
+window.AndroidBridge = {
+  version: '1.0.0',
+  postMessage(msg) { /* msg = { command, payload } */ },
+  getPlatformInfo() {
+    return {
+      nativeAudio: true,
+      notifications: true,
+      exactAlarms: true,
+      exactAlarmsGranted: false,   // el SO aún no autorizó SCHEDULE_EXACT_ALARM
+      backgroundService: true,
+      backgroundServiceActive: false,
+      notificationPermission: 'default', // 'granted' | 'denied' | 'default'
+      mediaSession: true,
+      mediaSessionActive: false,
+    };
+  },
+};
+```
+
+Comandos permitidos (whitelist — todo lo demás se rechaza en origen):
+
+```text
+GET_PLATFORM_INFO
+START_BACKGROUND_AUDIO / STOP / PAUSE / RESUME_BACKGROUND_AUDIO
+SCHEDULE_ALARM / CANCEL_ALARM
+REQUEST_NOTIFICATION_PERMISSION
+OPEN_EXPERIMENT
+```
+
+Reglas de seguridad (Fase 24): validación de origen, whitelist de comandos,
+payload solo objetos planos serializables, sin acceso a archivos ni shell.
+`supported` / `granted` / `active` son tres estados distintos: nunca
+confundirlos.
+
+## Matriz Web vs APK (objetivo, honesto)
+
+| Capacidad | Web/PWA | APK | Nota |
+|---|:---:|:---:|---|
+| Audio en primer plano | ✓ | ✓ | |
+| Audio en segundo plano | Limitado | ✓ | Foreground Service (P3) |
+| Lock screen / media controls | Limitado | ✓ | MediaSession nativa (P4) |
+| Audio focus (bluetooth, llamadas) | Accidental | ✓ explícito | duck/pause/resume (P5) |
+| Alarmas | Limitado (web abierta) | ✓ exactas | AlarmScheduler (P6) |
+| Notificaciones con app cerrada | No garantizado | ✓ | Notifications nativas (P7) |
+| Permisos reales | Limitados | ✓ | PermissionManager (P8) |
+| Offline | ✓ (PWA) | ✓ (assets locales) | |
+| Simulación / experimental | ✓ (mismo core) | ✓ (mismo core) | nunca duplicar |
+| Distribución | URL | APK firmada + página /download | (P9/P10) |
+
+El ✓ de la APK significa "implementado y probado en dispositivos objetivo",
+no "la API existe".
+
+## Orden de ejecución recomendado (con Android Studio, en tu máquina)
+
+1. Crear proyecto Android (Kotlin) + WebView que carga los **assets locales**
+   (`WebViewAssetLoader`, `file://`) con el build de esta web — offline-first.
+2. Implementar `AndroidBridge` (el contrato de arriba) — P2.
+3. Foreground Service con `AudioTrack`/`AAudio` + `MediaSession` + Audio Focus
+   — P3/P4/P5. La WebView sigue controlando frecuencia/beat/experimento; el
+   servicio nativo es el transporte persistente.
+4. Alarmas exactas (`SCHEDULE_EXACT_ALARM`, `AlarmManager`) + notificaciones
+   (`NotificationChannel`, `PendingIntent`) — P6/P7.
+5. Permisos bajo demanda (nunca todos al instalar) — P8.
+6. Firmar con keystore propio (nunca al repo), versionCode/versionName,
+   SHA-256 — P9.
+7. Página `/download` en la web con la APK y su SHA-256 — P10.
+8. Test de tortura en dispositivos reales (START → LOCK → YouTube → BT off/on
+   → …) midiendo frecuencia, fase, RMS, interrupciones — P11.
+9. Comparación Web vs APK y validación experimental con identidad de sesión
+   (versión de app, Android, device, engine, experimentId) — P12.
+
+## Telemetría y privacidad (sin backend)
+
+Eventos (experiment_start, audio_focus_loss/gain, background/foreground,
+bluetooth_change, notification, experiment_end) se guardan **solo local**
+(IndexedDB + almacenamiento local de Android). Sin servidor, sin nube: los
+datos de audio, EEG simulado y estado cognitivo nunca salen del dispositivo.

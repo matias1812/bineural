@@ -28,6 +28,10 @@ import {
 } from './notifications.js';
 import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
 import { createNotificationManager } from './core/notification-manager.js';
+// P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
+// la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
+import { createNativeBridgeAdapter } from './platform/native-bridge.js';
+import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 
 import { runBineuralDiagnostics } from './validation/diagnostics.js';
@@ -64,6 +68,31 @@ simulation.ambient = ambient; // Link for auditory masking model
 // <audio>) el sonido sale directo por ctx.destination y el ancla muda queda
 // como fallback legacy SOLO para reclamar la MediaSession.
 simulation.audio.transport = new AudioTransport({ isIos: isIos() });
+
+// ── Bridge nativo (P0, plan APK) ─────────────────────────────────────────────
+// Adaptador seguro hacia el shell Android (WebView → Kotlin). Sin la APK
+// (web/PWA) `present === false` y cada comando devuelve NOT_SUPPORTED: el
+// comportamiento actual no cambia. La futura APK inyecta `window.AndroidBridge`
+// y la web usa sus capacidades nativas sin tocar el core.
+const nativeBridge = createNativeBridgeAdapter();
+window.__nativeBridge = nativeBridge;
+// Capacidades fusionadas (web + nativo) para la UI de permisos y diagnóstico.
+function mergedCapabilities() {
+  return mergePlatformCapabilities({
+    web: probeCapabilities({
+      notificationSupported: notificationSupported(),
+      notificationPermission: notificationSupported() ? Notification.permission : null,
+      mediaSessionSupported: MEDIA_SESSION != null,
+      mediaSessionActive: playing,
+      wakeLockSupported: 'wakeLock' in navigator,
+      wakeLockActive: !!(_wakeLock && !_wakeLock.released),
+      pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
+      pushConfigured: false,
+      iosNeedsInstall: iosNeedsInstall(),
+    }),
+    native: nativeBridge.getState(),
+  });
+}
 
 // ── Monitor de ciclo de vida e integridad de sesión (P5/P19/P20) ────────────
 // El estado del ciclo de vida lo decide la máquina pura AppLifecycle a partir
@@ -2113,18 +2142,10 @@ function permissionStateText() {
 
 function renderPermissionState() {
   if (!permNotif) return;
-  const notifPerm = notificationSupported() ? Notification.permission : null;
-  const caps = probeCapabilities({
-    notificationSupported: notificationSupported(),
-    notificationPermission: notifPerm,
-    mediaSessionSupported: MEDIA_SESSION != null,
-    mediaSessionActive: playing,
-    wakeLockSupported: 'wakeLock' in navigator,
-    wakeLockActive: !!(_wakeLock && !_wakeLock.released),
-    pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
-    pushConfigured: false, // sin backend de Web Push (P13): honesto en la UI
-    iosNeedsInstall: iosNeedsInstall(),
-  });
+  // P0: la UI lee la matriz fusionada (web + bridge nativo si la APK existe).
+  const caps = mergedCapabilities();
+  const notifPerm = caps.notifications.permission;
+  const isNative = caps.native;
   permNotif.textContent = caps.notifications.label;
   permNotif.className = 'perm-state' + (notifPerm === 'granted' ? ' ok' : ' warn');
   const wakeActive = caps.wakeLock.active;
@@ -2135,6 +2156,14 @@ function renderPermissionState() {
   if (permMs) {
     permMs.textContent = caps.mediaSession.label;
     permMs.className = 'perm-state' + (caps.mediaSession.active ? ' ok' : ' warn');
+  }
+  // Fila plataforma: solo visible cuando corre dentro de la APK Android.
+  const permPlatformRow = document.getElementById('perm-platform-row');
+  const permPlatform = document.getElementById('perm-platform');
+  if (permPlatformRow && permPlatform) {
+    permPlatformRow.style.display = isNative ? '' : 'none';
+    permPlatform.textContent = isNative ? `Android (bridge v${nativeBridge.getState().version || '?'})` : 'Web / PWA';
+    permPlatform.className = 'perm-state ok';
   }
   // Fila Push: sin backend no puede funcionar; se muestra honestamente.
   const permPush = document.getElementById('perm-push');
@@ -3123,6 +3152,12 @@ window.__platformProbe = async () => {
       smoothedBeat: Math.round(visBeat * 10) / 10,
       targetBase: Math.round((isFinite(currentParams().base) ? currentParams().base : visBase) * 10) / 10,
       targetBeat: Math.round((isFinite(currentParams().beat) ? currentParams().beat : visBeat) * 10) / 10,
+    },
+    // P0 — Bridge nativo (APK): presente solo cuando el shell Android inyectó
+    // window.AndroidBridge. Sin APK, la web sigue siendo el único proveedor.
+    platform: {
+      runtime: nativeBridge.platform, // 'web' | 'android'
+      bridge: nativeBridge.getState(),
     },
   };
 };

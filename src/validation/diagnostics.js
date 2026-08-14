@@ -29,6 +29,11 @@ import { AudioTransport } from '../core/audio-transport.js';
 import { planRecovery, RECOVERY } from '../core/audio-health.js';
 import { AlarmManager, inMemoryAlarmStore, alarmStateOnTick } from '../core/alarm-manager.js';
 import { detectNotificationCapabilities, capabilitySummary } from '../core/notification-capabilities.js';
+// P0 — Separación Core / Platform (plan APK): bridge nativo y fusión de
+// capacidades. Se testean con bridge inyectado y sin él (la web debe seguir
+// funcionando idéntica cuando no hay APK).
+import { detectNativeBridge, validateCommand, createNativeBridgeAdapter, BRIDGE_COMMANDS } from '../platform/native-bridge.js';
+import { mergePlatformCapabilities } from '../platform/platform-capabilities.js';
 import { createNotificationManager } from '../core/notification-manager.js';
 
 export async function runBineuralDiagnostics() {
@@ -1132,6 +1137,103 @@ export async function runBineuralDiagnostics() {
     } finally {
       globalThis.location = prev;
     }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P0 — CORE / PLATFORM (plan Bineural → APK Android)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('NativeBridge: sin bridge la web sigue intacta (todo NOT_SUPPORTED)', () => {
+    const bridge = detectNativeBridge({});
+    if (bridge !== null) throw new Error('detectNativeBridge sin bridge debe ser null');
+    const adapter = createNativeBridgeAdapter({});
+    if (adapter.present !== false || adapter.platform !== 'web') throw new Error('adaptador debe reportar web');
+    const r = adapter.startBackgroundAudio();
+    if (r.ok !== false || r.error !== 'NOT_SUPPORTED') throw new Error('sin bridge: NOT_SUPPORTED');
+    if (adapter.scheduleAlarm({ id: 'x' }).ok) throw new Error('scheduleAlarm sin bridge debe fallar');
+    const st = adapter.getState();
+    for (const k of ['backgroundAudio', 'exactAlarms', 'nativeAudio', 'notifications']) {
+      if (st.supported[k] !== false) throw new Error(`supported.${k} debe ser false sin APK`);
+    }
+  });
+
+  runTest('NativeBridge: detección con bridge inyectado (contrato P1)', () => {
+    const fake = {
+      version: '1.0.0',
+      postMessage: () => ({ received: true }),
+      getPlatformInfo: () => ({
+        nativeAudio: true,
+        notifications: true,
+        exactAlarms: true,
+        backgroundService: true,
+        backgroundServiceActive: false,
+        notificationPermission: 'granted',
+        mediaSession: true,
+        mediaSessionActive: false,
+      }),
+    };
+    const info = detectNativeBridge({ bridge: fake });
+    if (!info || info.platform !== 'android' || info.version !== '1.0.0') throw new Error('detección fallida');
+    const adapter = createNativeBridgeAdapter({ bridge: fake });
+    if (adapter.present !== true || adapter.platform !== 'android') throw new Error('adaptador debe reportar android');
+    const st = adapter.getState();
+    if (!st.supported.backgroundAudio || !st.supported.exactAlarms || !st.supported.notifications) {
+      throw new Error('capacidades nativas del bridge no propagadas');
+    }
+    const r = adapter.startBackgroundAudio();
+    if (!r.ok || r.platform !== 'android') throw new Error('comando nativo debe entregarse');
+  });
+
+  runTest('NativeBridge: whitelist de comandos y validación de payload (Fase 24)', () => {
+    if (!BRIDGE_COMMANDS.includes('GET_PLATFORM_INFO')) throw new Error('whitelist vacía');
+    const ok = validateCommand('SCHEDULE_ALARM', { alarmId: 'a' });
+    if (!ok.ok) throw new Error('comando whitelisted rechazado');
+    if (validateCommand('EXEC_SHELL', {}).error !== 'DENIED') throw new Error('comando arbitrario debe ser DENIED');
+    if (validateCommand('START_BACKGROUND_AUDIO', 'nope').error !== 'INVALID') throw new Error('payload string debe ser INVALID');
+    if (validateCommand('START_BACKGROUND_AUDIO', ['a']).error !== 'INVALID') throw new Error('payload array debe ser INVALID');
+    if (validateCommand('SCHEDULE_ALARM', { 'evil key': 1 }).error !== 'INVALID') throw new Error('clave rara debe ser INVALID');
+  });
+
+  runTest('PlatformCapabilities: fusión honesta web + nativo (supported ≠ granted ≠ active)', () => {
+    const web = probeCapabilities({
+      notificationSupported: true,
+      notificationPermission: 'default',
+      mediaSessionSupported: true,
+      mediaSessionActive: false,
+      wakeLockSupported: true,
+      wakeLockActive: false,
+      pushSupported: true,
+      pushConfigured: false,
+    });
+    // Solo web: proveedor web, background limitado, alarmas no garantizadas.
+    const soloWeb = mergePlatformCapabilities({ web, native: null });
+    if (soloWeb.platform !== 'web' || soloWeb.notifications.provider !== 'web') throw new Error('sin APK debe ser web');
+    if (soloWeb.backgroundAudio.supported !== false) throw new Error('background web no debe prometer soporte');
+    if (soloWeb.exactAlarms.supported !== false) throw new Error('alarmas web no deben prometer exactitud');
+    // Con APK: nativo provee lo que la web no puede.
+    const native = createNativeBridgeAdapter({
+      bridge: {
+        version: '1.0.0',
+        postMessage: () => null,
+        getPlatformInfo: () => ({
+          nativeAudio: true,
+          notifications: true,
+          exactAlarms: true,
+          exactAlarmsGranted: false, // el SO aún no la autorizó
+          backgroundService: true,
+          backgroundServiceActive: false,
+          notificationPermission: 'default',
+          mediaSession: true,
+          mediaSessionActive: false,
+        }),
+      },
+    });
+    const apk = mergePlatformCapabilities({ web, native: native.getState() });
+    if (apk.platform !== 'android' || apk.notifications.provider !== 'native') throw new Error('con APK debe ser nativo');
+    if (apk.backgroundAudio.supported !== true) throw new Error('APK debe soportar background audio');
+    if (apk.exactAlarms.supported !== true) throw new Error('APK debe soportar alarmas exactas');
+    if (apk.exactAlarms.granted !== false) throw new Error('granted ≠ supported: el SO aún no la autorizó');
+    if (!/configuración del sistema/i.test(apk.exactAlarms.label)) throw new Error('label debe ser honesto sobre la autorización');
   });
 
   // ──────────────────────────────────────────────────────────────────────────
