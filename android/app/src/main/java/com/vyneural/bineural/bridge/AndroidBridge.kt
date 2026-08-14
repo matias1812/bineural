@@ -8,9 +8,11 @@ import android.os.Build
 import android.provider.Settings
 import android.webkit.JavascriptInterface
 import com.vyneural.bineural.BuildConfig
+import com.vyneural.bineural.MainActivity
 import com.vyneural.bineural.audio.AudioForegroundService
 import com.vyneural.bineural.diag.Diagnostics
 import com.vyneural.bineural.notifications.AlarmScheduler
+import com.vyneural.bineural.notifications.NotificationHelper
 import com.vyneural.bineural.permissions.PermissionManager
 import com.vyneural.bineural.util.BineuralLog
 import org.json.JSONObject
@@ -28,10 +30,11 @@ import org.json.JSONObject
  * (un error aquí nunca rompe la UI web).
  */
 class AndroidBridge(
-    private val context: Context,
+    private val activity: MainActivity,
     private val scheduler: AlarmScheduler,
     private val permissions: PermissionManager,
 ) {
+    private val context: Context = activity
     @JavascriptInterface
     fun getVersion(): String = "1.0.0"
 
@@ -52,6 +55,8 @@ class AndroidBridge(
         info.put("exactAlarmsGranted", scheduler.canScheduleExact())
         info.put("backgroundService", true)
         info.put("backgroundServiceActive", audioRunning)
+        info.put("focusState", Diagnostics.focusState)
+        info.put("fullscreen", Diagnostics.immersiveActive)
         return info.toString()
     }
 
@@ -128,6 +133,20 @@ class AndroidBridge(
                         BineuralLog.e("bridge", "open settings", e)
                         return respond("BRIDGE_ERROR", command, null)
                     }
+                    respond("OK", command, null)
+                }
+                "SET_FULLSCREEN" -> {
+                    val enabled = payload?.optBoolean("enabled", true) ?: true
+                    activity.setImmersiveMode(enabled)
+                    respond("OK", command, null)
+                }
+                "SET_ORIENTATION" -> {
+                    val mode = payload?.optString("mode", "sensor") ?: "sensor"
+                    activity.setOrientation(mode)
+                    respond("OK", command, null)
+                }
+                "TEST_NOTIFICATION" -> {
+                    NotificationHelper.showAlarm(context, "Vyneural · Prueba", "Notificaciones funcionando (diagnóstico).")
                     respond("OK", command, null)
                 }
                 else -> respond("DENIED", command, null)

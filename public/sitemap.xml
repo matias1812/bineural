@@ -41,6 +41,11 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://vyneural-six.vercel.app/diagnostico</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
+  <url>
     <loc>https://vyneural-six.vercel.app/terminos</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>

@@ -116,9 +116,49 @@ window.__audioProbe = () => ({
   stats: simulation.audio.getAudioStats(),
   transport: simulation.audio.transport ? simulation.audio.transport.getState() : null,
 });
+
+// ── Instrumentación en vivo (HUD + /diagnostico) ───────────────────────────
+// Registro de interferencias de audio/plataforma (ctx, visibilidad, foco
+// nativo, wake lock, media session, fullscreen) y métricas de rendimiento
+// del bucle de dibujo. Se exponen en window.__interferenceLog / window.__perf
+// y alimentan el HUD de la home (tecla D) y la página /diagnostico.
+const __interferenceLog = [];
+const __MAX_ILOG = 40;
+function ilog(kind, detail) {
+  __interferenceLog.push({
+    kind,
+    detail,
+    at: Date.now(),
+    audioTime: simulation.audio.ctx ? +simulation.audio.ctx.currentTime.toFixed(2) : 0,
+  });
+  if (__interferenceLog.length > __MAX_ILOG) __interferenceLog.shift();
+}
+window.__interferenceLog = __interferenceLog;
+window.__interferenceLogPush = ilog;
+// Evento nativo (APK): cambios de audio focus del shell (llamada, otro audio…).
+window.addEventListener('vyneural:audiofocus', (e) => {
+  ilog('focus', e.detail && e.detail.state ? e.detail.state : 'event');
+});
+document.addEventListener('fullscreenchange', () => {
+  ilog('fullscreen', document.fullscreenElement ? 'enter' : 'exit');
+});
+
+// Métricas del bucle de dibujo (EMA) + memoria del heap JS.
+const __perf = { fps: 0, frameMs: 0, emaFrameMs: 0, lastT: performance.now(), memoryMB: 0 };
+window.__perf = __perf;
+function perfTick() {
+  const now = performance.now();
+  const dt = now - __perf.lastT;
+  __perf.lastT = now;
+  __perf.frameMs = dt;
+  __perf.emaFrameMs = __perf.emaFrameMs ? __perf.emaFrameMs * 0.9 + dt * 0.1 : dt;
+  __perf.fps = __perf.emaFrameMs > 0 ? 1000 / __perf.emaFrameMs : 0;
+  if (performance.memory) __perf.memoryMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
+}
 // Estado real del AudioContext como fuente de verdad: iOS al bloquear y la
 // pérdida de audio focus suspenden el contexto sin disparar visibilitychange.
 simulation.audio.onCtxStateChange = (state) => {
+  ilog('ctx', state);
   lifecycle.transition('ctx', { ctxState: state, visible: !document.hidden, playing });
   if (state === 'suspended') {
     sessionLog.suspend({ reason: 'ctx-suspended' });
@@ -1543,6 +1583,7 @@ function restoreFromBackground() {
 }
 
 document.addEventListener('visibilitychange', () => {
+  ilog('visibility', document.hidden ? 'hidden' : 'visible');
   if (document.hidden) {
     // MITIGACIÓN DE INTERRUPCIÓN DE PLATAFORMA (no es comportamiento normal
     // de background): en iOS Safari sin PWA instalada el SO suspende el
@@ -1609,9 +1650,11 @@ async function acquireWakeLock() {
   if (_wakeLock && !_wakeLock.released) return;
   try {
     _wakeLock = await navigator.wakeLock.request('screen');
+    ilog('wakelock', 'acquired');
     _wakeLock.addEventListener('release', () => {
       // Si se libera automáticamente (ej. al cambiar de tab), re-adquirir al volver.
       _wakeLock = null;
+      ilog('wakelock', 'released');
     });
   } catch (_) {
     /* El usuario denegó o el navegador no soporta */
@@ -1705,6 +1748,7 @@ function updateMediaSession() {
     try { MEDIA_SESSION.setActive(playing); } catch (_) {}
   }
 
+  ilog('mediasession', playing ? 'playing' : 'paused');
   updateMediaPosition();
 }
 
@@ -2403,6 +2447,7 @@ function drawVisual() {
   // congela (P21) y, al volver, la fase se reconstruye desde el reloj de
   // audio (AudioClock) — no se repiten frames perdidos ni se quema CPU.
   if (document.hidden) return;
+  perfTick();
   if (IS_TOUCH && vizFrame++ % 4 > (playing ? 2 : 1)) return;
   const dpr = devicePixelRatio;
   const w = canvas.width;
@@ -3370,8 +3415,95 @@ function hideLoader() {
   }, remain);
 }
 
-// Secret testing shortcut: press 'E' to toggle Simulated EEG, 'M' to toggle Scientific Mode
+// ── HUD en vivo (tecla D) ──────────────────────────────────────────────────
+// Panel flotante con FPS, estado del motor de audio, wake lock, lifecycle y el
+// registro de interferencias en tiempo real. Abre con la tecla D o el botón
+// flotante; el estado de apertura persiste en localStorage.
+const LS_HUD = 'vyneural_hud_v1';
+let hudEl = null;
+function byId(id) {
+  return document.getElementById(id);
+}
+function buildHud() {
+  if (hudEl || !document.body) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'hud';
+  wrap.className = 'hud' + (lsGet(LS_HUD, true) ? '' : ' collapsed');
+  wrap.innerHTML = `
+    <button class="hud-close" aria-label="Cerrar HUD">✕</button>
+    <div class="hud-title">HUD · <span id="hud-lifecycle">…</span></div>
+    <div class="hud-grid">
+      <span>FPS</span><b id="hud-fps">—</b>
+      <span>Frame</span><b id="hud-frame">—</b>
+      <span>Mem JS</span><b id="hud-mem">—</b>
+      <span>Audio</span><b id="hud-ctx">—</b>
+      <span>Osc</span><b id="hud-osc">—</b>
+      <span>RMS</span><b id="hud-rms">—</b>
+      <span>Transport</span><b id="hud-transport">—</b>
+      <span>WakeLock</span><b id="hud-wakelock">—</b>
+      <span>Estado</span><b id="hud-state">—</b>
+    </div>
+    <ol class="hud-log" id="hud-log"></ol>
+  `;
+  document.body.appendChild(wrap);
+  const toggle = document.createElement('button');
+  toggle.id = 'hud-toggle';
+  toggle.className = 'hud-toggle';
+  toggle.textContent = 'D';
+  toggle.setAttribute('aria-label', 'Abrir HUD (D)');
+  document.body.appendChild(toggle);
+  wrap.querySelector('.hud-close').addEventListener('click', () => {
+    wrap.classList.add('collapsed');
+    lsSet(LS_HUD, false);
+  });
+  toggle.addEventListener('click', () => {
+    wrap.classList.remove('collapsed');
+    lsSet(LS_HUD, true);
+  });
+  hudEl = wrap;
+  // Actualiza el HUD solo mientras está abierto (500 ms).
+  setInterval(() => {
+    if (!hudEl || hudEl.classList.contains('collapsed')) return;
+    const probe = typeof window.__audioProbe === 'function' ? window.__audioProbe() : null;
+    const st = probe && probe.stats;
+    const tr = probe && probe.transport;
+    byId('hud-fps').textContent = Math.round(__perf.fps);
+    byId('hud-frame').textContent = __perf.emaFrameMs ? __perf.emaFrameMs.toFixed(1) + ' ms' : '—';
+    byId('hud-mem').textContent = __perf.memoryMB ? __perf.memoryMB + ' MB' : '—';
+    byId('hud-ctx').textContent = st ? st.ctxState : '—';
+    byId('hud-osc').textContent = st ? String(st.oscillatorCount) : '—';
+    byId('hud-rms').textContent = st ? (+st.rms).toFixed(4) : '—';
+    byId('hud-transport').textContent = tr ? tr.mode : '—';
+    byId('hud-wakelock').textContent = _wakeLock && !_wakeLock.released ? 'activo' : '—';
+    byId('hud-state').textContent = playing ? 'reproduciendo' : 'detenido';
+    byId('hud-lifecycle').textContent = lifecycle.state;
+    const log = byId('hud-log');
+    log.innerHTML = __interferenceLog
+      .slice(-8)
+      .reverse()
+      .map((e) => {
+        const d = new Date(e.at);
+        const p = (n) => String(n).padStart(2, '0');
+        return `<li><span class="hud-log-t">${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}</span><span class="hud-log-k">${e.kind}</span><span class="hud-log-d">${e.detail}</span></li>`;
+      })
+      .join('');
+  }, 500);
+}
+buildHud();
+
+// Secret testing shortcut: press 'E' to toggle Simulated EEG, 'M' to toggle
+// Scientific Mode, 'D' para abrir/cerrar el HUD.
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'd' || e.key === 'D') {
+    // No robar la tecla mientras se escribe en un campo.
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (hudEl) {
+      hudEl.classList.toggle('collapsed');
+      lsSet(LS_HUD, !hudEl.classList.contains('collapsed'));
+    }
+    return;
+  }
   if (e.key === 'e' || e.key === 'E') {
     if (simulation && simulation.eeg) simulation.eeg.toggle();
   }

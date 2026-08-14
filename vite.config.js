@@ -36,6 +36,7 @@ export default defineConfig({
         privacidad: resolve(__dirname, 'privacidad.html'),
         descargar: resolve(__dirname, 'descargar.html'),
         'codigo-abierto': resolve(__dirname, 'codigo-abierto.html'),
+        diagnostico: resolve(__dirname, 'diagnostico.html'),
       },
     },
   },

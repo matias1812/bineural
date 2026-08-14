@@ -1,13 +1,18 @@
 package com.vyneural.bineural
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.WindowInsets
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import com.vyneural.bineural.audio.AudioForegroundService
 import com.vyneural.bineural.bridge.AndroidBridge
 import com.vyneural.bineural.diag.Diagnostics
 import com.vyneural.bineural.lifecycle.LifecycleManager
@@ -51,6 +56,12 @@ class MainActivity : ComponentActivity() {
 
         webView.addJavascriptInterface(AndroidBridge(this, scheduler, permissions), "AndroidBridgeNative")
 
+        // Push de eventos nativos al JS: cambios de audio focus (llamadas, otro
+        // audio, Bluetooth) para el log de interferencias del HUD / /diagnostico.
+        AudioForegroundService.onFocusStateChange = { label ->
+            pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:audiofocus',{detail:{state:'$label'}}))")
+        }
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
@@ -85,6 +96,44 @@ class MainActivity : ComponentActivity() {
         }
 
         loadLocalPage("index")
+    }
+
+    /** Envía JavaScript al WebView (eventos nativos → JS). */
+    fun pushToWeb(js: String) {
+        webView.post { webView.evaluateJavascript(js, null) }
+    }
+
+    /** Pantalla completa (immersive): oculta/muestra las barras del sistema. */
+    fun setImmersiveMode(enabled: Boolean) {
+        Diagnostics.immersiveActive = enabled
+        runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val controller = window.insetsController
+                if (enabled) controller?.hide(WindowInsets.Type.systemBars())
+                else controller?.show(WindowInsets.Type.systemBars())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = if (enabled) {
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                } else {
+                    View.SYSTEM_UI_FLAG_VISIBLE
+                }
+            }
+        }
+    }
+
+    /** Rotación: portrait / landscape / sensor (libera). */
+    fun setOrientation(mode: String) {
+        runOnUiThread {
+            requestedOrientation = when (mode) {
+                "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
     }
 
     /** Carga una página local (MPA de Vite): /privacidad → privacidad.html. */

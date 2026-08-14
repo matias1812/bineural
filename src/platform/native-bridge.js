@@ -28,6 +28,9 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'REQUEST_EXACT_ALARM_PERMISSION',
   'OPEN_EXPERIMENT',
   'OPEN_SETTINGS',
+  'SET_FULLSCREEN',
+  'SET_ORIENTATION',
+  'TEST_NOTIFICATION',
 ]);
 
 /**
@@ -152,10 +155,16 @@ export function createNativeBridgeAdapter(env = {}) {
 
     // ---- Permisos (Fase 10) ----
     requestNotificationPermission: () => send('REQUEST_NOTIFICATION_PERMISSION'),
+    requestExactAlarmPermission: () => send('REQUEST_EXACT_ALARM_PERMISSION'),
 
     // ---- Sesión experimental (Fase 9) ----
     openExperiment: (experimentId) =>
       send('OPEN_EXPERIMENT', typeof experimentId === 'string' ? { experimentId } : null),
+
+    // ---- Pantalla: fullscreen + rotación (Fase pantalla) ----
+    setFullscreen: (payload) => send('SET_FULLSCREEN', typeof payload === 'object' ? payload : null),
+    setOrientation: (payload) => send('SET_ORIENTATION', typeof payload === 'object' ? payload : null),
+    testNotification: () => send('TEST_NOTIFICATION'),
 
     // ---- Diagnóstico ----
     getState() {

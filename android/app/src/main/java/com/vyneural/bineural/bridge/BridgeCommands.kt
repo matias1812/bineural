@@ -19,6 +19,9 @@ object BridgeCommands {
         "REQUEST_EXACT_ALARM_PERMISSION",
         "OPEN_EXPERIMENT",
         "OPEN_SETTINGS",
+        "SET_FULLSCREEN",
+        "SET_ORIENTATION",
+        "TEST_NOTIFICATION",
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

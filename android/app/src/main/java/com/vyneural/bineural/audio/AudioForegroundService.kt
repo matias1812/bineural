@@ -24,7 +24,7 @@ class AudioForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        focus = AudioFocusHelper(this, engine)
+        focus = AudioFocusHelper(this, engine) { label -> onFocusStateChange?.invoke(label) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -105,6 +105,11 @@ class AudioForegroundService : Service() {
         const val EXTRA_BASE = "base"
         const val EXTRA_BEAT = "beat"
         private const val NOTIF_ID = 1001
+
+        // Callback hacia MainActivity para reenviar al JS los cambios de audio
+        // focus (log de interferencias del HUD / /diagnostico).
+        @Volatile
+        var onFocusStateChange: ((String) -> Unit)? = null
 
         @Volatile
         var running = false

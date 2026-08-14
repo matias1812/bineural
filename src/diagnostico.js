@@ -1,0 +1,299 @@
+// src/diagnostico.js — página /diagnostico (web + APK)
+// Panel de refinamiento: pantalla (fullscreen/rotación), rendimiento, audio e
+// interferencias, permisos, notificaciones y plataforma/lógica. Solo lee
+// estados reales del sistema; nada sale del dispositivo.
+import { createNativeBridgeAdapter } from './platform/native-bridge.js';
+import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
+import { probeCapabilities } from './core/capabilities.js';
+import { setFullscreen, setOrientation, screenState } from './platform/fullscreen.js';
+import { notificationSupported, getAlarms, requestPermission } from './notifications.js';
+
+const $ = (id) => document.getElementById(id);
+function setText(id, v) {
+  const el = $(id);
+  if (el) el.textContent = v ?? '—';
+}
+
+// El bridge nativo se inyecta en onPageFinished (después del arranque del
+// módulo): se re-detecta en cada uso, no se guarda una foto al cargar.
+function currentBridge() {
+  const raw = typeof window !== 'undefined' ? window.AndroidBridge : null;
+  if (!raw || typeof raw.postMessage !== 'function') return null;
+  return createNativeBridgeAdapter();
+}
+
+// ── Log local de plataforma/audio (esta página) ────────────────────────────
+const audioLog = [];
+function logLine(kind, detail) {
+  audioLog.push(`${new Date().toLocaleTimeString('es-CL')} · ${kind} · ${detail}`);
+  if (audioLog.length > 14) audioLog.shift();
+  const pre = $('diag-audio-log');
+  if (pre) pre.textContent = audioLog.join('\n');
+}
+['visibilitychange', 'fullscreenchange', 'orientationchange'].forEach((ev) => {
+  window.addEventListener(ev, () => {
+    logLine(ev, `${screenState().orientation || '—'} · ${document.visibilityState}`);
+  });
+});
+// Evento nativo (APK): cambios de audio focus del shell.
+window.addEventListener('vyneural:audiofocus', (e) => {
+  logLine('audiofocus', (e.detail && e.detail.state) || 'event');
+});
+
+// ── Pantalla: fullscreen + rotación ────────────────────────────────────────
+// El fullscreen nativo (APK) oculta las barras del sistema pero NO marca
+// document.fullscreenElement: se rastrea aparte para mostrar el estado real
+// y poder alternar (entrar/salir).
+let nativeFs = false;
+function refreshScreen() {
+  const s = screenState();
+  const bridge = currentBridge();
+  const info = bridge ? bridge.getState().info : null;
+  nativeFs = !!(info && info.fullscreen);
+  setText('diag-fs-state', s.fullscreen ? 'sí (web)' : nativeFs ? 'sí (nativa)' : 'no');
+  setText('diag-orientation', s.orientation || '—');
+  setText('diag-viewport', `${s.inner.w} × ${s.inner.h} · dpr ${s.dpr}`);
+}
+setInterval(refreshScreen, 1000);
+
+function bind(id, fn) {
+  const b = $(id);
+  if (b) b.addEventListener('click', fn);
+}
+const screenResult = (r, action) =>
+  logLine('pantalla', r && r.ok ? action : `error: ${r && r.error ? r.error : 'sin respuesta'}`);
+
+bind('btn-fs', async () => {
+  const target = !(screenState().fullscreen || nativeFs);
+  const r = await setFullscreen(target, currentBridge());
+  screenResult(r, target ? 'fullscreen activado' : 'fullscreen desactivado');
+  refreshScreen();
+});
+bind('btn-or-portrait', async () => screenResult(await setOrientation('portrait', currentBridge()), 'vertical bloqueada'));
+bind('btn-or-landscape', async () => screenResult(await setOrientation('landscape', currentBridge()), 'horizontal bloqueada'));
+bind('btn-or-sensor', async () => screenResult(await setOrientation('sensor', currentBridge()), 'orientación libre'));
+
+// ── Rendimiento (esta página) ──────────────────────────────────────────────
+const perf = { ema: 0, last: performance.now() };
+function perfTick() {
+  const now = performance.now();
+  const dt = now - perf.last;
+  perf.last = now;
+  perf.ema = perf.ema ? perf.ema * 0.9 + dt * 0.1 : dt;
+  setText('diag-fps', Math.round(1000 / perf.ema));
+  setText('diag-frame', `${perf.ema.toFixed(1)} ms`);
+  if (performance.memory) setText('diag-mem', `${Math.round(performance.memory.usedJSHeapSize / 1048576)} MB`);
+  requestAnimationFrame(perfTick);
+}
+requestAnimationFrame(perfTick);
+
+// ── Audio: tono de prueba + servicio nativo ────────────────────────────────
+let testCtx = null;
+bind('btn-beep', () => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) {
+      logLine('beep', 'sin Web Audio API');
+      return;
+    }
+    if (!testCtx) {
+      testCtx = new AC();
+      testCtx.onstatechange = () => logLine('beep ctx', testCtx.state);
+    }
+    const osc = testCtx.createOscillator();
+    const g = testCtx.createGain();
+    osc.frequency.value = 432;
+    const t0 = testCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.15, t0 + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1);
+    osc.connect(g).connect(testCtx.destination);
+    osc.start();
+    osc.stop(t0 + 1.05);
+    logLine('beep', 'tono 432 Hz · 1 s');
+  } catch (e) {
+    logLine('beep', `error: ${e.message}`);
+  }
+});
+
+let bgActive = false;
+bind('btn-bg', () => {
+  const bridge = currentBridge();
+  if (!bridge) {
+    logLine('servicio', 'solo en la APK (bridge nativo)');
+    return;
+  }
+  if (!bgActive) {
+    bridge.startBackgroundAudio({ base: 432, beat: 6 });
+    bgActive = true;
+    $('btn-bg').textContent = '🎧 Detener servicio de audio';
+    logLine('servicio', 'START_BACKGROUND_AUDIO enviado');
+  } else {
+    bridge.stopBackgroundAudio();
+    bgActive = false;
+    $('btn-bg').textContent = '🎧 Servicio de audio nativo';
+    logLine('servicio', 'STOP_BACKGROUND_AUDIO enviado');
+  }
+});
+
+// ── Permisos ───────────────────────────────────────────────────────────────
+function refreshCaps() {
+  const probe = probeCapabilities({
+    notificationSupported: notificationSupported(),
+    notificationPermission: notificationSupported() ? Notification.permission : null,
+    mediaSessionSupported: 'mediaSession' in navigator,
+    mediaSessionActive: false,
+    wakeLockSupported: 'wakeLock' in navigator,
+    wakeLockActive: false,
+    pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
+    pushConfigured: false,
+    iosNeedsInstall: false,
+  });
+  const bridge = currentBridge();
+  const merged = mergePlatformCapabilities({
+    web: probe,
+    native: bridge ? bridge.getState() : null,
+    env: { ua: navigator.userAgent, bridgePresent: !!bridge },
+  });
+  const rows = [
+    ['Notificaciones', merged.notifications.label || merged.notifications.permission, merged.notifications.provider || 'web'],
+    ['Audio 2.º plano', merged.backgroundAudio.label, merged.backgroundAudio.provider || 'web'],
+    ['Alarmas exactas', merged.exactAlarms.label, merged.exactAlarms.provider || 'web'],
+    ['Media Session', merged.mediaSession.label, merged.mediaSession.provider || 'web'],
+    ['Wake Lock', merged.wakeLock.label, 'web'],
+    ['Push', merged.push.label, 'web'],
+  ];
+  const tbody = document.querySelector('#diag-perms tbody');
+  if (tbody) {
+    tbody.innerHTML = rows
+      .map(([name, label, provider]) => `<tr><td>${name}</td><td>${label ?? '—'}</td><td>${provider}</td></tr>`)
+      .join('');
+  }
+  return merged;
+}
+
+const permNote = (msg) => {
+  const n = $('diag-perm-note');
+  if (n) n.textContent = msg;
+};
+bind('btn-perm-notif', async () => {
+  const bridge = currentBridge();
+  if (bridge) {
+    bridge.requestNotificationPermission();
+    permNote('Comando nativo enviado: REQUEST_NOTIFICATION_PERMISSION. Revisá el diálogo del sistema.');
+  } else if (notificationSupported()) {
+    const r = await requestPermission();
+    permNote(`Resultado: ${r}`);
+  } else {
+    permNote('Notificaciones no soportadas en este navegador.');
+  }
+  refreshCaps();
+});
+bind('btn-perm-alarm', () => {
+  const bridge = currentBridge();
+  if (bridge) {
+    bridge.requestExactAlarmPermission();
+    permNote('Comando nativo enviado: REQUEST_EXACT_ALARM_PERMISSION.');
+  } else {
+    permNote('Alarmas exactas solo en la APK (requieren el sistema operativo).');
+  }
+});
+bind('btn-perm-wake', async () => {
+  if ('wakeLock' in navigator) {
+    try {
+      const wl = await navigator.wakeLock.request('screen');
+      permNote('Wake Lock adquirido. Se libera en 5 s.');
+      setTimeout(() => {
+        wl.release().catch(() => {});
+        permNote('Wake Lock liberado.');
+      }, 5000);
+    } catch (e) {
+      permNote(`Wake Lock denegado: ${e.message}`);
+    }
+  } else {
+    permNote('Wake Lock no soportado en este navegador.');
+  }
+});
+
+// ── Notificaciones ─────────────────────────────────────────────────────────
+bind('btn-notif-test', () => {
+  const bridge = currentBridge();
+  if (bridge) {
+    bridge.testNotification();
+    permNote('Notificación nativa enviada (TEST_NOTIFICATION).');
+  } else if (notificationSupported() && Notification.permission === 'granted') {
+    try {
+      new Notification('Vyneural · Prueba de diagnóstico', {
+        body: 'Si ves esto, las notificaciones funcionan.',
+        icon: 'icons/icon-192.png',
+        badge: 'icons/icon-192.png',
+        tag: 'vyneural-diag-test',
+      });
+      permNote('Notificación web enviada.');
+    } catch (e) {
+      permNote(`Error: ${e.message}`);
+    }
+  } else {
+    permNote('Permiso no concedido: pedilo en Permisos primero.');
+  }
+});
+
+// ── Estado: alarmas + última sesión ────────────────────────────────────────
+function refreshState() {
+  try {
+    const alarms = getAlarms();
+    setText('diag-alarms', String(alarms.length));
+  } catch (_) {
+    setText('diag-alarms', '—');
+  }
+  let session = '—';
+  try {
+    const s = JSON.parse(localStorage.getItem('ob-session-v1'));
+    if (s && s.state) session = s.state;
+  } catch (_) {
+    /* sin sesión */
+  }
+  setText('diag-session', session);
+}
+
+// ── Plataforma / lógica ────────────────────────────────────────────────────
+function refreshPlatform() {
+  const merged = refreshCaps();
+  const bridge = currentBridge();
+  const native = bridge ? bridge.getState() : null;
+  setText(
+    'diag-platform',
+    JSON.stringify(
+      {
+        ua: navigator.userAgent,
+        bridge: native
+          ? {
+              platform: native.platform,
+              bridgeStatus: native.bridgeStatus,
+              version: native.version,
+              focusState: native.info ? native.info.focusState : null,
+              backgroundServiceActive: native.supported && native.info ? native.info.backgroundServiceActive : null,
+            }
+          : null,
+        platformKind: merged ? merged.platformKind : null,
+        displayMode: (() => {
+          try {
+            if (window.matchMedia('(display-mode: standalone)').matches) return 'standalone';
+            if (window.matchMedia('(display-mode: fullscreen)').matches) return 'fullscreen';
+          } catch (_) {
+            /* sin matchMedia */
+          }
+          return 'browser';
+        })(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+refreshScreen();
+refreshState();
+refreshPlatform();
+setInterval(refreshState, 1000);
+setInterval(refreshPlatform, 2000);

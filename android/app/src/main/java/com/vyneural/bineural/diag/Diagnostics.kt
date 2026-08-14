@@ -26,6 +26,10 @@ object Diagnostics {
     @Volatile
     var bridgeStatus: String = "UNAVAILABLE"
 
+    /** Pantalla completa nativa (immersive mode) activa o no. */
+    @Volatile
+    var immersiveActive: Boolean = false
+
     @Volatile
     var lastError: String? = null
 
