@@ -30,13 +30,13 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_PLAYER, "Reproductor Bineural", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(CHANNEL_PLAYER, "Reproductor Vyneural", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Control de la sesión en curso"
                 setShowBadge(false)
             },
         )
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALARMS, "Alarmas Bineural", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(CHANNEL_ALARMS, "Alarmas Vyneural", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Recordatorios de sesión"
             },
         )

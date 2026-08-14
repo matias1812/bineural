@@ -10,6 +10,32 @@ inject();
 // recogidas de los visitantes reales.
 injectSpeedInsights();
 
+// ── Dentro de la APK (WebView nativa) ───────────────────────────────────────
+// La web empaquetada dentro de la app corre sobre file:// y el shell inyecta
+// AndroidBridgeNative. Ahí no tiene sentido "instalar la APK": la vista de
+// descarga/instalación se oculta (CSS) y la tarjeta se reemplaza por un aviso.
+const IN_APP =
+  typeof window !== 'undefined' &&
+  (typeof window.AndroidBridgeNative !== 'undefined' || location.protocol === 'file:');
+if (IN_APP) document.documentElement.classList.add('in-app');
+
+// En la app ya instalada, la tarjeta de descarga se convierte en un aviso de
+// que la aplicación ya está en uso (sin botón de instalar).
+if (IN_APP) {
+  const card = document.querySelector('.download-card');
+  if (card) {
+    card.innerHTML = `
+      <h2>Ya estás usando Vyneural</h2>
+      <p class="download-meta">La app está instalada en este dispositivo y funciona sin conexión.</p>
+      <p>
+        Esta vista es para instalar la aplicación desde el navegador. Desde acá podés
+        explorar el <a href="/codigo-abierto">código abierto</a> o volver al
+        <a href="/">generador</a>.
+      </p>
+    `;
+  }
+}
+
 // ---------------------------------------------------------------- Nav móvil
 const navToggle = document.getElementById('nav-toggle');
 const navLinks = document.getElementById('site-links');

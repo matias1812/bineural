@@ -1,4 +1,6 @@
+<!-- Ícono de la app: fondo oscuro + barras con gradiente, la misma imagen de
+     la PWA (public/icons/icon-512.png). Generado por scripts/gen-launcher-icons.cjs. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

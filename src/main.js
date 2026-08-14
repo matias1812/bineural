@@ -934,8 +934,8 @@ function endSession() {
     try {
       new Notification('Vyneural', {
         body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
+        icon: 'icons/icon-192.png',
+        badge: 'icons/icon-192.png',
         tag: 'vyneural-session-end',
       });
     } catch (_) {
@@ -1687,11 +1687,11 @@ function updateMediaSession() {
   // Artwork: intentamos con la portada real, con fallback al icono de la app.
   MEDIA_SESSION.metadata = new MediaMetadata({
     title: selected.name,
-    artist: 'Bineural · Ondas binaurales',
+    artist: 'Vyneural · Ondas binaurales',
     album: `${selected.band} · ${p.base} / ${(p.base + p.beat).toFixed(1)} Hz`,
     artwork: [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
     ],
   });
 
@@ -3270,10 +3270,15 @@ if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
   }
 }
 
-// Registro del service worker para la PWA (solo en producción).
-if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+// Registro del service worker para la PWA (solo en producción y solo sobre http/https:
+// dentro de la APK la página vive en file://, donde no hay service worker).
+if (
+  'serviceWorker' in navigator &&
+  /^https?:$/.test(location.protocol) &&
+  location.hostname !== 'localhost'
+) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').catch(() => {});
   });
 }
 

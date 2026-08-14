@@ -318,6 +318,23 @@ a:hover {
   color: #fbbf24;
 }
 
+/* Bloques de código (p. ej. pasos de compilación en /codigo-abierto). */
+.page-body pre {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.page-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
 /* ---------------------------------------------------------------- Tabla de bandas */
 /* La tabla vive dentro de un contenedor con scroll horizontal: conserva su
    layout real (display: table) para que columnas y filas queden alineadas
@@ -678,6 +695,18 @@ a:hover {
 .install-steps li {
   margin-bottom: 10px;
   line-height: 1.6;
+}
+
+/* Dentro de la APK (clase .in-app puesta por site.js) no se ofrece instalar
+   la APK: se ocultan la vista de descarga/instalación y los accesos a ella. */
+.in-app .site-links a[href="/descargar"],
+.in-app .footer-col a[href="/descargar"],
+.in-app a[href="/descargar"].hero-cta,
+.in-app a[href="/descargar"].apk-cta-btn,
+.in-app .apk-cta,
+.in-app .install-steps,
+.in-app #install-title {
+  display: none !important;
 }
 
 .cmp-table {

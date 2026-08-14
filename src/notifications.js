@@ -139,8 +139,8 @@ export function showSwNotification(alarm) {
         reg.showNotification('¡Hora de tu sesión en Vyneural!', {
           body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
           tag: `vyneural-alarm-${alarm.id}`,
-          icon: '/icons/icon-192.png',
-          badge: '/icons/icon-192.png',
+          icon: 'icons/icon-192.png',
+          badge: 'icons/icon-192.png',
           renotify: true,
           data: { url },
           actions,
@@ -161,8 +161,8 @@ export function showLocalNotification(alarm, url = getAlarmDeepLink(alarm)) {
     const n = new Notification('¡Hora de tu sesión en Vyneural!', {
       body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
       tag: `vyneural-alarm-${alarm.id}`,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
       renotify: true,
     });
     n.onclick = () => {

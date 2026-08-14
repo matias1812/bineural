@@ -85,7 +85,7 @@ class AndroidBridge(
                 }
                 "SCHEDULE_ALARM" -> {
                     val id = payload?.optString("alarmId") ?: return respond("INVALID", command, null)
-                    val title = payload.optString("title", "Bineural")
+                    val title = payload.optString("title", "Vyneural")
                     val body = payload.optString("body", "Hora de tu sesión")
                     val at = payload.optLong("atMs", 0L)
                     if (id.isEmpty() || at <= 0L) return respond("INVALID", command, null)

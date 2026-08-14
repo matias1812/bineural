@@ -41,7 +41,7 @@ La firma release lee las credenciales de `local.properties` (gitignored) o de
 las variables `BINEURAL_STORE_FILE/BINEURAL_STORE_PASS/BINEURAL_KEY_ALIAS/
 BINEURAL_KEY_PASS`. El keystore vive FUERA del repositorio
 (`~/.local/bineural-release.keystore`); nunca se sube. La APK release actual:
-SHA-256 `7858c0ad0f5d9e0b1be51b51465dc9d9209bee47b41aaf7a8ccab99db3300a7d`
+SHA-256 `bf885bd5245adf6a670a04ad20ff394e81a7ba35bb3638f13b641111a844fba2`
 (se sirve en la web en `/bineural.apk`).
 
 ## Qué implementa

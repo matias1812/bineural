@@ -15,9 +15,9 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -47,8 +47,8 @@
     />
     <meta name="twitter:image" content="https://ondas-binaurales.vercel.app/og.png" />
 
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
 
     <!-- Datos estructurados: aplicación web -->
     <script type="application/ld+json">
@@ -65,10 +65,10 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" crossorigin src="/assets/main-GUNi2097.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/site-Bat6UMRX.js">
-    <link rel="stylesheet" crossorigin href="/assets/site-Ci6o-NpZ.css">
-    <link rel="stylesheet" crossorigin href="/assets/main-1qOCvqdo.css">
+    <script type="module" crossorigin src="./assets/main-B-r8Jq1P.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/site-BQgpqfFJ.js">
+    <link rel="stylesheet" crossorigin href="./assets/site-yQYaROff.css">
+    <link rel="stylesheet" crossorigin href="./assets/main-B7N97XLI.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -112,6 +112,8 @@
         <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
+        <a href="/descargar">APK (Android)</a>
+        <a href="/codigo-abierto">Código abierto</a>
 
       </nav>
     </header>
@@ -126,7 +128,7 @@
           que necesitas hoy.
         </p>
         <div class="hero-cta-row">
-          <a class="hero-cta" href="#estados">Comenzar ahora ↓</a>
+          <a class="hero-cta" href="/descargar">Descargar la app ↓</a>
           <a class="hero-cta hero-cta-ghost" href="/beneficios">Ver beneficios</a>
         </div>
         <ul class="trust-row" aria-label="Confianza">
@@ -232,6 +234,12 @@
       </section>
 
       <section class="controls">
+        <button id="settings-toggle" class="settings-toggle" aria-expanded="false" aria-controls="settings-body" type="button">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Duración, ambiente y frecuencias</span>
+          <svg class="ico settings-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div id="settings-body" class="settings-body hidden">
         <div class="timer-row">
           <span class="timer-label"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Duración</span>
           <div id="timer-options">
@@ -287,6 +295,17 @@
         <div class="wave-row">
           <span class="wave-label"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h3l3-7 4 14 3-10 2 3h5"/></svg> Forma de onda <span class="wave-hint">se aplica a la frecuencia elegida</span></span>
           <div id="wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
+        </div>
+        <div class="exp-setting-row">
+          <span class="exp-setting-label"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.5L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg> Condición experimental <span class="exp-setting-hint">la misma del modo experimental</span></span>
+          <div id="exp-conditions-settings" class="exp-conditions" role="radiogroup" aria-label="Condición del estímulo (modo experimental)">
+            <button type="button" class="exp-cond active" data-cond="binaural">Binaural</button>
+            <button type="button" class="exp-cond" data-cond="pure-tone">Tono puro</button>
+            <button type="button" class="exp-cond" data-cond="noise">Ruido</button>
+            <button type="button" class="exp-cond" data-cond="amplitude-modulation">AM</button>
+            <button type="button" class="exp-cond" data-cond="none">Sin estímulo</button>
+          </div>
+        </div>
         </div>
       </section>
 
@@ -373,6 +392,20 @@
         <h2>¿Listo para tu primera sesión?</h2>
         <p>Gratis, sin cuenta y listo en segundos. Solo necesitas unos audífonos.</p>
         <a class="hero-cta" href="#estados">Comenzar ahora</a>
+      </section>
+
+      <section class="apk-cta" id="apk-cta">
+        <div class="apk-cta-inner">
+          <div>
+            <h2>📱 ¿Android? Llevá Vyneural en tu bolsillo</h2>
+            <p>
+              La APK mantiene el audio en segundo plano, muestra los controles en la pantalla
+              bloqueada y dispara notificaciones y alarmas con la app cerrada. Mismo núcleo
+              científico, todo offline y sin backend.
+            </p>
+          </div>
+          <a class="apk-cta-btn" href="/descargar">Descargar APK →</a>
+        </div>
       </section>
 
     </div>
@@ -587,6 +620,7 @@
           Vyneural usa estos permisos para seguir sonando limpio fuera de la app
           (pantalla bloqueada o en segundo plano) y para avisarte de los recordatorios.
         </p>
+        <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
         <div class="perm-row"><span>Notificaciones</span><b id="perm-notif" class="perm-state">—</b></div>
         <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
         <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
@@ -639,6 +673,8 @@
           <a href="/que-son-las-ondas-binaurales">Qué son las ondas binaurales</a>
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
+          <a href="/descargar">Descargar APK (Android)</a>
+          <a href="/codigo-abierto">Código abierto</a>
         </div>
         <div class="footer-col">
           <h3>Estados</h3>
@@ -668,6 +704,6 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
   </body>
 </html>

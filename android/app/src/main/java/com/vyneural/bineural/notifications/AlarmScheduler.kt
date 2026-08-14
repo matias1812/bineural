@@ -56,7 +56,7 @@ class AlarmScheduler(private val context: Context) {
         for ((id, raw) in prefs.all) {
             runCatching {
                 val j = JSONObject(raw as String)
-                schedule(id, j.optString("title", "Bineural"), j.optString("body", ""), j.optLong("at"))
+                schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"))
             }
         }
     }

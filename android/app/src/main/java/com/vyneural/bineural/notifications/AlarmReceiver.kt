@@ -22,7 +22,7 @@ class AlarmReceiver : BroadcastReceiver() {
         }.getOrNull() ?: return
         NotificationHelper.showAlarm(
             context,
-            record.optString("title", "Bineural"),
+            record.optString("title", "Vyneural"),
             record.optString("body", "Hora de tu sesión"),
         )
         prefs.edit().remove(id).apply()

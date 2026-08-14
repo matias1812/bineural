@@ -69,7 +69,7 @@ class AudioForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat() {
-        val notif = NotificationHelper.mediaNotification(this, "Sesión Bineural", "Reproduciendo…")
+        val notif = NotificationHelper.mediaNotification(this, "Sesión Vyneural", "Reproduciendo…")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {

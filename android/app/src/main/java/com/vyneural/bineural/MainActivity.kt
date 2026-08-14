@@ -1,5 +1,7 @@
 package com.vyneural.bineural
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -15,7 +17,7 @@ import com.vyneural.bineural.permissions.PermissionManager
 import com.vyneural.bineural.util.BineuralLog
 
 /**
- * Shell Android (P1): carga la web Bineural desde assets locales (offline,
+ * Shell Android (P1): carga la web Vyneural desde assets locales (offline,
  * sin servidor) y le inyecta `window.AndroidBridge` con el contrato exacto de
  * `src/platform/native-bridge.js`. UN WebView, UN servicio de audio, UNA
  * sesión — cero duplicación.
@@ -48,6 +50,16 @@ class MainActivity : ComponentActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 if (url.startsWith("file:///android_asset/bineural/")) return false
+                // Enlaces externos (GitHub, Instagram, fuentes): abrir en el
+                // navegador del sistema, nunca dentro de la WebView.
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: Exception) {
+                        BineuralLog.e("webview", "no external browser for $url")
+                    }
+                    return true
+                }
                 val path = request.url.path ?: "/"
                 val page = path.trim('/').ifEmpty { "index" }
                 loadLocalPage(page)
