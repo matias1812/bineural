@@ -1,0 +1,56 @@
+{
+  "name": "Vyneural",
+  "short_name": "Vyneural",
+  "description": "Generador de ondas binaurales para meditación, sueño, relajación y concentración.",
+  "lang": "es",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#0b0d1a",
+  "theme_color": "#0b0d1a",
+  "shortcuts": [
+    {
+      "name": "Meditación",
+      "short_name": "Meditar",
+      "description": "Abrir sesión de meditación (Theta 6 Hz)",
+      "url": "/?state=meditacion",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Sueño profundo",
+      "short_name": "Dormir",
+      "description": "Abrir sesión de sueño profundo (Delta 2 Hz)",
+      "url": "/?state=sueno",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Concentración",
+      "short_name": "Foco",
+      "description": "Abrir sesión de concentración (Beta 16 Hz)",
+      "url": "/?state=concentracion",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

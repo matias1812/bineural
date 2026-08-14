@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Perdido en el espacio · Vyneural</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        background: radial-gradient(900px 500px at 50% 20%, #1c1b3a, #0b0d1a 70%);
+        color: #eef0ff;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      #stars {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+      }
+      .card {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        max-width: 480px;
+        padding: 40px 32px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 24px;
+        backdrop-filter: blur(12px);
+        animation: float 5s ease-in-out infinite;
+      }
+      .code {
+        font-size: 84px;
+        font-weight: 800;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1;
+      }
+      h1 {
+        margin: 14px 0 8px;
+        font-size: 22px;
+      }
+      p {
+        color: #9aa0c3;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      a {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 12px 26px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #a78bfa, #6366f1);
+        color: #fff;
+        font-weight: 700;
+        text-decoration: none;
+        box-shadow: 0 12px 34px -8px rgba(167, 139, 250, 0.5);
+        transition: transform 0.2s ease;
+      }
+      a:hover {
+        transform: translateY(-2px) scale(1.03);
+      }
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stars"></canvas>
+    <div class="card">
+      <div class="code">404</div>
+      <h1>Perdido en el espacio</h1>
+      <p>Esta frecuencia no existe… o se desvaneció entre las estrellas. Volvé al viaje.</p>
+      <a href="/">↩ Volver al inicio</a>
+    </div>
+    <script>
+      (function () {
+        const cv = document.getElementById('stars');
+        const cx = cv.getContext('2d');
+        const colors = ['#ffffff', '#93c5fd', '#c4b5fd', '#f9a8d4'];
+        let w, h, stars = [];
+        function resize() {
+          w = cv.width = window.innerWidth;
+          h = cv.height = window.innerHeight;
+          stars = [];
+          const n = Math.min(180, Math.floor((w * h) / 7000));
+          for (let i = 0; i < n; i++) {
+            stars.push({
+              x: Math.random() * w,
+              y: Math.random() * h,
+              r: Math.random() * 1.6 + 0.4,
+              c: colors[Math.floor(Math.random() * colors.length)],
+              tw: Math.random() * Math.PI * 2,
+            });
+          }
+        }
+        function frame() {
+          requestAnimationFrame(frame);
+          cx.clearRect(0, 0, w, h);
+          for (const s of stars) {
+            s.tw += 0.04;
+            const a = 0.5 + 0.5 * Math.sin(s.tw);
+            cx.globalAlpha = 0.35 + 0.65 * a;
+            cx.fillStyle = s.c;
+            cx.beginPath();
+            cx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            cx.fill();
+          }
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        frame();
+      })();
+    </script>
+  </body>
+</html>

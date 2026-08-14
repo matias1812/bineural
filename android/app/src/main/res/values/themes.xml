@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.Bineural" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0b0d12</item>
+        <item name="android:statusBarColor">#0b0d12</item>
+        <item name="android:navigationBarColor">#0b0d12</item>
+        <item name="android:colorAccent">#8b5cf6</item>
+    </style>
+</resources>

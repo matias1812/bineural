@@ -32,8 +32,9 @@ permisos, lifecycle).
 | Fase | Qué | Estado | Dónde |
 |---|---|---|---|
 | P0 | Separar Core / Platform | ✅ **Implementado y validado (78/78)** | `src/platform/` — ver abajo |
-| P1 | Android Studio + WebView local | ⬜ Requiere Android SDK (tu máquina) | — |
-| P2 | Bridge JS ↔ Kotlin | 🟡 Contrato definido en `native-bridge.js`; falta el Kotlin | `docs/android-roadmap.md` §Contrato |
+| P1 | Android native runtime | 🟡 **Source delivered, NOT VERIFIED** (Kotlin + Gradle + manifest listos; falta SDK/compilar/probar en dispositivo) | `android/` + `android/README.md` |
+| P2 | Bridge JS ↔ Kotlin | ✅ **Entregado** — `AndroidBridge.kt` implementa el contrato exacto de `native-bridge.js` | `android/.../bridge/` |
+| P3 | Foreground Audio Service | 🟡 Código entregado (`AudioForegroundService` + `BinauralToneEngine`); sin prueba física | `android/.../audio/` |
 | P3 | Foreground Audio Service nativo | ⬜ Requiere APK | — |
 | P4 | MediaSession nativa | ⬜ Requiere APK | — |
 | P5 | Audio Focus (duck/pause/resume) | ⬜ Requiere APK | — |
