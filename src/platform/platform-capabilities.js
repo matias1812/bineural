@@ -1,36 +1,61 @@
 // src/platform/platform-capabilities.js
 // P0 — Separación Core / Platform.
 //
-// Fusiona las capacidades de la WEB (probeCapabilities, honestas) con las
-// del shell NATIVO (Android) cuando el bridge está presente. El resultado es
-// la matriz única que la UI muestra: cada capacidad declara su proveedor
-// ('web' | 'native') y su estado real (supported / granted / active), sin
-// confundir "la API existe" con "funciona garantizado".
+// Distingue el ENTORNO real y fusiona las capacidades de la WEB
+// (probeCapabilities, honestas) con las del shell NATIVO (Android) cuando el
+// bridge está presente. Regla del P0 gate §2/§8:
+//
+//   "Un Chrome Android sigue siendo WEB" — android-native SOLO cuando el
+//   bridge respondió el handshake; el user-agent jamás concede capacidades.
 //
 // Es pura (recibe inyección) para poder testearla headless.
 
 /**
- * @param {object} p
- * @param {object} p.web       Resultado de probeCapabilities().
- * @param {object|null} p.native  getState() del adaptador de bridge (null si no hay APK).
- * @returns {object} Matriz fusionada con etiquetas honestas.
+ * Clasifica el entorno real (nunca por UA para conceder capacidades).
+ * @param {object} [env]
+ * @param {string} [env.ua]            navigator.userAgent.
+ * @param {boolean} [env.bridgePresent] ¿window.AndroidBridge detectado?
+ * @returns {'desktop'|'android-browser'|'android-native'|'ios'|'unknown'}
  */
-export function mergePlatformCapabilities({ web, native = null }) {
-  const isNative = !!(native && native.present);
+export function detectPlatformKind({ ua = '', bridgePresent = false } = {}) {
+  const isIos = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  if (isIos) return 'ios';
+  if (isAndroid) return bridgePresent ? 'android-native' : 'android-browser';
+  if (!ua) return 'unknown';
+  return 'desktop';
+}
 
-  // Notificaciones: el proveedor nativo (si existe) puede mostrar avisos con
-  // la app cerrada; la web no. El permiso real lo reporta el bridge.
+/**
+ * Fusiona capacidades web + nativas en una matriz única.
+ * @param {object} p
+ * @param {object} p.web         Resultado de probeCapabilities().
+ * @param {object|null} p.native getState() del adaptador de bridge (null si no hay APK).
+ * @param {object} [p.env]       { ua, bridgePresent } para clasificar el entorno.
+ * @returns {object} Matriz con provider y estados separados.
+ */
+export function mergePlatformCapabilities({ web, native = null, env = {} }) {
+  const isNative = !!(native && native.present);
+  const platformKind = detectPlatformKind({
+    ua: env.ua || '',
+    bridgePresent: isNative,
+  });
+
+  // Notificaciones: nativo puede avisar con la app cerrada; la web no.
   const notif = isNative
     ? {
         provider: 'native',
         supported: !!native.info && !!native.info.notifications,
-        permission: native.info && native.info.notificationPermission ? native.info.notificationPermission : web.notifications.permission,
+        granted: (native.info && native.info.notificationPermission) === 'granted',
+        permission: native.info && native.info.notificationPermission
+          ? native.info.notificationPermission
+          : web.notifications.permission,
         label: notifNativeLabel(native),
       }
-    : { provider: 'web', ...web.notifications, label: web.notifications.label };
+    : { provider: 'web', granted: web.notifications.permission === 'granted', ...web.notifications };
 
-  // Audio en segundo plano: la web está limitada por el navegador/SO; la APK
-  // con Foreground Service lo garantiza (si el sistema lo permite).
+  // Audio en segundo plano: web limitada; APK con Foreground Service lo
+  // garantiza si el sistema lo permite.
   const backgroundAudio = isNative
     ? {
         provider: 'native',
@@ -47,7 +72,7 @@ export function mergePlatformCapabilities({ web, native = null }) {
         label: 'Limitado por el navegador (la pestaña debe seguir viva)',
       };
 
-  // Alarmas exactas: solo la APK puede garantizarlas con el SO.
+  // Alarmas exactas: solo la APK con el SO.
   const exactAlarms = isNative
     ? {
         provider: 'native',
@@ -64,8 +89,7 @@ export function mergePlatformCapabilities({ web, native = null }) {
         label: 'No garantizado sin la app (requiere calendario o web abierta)',
       };
 
-  // Media Session: la APK la implementa nativamente; la web depende del
-  // navegador.
+  // Media Session: nativa en la APK; web depende del navegador.
   const mediaSession = isNative
     ? {
         provider: 'native',
@@ -78,14 +102,15 @@ export function mergePlatformCapabilities({ web, native = null }) {
     : { provider: 'web', ...web.mediaSession, label: web.mediaSession.label };
 
   return {
+    platformKind,
     platform: isNative ? 'android' : 'web',
     native: isNative,
     notifications: notif,
     backgroundAudio,
     exactAlarms,
     mediaSession,
-    // Las capacidades web que la APK no cambia (push sigue necesitando
-    // backend; wake lock es pantalla, no audio).
+    // La APK no cambia estas: push sigue necesitando backend; wake lock es
+    // pantalla, no audio.
     wakeLock: web.wakeLock,
     push: web.push,
     audio: web.audio,

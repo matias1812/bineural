@@ -91,6 +91,9 @@ function mergedCapabilities() {
       iosNeedsInstall: iosNeedsInstall(),
     }),
     native: nativeBridge.getState(),
+    // Entorno real: el UA clasifica (desktop/ios/android-browser), pero las
+    // capacidades nativas SOLO las concede el handshake del bridge (§8).
+    env: { ua: navigator.userAgent, bridgePresent: nativeBridge.present },
   });
 }
 
@@ -3157,7 +3160,14 @@ window.__platformProbe = async () => {
     // window.AndroidBridge. Sin APK, la web sigue siendo el único proveedor.
     platform: {
       runtime: nativeBridge.platform, // 'web' | 'android'
+      kind: mergedCapabilities().platformKind, // desktop|android-browser|android-native|ios|unknown
       bridge: nativeBridge.getState(),
+    },
+    capabilities: {
+      notifications: mergedCapabilities().notifications,
+      backgroundAudio: mergedCapabilities().backgroundAudio,
+      exactAlarms: mergedCapabilities().exactAlarms,
+      mediaSession: mergedCapabilities().mediaSession,
     },
   };
 };

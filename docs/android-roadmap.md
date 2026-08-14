@@ -31,7 +31,7 @@ permisos, lifecycle).
 
 | Fase | Qué | Estado | Dónde |
 |---|---|---|---|
-| P0 | Separar Core / Platform | ✅ **Implementado y testeado (75/75)** | `src/platform/` — ver abajo |
+| P0 | Separar Core / Platform | ✅ **Implementado y validado (78/78)** | `src/platform/` — ver abajo |
 | P1 | Android Studio + WebView local | ⬜ Requiere Android SDK (tu máquina) | — |
 | P2 | Bridge JS ↔ Kotlin | 🟡 Contrato definido en `native-bridge.js`; falta el Kotlin | `docs/android-roadmap.md` §Contrato |
 | P3 | Foreground Audio Service nativo | ⬜ Requiere APK | — |
@@ -58,15 +58,22 @@ permisos, lifecycle).
   - `detectNativeBridge()` — detecta `window.AndroidBridge` (lo inyecta la APK).
   - `validateCommand(command, payload)` — whitelist + validación de payload
     (Fase 24: comandos arbitrarios → `DENIED`).
+  - `handshake()` — P0 gate §9: `GET_PLATFORM_CAPABILITIES`; sin respuesta real
+    → `UNAVAILABLE`. El bridge nunca se da por existente solo por el UA (§8).
   - `createNativeBridgeAdapter()` — métodos `startBackgroundAudio`,
     `scheduleAlarm`, `requestNotificationPermission`, `openExperiment`, …
     **Sin bridge**: cada comando responde `{ ok:false, error:'NOT_SUPPORTED' }`
-    → la web/PWA actual funciona idéntica.
-- **`src/platform/platform-capabilities.js`**: `mergePlatformCapabilities()` —
-  matriz única y honesta con proveedor (`web` | `native`) y estados
-  separados **supported ≠ granted ≠ active**. La web no promete background
-  audio; la APK sí (si el sistema lo permite), y "autorizada" es un estado
-  distinto de "soportada".
+    → la web/PWA actual funciona idéntica. Aislamiento de fallos (§10): un
+    bridge que lanza se reporta como `BRIDGE_ERROR`/`bridgeStatus:'ERROR'` y
+    nunca rompe la UI ni el core.
+- **`src/platform/platform-capabilities.js`**: `detectPlatformKind()` distingue
+  `desktop` / `android-browser` / `android-native` / `ios` / `unknown` —
+  **un Chrome Android sin bridge es `android-browser`, nunca nativo** (§2/§8).
+  `mergePlatformCapabilities()` produce la matriz única y honesta con
+  proveedor (`web` | `native`) y estados separados
+  **supported ≠ granted ≠ active**. La web no promete background audio; la
+  APK sí (si el sistema lo permite), y "autorizada" es un estado distinto de
+  "soportada".
 - **UI**: el modal de permisos muestra una fila **Plataforma** (solo visible
   dentro de la APK) y las etiquetas cambian a "Nativa — concedido ✓" etc.
 - **Diagnóstico**: `window.__platformProbe().platform` expone el estado real
@@ -147,6 +154,29 @@ no "la API existe".
    → …) midiendo frecuencia, fase, RMS, interrupciones — P11.
 9. Comparación Web vs APK y validación experimental con identidad de sesión
    (versión de app, Android, device, engine, experimentId) — P12.
+
+## P0 VALIDATION GATE — STATUS (cerrado antes de avanzar a Kotlin)
+
+| # | Criterio | Resultado | Evidencia |
+|---|---|---|---|
+| 1 | Core sin modificar | ✅ PASS | diff `dcd639e..0d47b91`: solo `src/platform/`, UI de permisos y sonda; `audio.js`, `cymatics.js`, `wavefield.js`, `simulation.js`, `experiments.js` intactos |
+| 2 | Entorno real (Chrome Android ≠ nativo) | ✅ PASS | `detectPlatformKind()` + test: UA Android sin bridge → `android-browser` |
+| 3 | Bridge sin errores si no existe | ✅ PASS | sin bridge: `NOT_SUPPORTED`, nunca lanza (test) |
+| 4 | Whitelist de comandos | ✅ PASS | 11 comandos; arbitrarios → `DENIED` (test `EXEC_SHELL`) |
+| 5 | supported ≠ granted ≠ active | ✅ PASS | notificaciones `granted`, alarmas `supported`+`granted`, background `supported`+`active` (test) |
+| 6 | Fallback web (NO_OP) | ✅ PASS | navegador: `runtime:'web'`, bridge `UNAVAILABLE`, app normal |
+| 7 | Diagnóstico | ✅ PASS | `__platformProbe().platform` + `.capabilities`; `window.__nativeBridge` |
+| 8 | Sin falsos positivos | ✅ PASS | capacidades SOLO de `getPlatformInfo()`/handshake real; bridge mudo → `UNAVAILABLE` (test) |
+| 9 | Handshake | ✅ PASS | `handshake()` → `CONNECTED`/`UNAVAILABLE`; timeout; test |
+| 10 | Aislamiento de fallos | ✅ PASS | bridge que lanza → `BRIDGE_ERROR`, adaptador nunca lanza (test) |
+| 11 | Una sola inicialización | ✅ PASS | adaptador único en main.js; sin listeners duplicados |
+| 12 | Seguridad | ✅ PASS | whitelist + payload plano serializable + claves validadas; sin JS/archivos/shell/intents arbitrarios |
+| 13 | NO APK todavía | ✅ PASS | nada de Kotlin/Gradle creado |
+| 14 | Matriz de entornos | ✅ PASS* | desktop verificado en vivo; Firefox/Android/iOS **NOT TESTED** (requiere dispositivo) |
+| 15 | Criterios de aceptación | ✅ PASS | todos los anteriores (78/78 tests, build ✓) |
+
+**P0 STATUS: PASS** — se puede avanzar a P1 (scaffold Android) cuando haya
+SDK disponible. Los puntos con * dependen de prueba física en dispositivo.
 
 ## Telemetría y privacidad (sin backend)
 

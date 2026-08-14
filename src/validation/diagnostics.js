@@ -33,7 +33,7 @@ import { detectNotificationCapabilities, capabilitySummary } from '../core/notif
 // capacidades. Se testean con bridge inyectado y sin él (la web debe seguir
 // funcionando idéntica cuando no hay APK).
 import { detectNativeBridge, validateCommand, createNativeBridgeAdapter, BRIDGE_COMMANDS } from '../platform/native-bridge.js';
-import { mergePlatformCapabilities } from '../platform/platform-capabilities.js';
+import { mergePlatformCapabilities, detectPlatformKind } from '../platform/platform-capabilities.js';
 import { createNotificationManager } from '../core/notification-manager.js';
 
 export async function runBineuralDiagnostics() {
@@ -1185,13 +1185,86 @@ export async function runBineuralDiagnostics() {
   });
 
   runTest('NativeBridge: whitelist de comandos y validación de payload (Fase 24)', () => {
-    if (!BRIDGE_COMMANDS.includes('GET_PLATFORM_INFO')) throw new Error('whitelist vacía');
+    if (!BRIDGE_COMMANDS.includes('GET_PLATFORM_CAPABILITIES')) throw new Error('whitelist sin handshake');
+    if (!BRIDGE_COMMANDS.includes('REQUEST_EXACT_ALARM_PERMISSION') || !BRIDGE_COMMANDS.includes('OPEN_SETTINGS')) {
+      throw new Error('whitelist incompleta');
+    }
     const ok = validateCommand('SCHEDULE_ALARM', { alarmId: 'a' });
     if (!ok.ok) throw new Error('comando whitelisted rechazado');
     if (validateCommand('EXEC_SHELL', {}).error !== 'DENIED') throw new Error('comando arbitrario debe ser DENIED');
     if (validateCommand('START_BACKGROUND_AUDIO', 'nope').error !== 'INVALID') throw new Error('payload string debe ser INVALID');
     if (validateCommand('START_BACKGROUND_AUDIO', ['a']).error !== 'INVALID') throw new Error('payload array debe ser INVALID');
     if (validateCommand('SCHEDULE_ALARM', { 'evil key': 1 }).error !== 'INVALID') throw new Error('clave rara debe ser INVALID');
+  });
+
+  runTest('NativeBridge: handshake — sin bridge UNAVAILABLE; con respuesta CONNECTED (§9)', async () => {
+    const noBridge = createNativeBridgeAdapter({});
+    const hs0 = await noBridge.handshake({ timeoutMs: 10 });
+    if (hs0.status !== 'UNAVAILABLE' || hs0.platform !== 'web') throw new Error('sin bridge el handshake debe ser UNAVAILABLE');
+    // Bridge con getPlatformInfo síncrono → CONNECTED inmediato.
+    const fake = {
+      version: '1.0.0',
+      postMessage: () => null,
+      getPlatformInfo: () => ({ nativeAudio: true, notifications: true }),
+    };
+    const ok = createNativeBridgeAdapter({ bridge: fake });
+    const hs1 = await ok.handshake({ timeoutMs: 10 });
+    if (hs1.status !== 'CONNECTED' || hs1.platform !== 'android') throw new Error('handshake con info síncrona debe conectar');
+    if (ok.getState().bridgeStatus !== 'CONNECTED') throw new Error('bridgeStatus debe quedar CONNECTED');
+    // Bridge SIN getPlatformInfo que no responde → UNAVAILABLE (sin falso positivo).
+    const silent = createNativeBridgeAdapter({ bridge: { version: 'x', postMessage: () => null } });
+    const hs2 = await silent.handshake({ timeoutMs: 10 });
+    if (hs2.status !== 'UNAVAILABLE') throw new Error('bridge mudo debe reportar UNAVAILABLE, no capacidades');
+    if (silent.getState().supported.notifications !== false) throw new Error('bridge sin respuesta NO puede marcar capacidades');
+  });
+
+  runTest('NativeBridge: aislamiento de fallos — un bridge roto no rompe la web (§10)', () => {
+    const broken = createNativeBridgeAdapter({
+      bridge: {
+        version: '1.0.0',
+        postMessage: () => {
+          throw new Error('bridge roto');
+        },
+        getPlatformInfo: () => {
+          throw new Error('info rota');
+        },
+      },
+    });
+    const r = broken.startBackgroundAudio();
+    if (r.ok !== false || r.error !== 'BRIDGE_ERROR') throw new Error('el error del bridge debe aislarse en BRIDGE_ERROR');
+    if (broken.getState().bridgeStatus !== 'ERROR') throw new Error('bridgeStatus debe reflejar el error');
+    // El adaptador nunca lanza: todo lo demás sigue funcionando como web.
+    let threw = false;
+    try {
+      broken.scheduleAlarm({ id: 'x' });
+      broken.cancelAlarm('x');
+      broken.requestNotificationPermission();
+      broken.openExperiment('e1');
+    } catch {
+      threw = true;
+    }
+    if (threw) throw new Error('el adaptador nunca debe lanzar');
+  });
+
+  runTest('PlatformCapabilities: entorno real — Chrome Android ≠ nativo (§2/§8)', () => {
+    const uaAndroid = 'Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile';
+    const uaIos = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)';
+    if (detectPlatformKind({ ua: uaAndroid, bridgePresent: false }) !== 'android-browser') {
+      throw new Error('Chrome Android sin bridge debe ser android-browser, NO nativo');
+    }
+    if (detectPlatformKind({ ua: uaAndroid, bridgePresent: true }) !== 'android-native') {
+      throw new Error('bridge presente en Android debe ser android-native');
+    }
+    if (detectPlatformKind({ ua: uaIos, bridgePresent: false }) !== 'ios') throw new Error('iPhone debe ser ios');
+    if (detectPlatformKind({ ua: '', bridgePresent: false }) !== 'unknown') throw new Error('sin UA debe ser unknown');
+    if (detectPlatformKind({ ua: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/120', bridgePresent: false }) !== 'desktop') {
+      throw new Error('escritorio debe ser desktop');
+    }
+    // La fusión refleja el entorno: Android sin bridge NO concede nativo.
+    const web = probeCapabilities({ notificationSupported: true, notificationPermission: 'default' });
+    const solo = mergePlatformCapabilities({ web, native: null, env: { ua: uaAndroid, bridgePresent: false } });
+    if (solo.platformKind !== 'android-browser' || solo.platform !== 'web') throw new Error('UA Android sin bridge no es nativo');
+    if (solo.backgroundAudio.supported !== false) throw new Error('sin bridge no hay background nativo');
   });
 
   runTest('PlatformCapabilities: fusión honesta web + nativo (supported ≠ granted ≠ active)', () => {

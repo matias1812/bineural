@@ -17,7 +17,7 @@
 
 /** Comandos permitidos. Todo lo demás se rechaza con DENIED. */
 export const BRIDGE_COMMANDS = Object.freeze([
-  'GET_PLATFORM_INFO',
+  'GET_PLATFORM_CAPABILITIES', // handshake (P0 gate §9): devuelve la capacidad real
   'START_BACKGROUND_AUDIO',
   'STOP_BACKGROUND_AUDIO',
   'PAUSE_BACKGROUND_AUDIO',
@@ -25,7 +25,9 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'SCHEDULE_ALARM',
   'CANCEL_ALARM',
   'REQUEST_NOTIFICATION_PERMISSION',
+  'REQUEST_EXACT_ALARM_PERMISSION',
   'OPEN_EXPERIMENT',
+  'OPEN_SETTINGS',
 ]);
 
 /**
@@ -73,7 +75,17 @@ export function validateCommand(command, payload) {
 export function createNativeBridgeAdapter(env = {}) {
   const raw = env.bridge || (typeof window !== 'undefined' ? window.AndroidBridge : null);
   const bridge = detectNativeBridge(env);
-  const info = raw && typeof raw.getPlatformInfo === 'function' ? raw.getPlatformInfo() : null;
+  // Aislamiento de fallos: un getPlatformInfo que lance NO debe impedir
+  // crear el adaptador (la web sigue funcionando).
+  let info = null;
+  try {
+    if (raw && typeof raw.getPlatformInfo === 'function') info = raw.getPlatformInfo();
+  } catch {
+    info = null;
+  }
+  // Handshake (P0 gate §9): si el bridge no responde getPlatformInfo, el
+  // estado es UNAVAILABLE — nunca asumimos que existe por el user-agent.
+  let bridgeStatus = !bridge ? 'UNAVAILABLE' : info ? 'CONNECTED' : 'PENDING';
 
   /** Ejecuta un comando whitelisted; responde con estado honesto. */
   function send(command, payload) {
@@ -87,14 +99,46 @@ export function createNativeBridgeAdapter(env = {}) {
       // sistema, el resultado real llega por evento nativo.
       return { ok: true, pending: true, response: res !== undefined ? res : null, platform: 'android' };
     } catch {
+      // Aislamiento de fallos (P0 gate §10): un error del bridge NUNCA rompe
+      // la UI ni el core; se reporta y la web sigue con su proveedor web.
+      bridgeStatus = 'ERROR';
       return { ok: false, error: 'BRIDGE_ERROR', platform: 'android' };
     }
+  }
+
+  /**
+   * Handshake completo: GET_PLATFORM_CAPABILITIES y, si el bridge responde
+   * por evento asíncrono, lo espera con timeout. Sin respuesta → UNAVAILABLE.
+   */
+  async function handshake({ timeoutMs = 250 } = {}) {
+    if (!bridge) return { status: 'UNAVAILABLE', platform: 'web' };
+    // Respuesta síncrona: ya la tenemos (getPlatformInfo).
+    if (info) {
+      bridgeStatus = 'CONNECTED';
+      return { status: 'CONNECTED', platform: 'android', info };
+    }
+    // Sin getPlatformInfo, intentamos el comando de handshake.
+    try {
+      const res = send('GET_PLATFORM_CAPABILITIES');
+      if (res.ok && res.response && typeof res.response === 'object') {
+        info = res.response;
+        bridgeStatus = 'CONNECTED';
+        return { status: 'CONNECTED', platform: 'android', info };
+      }
+    } catch {
+      /* caer al timeout */
+    }
+    await new Promise((r) => setTimeout(r, timeoutMs));
+    bridgeStatus = info ? 'CONNECTED' : 'UNAVAILABLE';
+    return { status: bridgeStatus, platform: 'android', info: info || null };
   }
 
   return {
     present: !!bridge,
     info: info || null,
     platform: bridge ? 'android' : 'web',
+    bridgeStatus,
+    handshake,
 
     // ---- Audio en segundo plano (Fase 4) ----
     startBackgroundAudio: (payload) => send('START_BACKGROUND_AUDIO', payload),
@@ -118,6 +162,7 @@ export function createNativeBridgeAdapter(env = {}) {
       return {
         present: this.present,
         platform: this.platform,
+        bridgeStatus,
         version: raw && raw.version ? raw.version : null,
         info,
         supported: {
