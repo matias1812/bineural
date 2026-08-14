@@ -21,6 +21,10 @@ import {
   wakeStateText,
   enabledStateText,
 } from '../core/permissions.js';
+import { AudioClock } from '../core/audio-clock.js';
+import { AppLifecycle } from '../core/lifecycle.js';
+import { ExperimentEventLog } from '../core/experiment-events.js';
+import { probeCapabilities } from '../core/capabilities.js';
 
 export function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
@@ -636,6 +640,134 @@ export function runBineuralDiagnostics() {
     if (wakeStateText({ wakeLockSupported: true, wakeLockHeld: true }) !== 'Activo ✓') throw new Error('wake on');
     if (wakeStateText({ wakeLockSupported: false }) !== 'No soportado') throw new Error('wake unsupported');
     if (enabledStateText(true) !== 'Desactivados' || enabledStateText(false) !== 'Activados') throw new Error('enabled toggle');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SYSTEM ROBUSTNESS TESTS (P4/P5/P19/P20/P10)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('AudioClock: la fase del latido deriva del reloj de audio sin drift (20 min)', () => {
+    let t = 0;
+    const clock = new AudioClock(() => t);
+    clock.setEpoch(10); // arranca en t=10 s
+    t = 10 + 1000; // 1000 s simuladas
+    const phase = clock.beatPhase(6);
+    if (phase == null || phase < 0 || phase >= 1) throw new Error(`fase fuera de rango: ${phase}`);
+    // La fase esperada se calcula directamente: ((t - epoch) mod period)/period
+    const period = 1 / 6;
+    const expected = (((t - 10) % period) + period) % period / period;
+    if (Math.abs(phase - expected) > 1e-9) throw new Error(`fase incorrecta: ${phase} vs ${expected}`);
+    // 20 minutos a 10 Hz: la fase en t=epoch+1200 debe ser ~0 (justo el
+    // latido). Tolerancia de punto flotante: 0.1 s no es exacto en binario.
+    clock.setEpoch(5);
+    t = 5 + 1200;
+    const ph = clock.beatPhase(10);
+    if (ph == null) throw new Error('sin fase');
+    const toBeat = Math.min(ph, 1 - ph);
+    if (toBeat > 1e-3) throw new Error(`tras 20 min exactos la fase debe ser 0, fue ${ph}`);
+  });
+
+  runTest('AudioClock: nextBeatAt programa el próximo latido sin timers', () => {
+    let t = 0;
+    const clock = new AudioClock(() => t);
+    clock.setEpoch(0);
+    t = 0.1;
+    const next = clock.nextBeatAt(6); // periodo 1/6 s
+    const expected = 0.1 + (1 / 6 - ((0.1 % (1 / 6))));
+    if (Math.abs(next - expected) > 1e-9) throw new Error(`nextBeatAt incorrecto: ${next}`);
+    if (clock.beatPhase(0) != null) throw new Error('beat 0 → sin fase');
+  });
+
+  runTest('AppLifecycle: secuencia real FOREGROUND → BACKGROUND-audio → suspendido → RETURNING → FOREGROUND', () => {
+    const lc = new AppLifecycle();
+    // Estado inicial tras play: FOREGROUND ('start' solo aplica desde STOPPED).
+    if (lc.state !== 'FOREGROUND') throw new Error('estado inicial');
+    let r = { ok: true, to: 'FOREGROUND' };
+    // Ocultar con audio corriendo (Android con ancla): sigue sonando.
+    r = lc.transition('visibility', { visible: false, ctxState: 'running', playing: true });
+    if (r.to !== 'AUDIO_RUNNING_BACKGROUND') throw new Error(`esperaba AUDIO_RUNNING_BACKGROUND, ${r.to}`);
+    // El SO suspende el contexto estando oculto (iOS):
+    r = lc.transition('ctx', { ctxState: 'suspended' });
+    if (r.to !== 'AUDIO_SUSPENDED') throw new Error(`esperaba AUDIO_SUSPENDED, ${r.to}`);
+    // Volver visible: pasamos por RETURNING y completamos al recuperar running.
+    r = lc.transition('visibility', { visible: true, ctxState: 'suspended', playing: true });
+    if (r.to !== 'RETURNING') throw new Error(`esperaba RETURNING, ${r.to}`);
+    r = lc.transition('resume', { resumeOk: true });
+    if (r.to !== 'FOREGROUND') throw new Error(`esperaba FOREGROUND, ${r.to}`);
+  });
+
+  runTest('AppLifecycle: transiciones imposibles se rechazan (no se fuerza el estado)', () => {
+    const lc = new AppLifecycle();
+    // Un evento de contexto en FOREGROUND no es válido: no debe cambiar nada.
+    const r = lc.transition('ctx', { ctxState: 'suspended' });
+    if (r.ok) throw new Error('ctx en FOREGROUND no es una transición válida');
+    if (lc.state !== 'FOREGROUND') throw new Error('el estado no debe cambiar');
+    // Ocultar sin reproducir → BACKGROUND; volver → FOREGROUND.
+    lc.transition('visibility', { visible: false, ctxState: null, playing: false });
+    if (lc.state !== 'BACKGROUND') throw new Error('esperaba BACKGROUND');
+    lc.transition('visibility', { visible: true });
+    if (lc.state !== 'FOREGROUND') throw new Error('esperaba FOREGROUND');
+    // Stop desde cualquier estado → STOPPED; start lo reanima.
+    lc.transition('visibility', { visible: false, ctxState: 'running', playing: true });
+    lc.transition('stop');
+    if (lc.state !== 'STOPPED') throw new Error('esperaba STOPPED');
+    if (!lc.transition('start').ok) throw new Error('start desde STOPPED debe ser válido');
+    if (lc.state !== 'FOREGROUND') throw new Error('esperaba FOREGROUND tras start');
+  });
+
+  runTest('ExperimentEventLog: la integridad refleja las interrupciones reales del SO', () => {
+    let wall = 0;
+    let audio = 0;
+    const log = new ExperimentEventLog({ wallNow: () => wall, audioTime: () => audio });
+    log.start({ condition: 'BINAURAL' });
+    wall = 10000; audio = 10000; // 10 s sonando
+    log.suspend({ reason: 'ctx-suspended' }); // el SO interrumpe
+    wall = 12000; // 2 s de interrupción
+    log.recover({ reason: 'ctx-running' });
+    wall = 20000; audio = 20000; // 8 s más
+    const r = log.compute();
+    // Exposición 18 s; esperada 20 s → integridad 0.9.
+    if (Math.abs(r.integrity - 0.9) > 1e-9) throw new Error(`integridad ${r.integrity}`);
+    if (r.interruptions.length !== 1 || r.interruptions[0].durationMs !== 2000) throw new Error('interrupción mal registrada');
+    if (r.events.some((e) => !['experimentStarted', 'audioSuspended', 'audioRecovered', 'experimentCompleted'].includes(e.type))) {
+      throw new Error('evento inesperado en el registro');
+    }
+    const txt = log.integrityText();
+    if (!/90%/.test(txt) || !/Interrupción/.test(txt)) throw new Error(`texto de integridad: ${txt}`);
+  });
+
+  runTest('ExperimentEventLog: la pausa voluntaria no se cuenta como interrupción', () => {
+    let wall = 0;
+    const log = new ExperimentEventLog({ wallNow: () => wall });
+    log.start();
+    wall = 5000;
+    log.pause({ source: 'lock-screen' }); // pausa voluntaria desde el control del SO
+    wall = 20000; // 15 s de pausa voluntaria
+    log.resume();
+    wall = 25000; // 5 s más
+    const r = log.compute();
+    if (r.integrity !== 1) throw new Error(`integridad ${r.integrity} (pausa voluntaria no debe bajar la integridad)`);
+    if (r.pausedMs !== 15000) throw new Error(`pausedMs ${r.pausedMs}`);
+    if (r.interruptions.length !== 0) throw new Error('no hay interrupciones');
+  });
+
+  runTest('PlatformCapabilities: cada capacidad se muestra con su función real', () => {
+    const caps = probeCapabilities({
+      notificationSupported: true,
+      notificationPermission: 'granted',
+      mediaSessionSupported: true,
+      mediaSessionActive: true,
+      wakeLockSupported: true,
+      wakeLockActive: true,
+      pushSupported: true,
+      pushConfigured: false,
+    });
+    if (caps.notifications.label !== 'Concedido ✓') throw new Error('notif label');
+    if (caps.mediaSession.label !== 'Controles activos') throw new Error('media session no depende de Notification');
+    if (caps.push.label !== 'No configurado — requiere servidor') throw new Error('push honesto sin backend');
+    if (!caps.wakeLock.label.toLowerCase().includes('pantalla')) throw new Error('wake lock = pantalla, no garantía de audio');
+    const noMs = probeCapabilities({});
+    if (noMs.mediaSession.label !== 'No soportado') throw new Error('media session unsupported');
   });
 
   // ──────────────────────────────────────────────────────────────────────────

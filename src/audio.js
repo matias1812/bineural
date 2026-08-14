@@ -1,6 +1,11 @@
 // Motor de ondas binaurales con Web Audio API.
 // Reproduce dos osciladores: uno en el oído izquierdo (frecuencia base)
 // y otro en el derecho (base + ritmo). El cerebro percibe la diferencia.
+//
+// Reloj maestro: la fase del latido y el tiempo de sesión se derivan del
+// AudioContext.currentTime (AudioClock), nunca de timers JS, para que no
+// haya drift aunque la pestaña pase minutos en segundo plano.
+import { AudioClock } from './core/audio-clock.js';
 
 export class BinauralEngine {
   constructor() {
@@ -13,8 +18,13 @@ export class BinauralEngine {
     this.beat = 0;
     this._base = 0;
     this.onBeatPulse = null;
+    // Hook para el monitor de ciclo de vida: se dispara con cada cambio real
+    // del AudioContext (running ↔ suspended) aunque no haya visibilitychange.
+    this.onCtxStateChange = null;
     this._pulseTimer = null;
     this._epoch = null; // tiempo del AudioContext del último latido (fase 0)
+    // Reloj maestro de la sesión (fase del latido, tiempo transcurrido).
+    this.clock = new AudioClock(() => (this.ctx ? this.ctx.currentTime : 0));
   }
 
   get isPlaying() {
@@ -46,6 +56,12 @@ export class BinauralEngine {
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
+      // Estado real del contexto como fuente de verdad del ciclo de vida:
+      // iOS al bloquear, pérdida de audio focus o congelación de la pestaña
+      // suspenden el contexto sin disparar visibilitychange.
+      this.ctx.onstatechange = () => {
+        if (this.onCtxStateChange) this.onCtxStateChange(this.ctx.state);
+      };
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return this.ctx;
@@ -150,6 +166,7 @@ export class BinauralEngine {
     this._volume = volume;
     // Época del primer latido: el primer pulso del timer se dispara a +100 ms.
     this._epoch = ctx.currentTime + 0.1;
+    this.clock.setEpoch(this._epoch);
 
     // Fundido de entrada para un inicio suave.
     const now = ctx.currentTime;
@@ -246,17 +263,31 @@ export class BinauralEngine {
 
   // Fase del latido [0,1) en un instante dado del reloj del AudioContext.
   // 0 = justo el latido, igual que el pulso que ven las gotas del visualizador.
+  // Derivada del AudioClock (AudioContext.currentTime): sin drift por timers.
   getBeatPhaseAt(time) {
     if (!this.ctx || this._epoch == null || !this.leftOsc || !this.beat) return null;
-    const period = Math.max(0.08, 1 / this.beat);
-    const elapsed = time - this._epoch;
-    return (((elapsed % period) + period) % period) / period;
+    return this.clock.beatPhase(this.beat, time);
   }
 
   // Fase del latido en este momento.
   getBeatPhase() {
     if (!this.ctx) return null;
     return this.getBeatPhaseAt(this.ctx.currentTime);
+  }
+
+  // Estado real del motor para el monitor de integridad (P26/P36): contexto,
+  // sample rate, reloj, ganancia, RMS y nº de osciladores. Devuelve null si
+  // todavía no hay contexto.
+  getAudioStats() {
+    if (!this.ctx) return null;
+    return {
+      ctxState: this.ctx.state,
+      sampleRate: this.ctx.sampleRate,
+      currentTime: this.ctx.currentTime,
+      gain: this.masterGain ? this.masterGain.gain.value : 0,
+      rms: this.getRms(),
+      oscillatorCount: this.leftOsc ? 2 : 0,
+    };
   }
 
   // Época del latido actual (para alinear el LFO de los ambientes).

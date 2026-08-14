@@ -3,7 +3,7 @@
 ## Cómo ejecutar
 
 ```bash
-npm test                       # suite headless (Node) — 47 tests, < 2 s
+npm test                       # suite headless (Node) — 54 tests, < 2 s
 window.runBineuralDiagnostics()# misma suite en el navegador (consola)
 npm run build                  # build de producción
 ```
@@ -34,6 +34,18 @@ perezosa para permitirlo).
 | Wake Lock activo → no se re-adquiere | Sin duplicados |
 | Sin soporte de Wake Lock → se omite | Degradación limpia |
 | Textos de estado por plataforma | Modal honesto (concedido/denegado/iOS/unsupported) |
+
+### Robustez de sistema (P4/P5/P19/P20/P10)
+
+| Test | Qué valida |
+|---|---|
+| AudioClock: fase sin drift (20 min) | La fase deriva de AudioContext.currentTime, no de timers |
+| AudioClock: nextBeatAt | El pulso visual se programa con el reloj de audio |
+| AppLifecycle: secuencia real | FOREGROUND → AUDIO_RUNNING_BACKGROUND → AUDIO_SUSPENDED → RETURNING → FOREGROUND |
+| AppLifecycle: transiciones imposibles rechazadas | No se fuerza el estado; stop/start correctos |
+| Integridad con interrupciones del SO | 10 s + 2 s suspendido + 8 s → integridad 0.9 y texto honesto |
+| Pausa voluntaria ≠ interrupción | La integridad no baja por pausar (solo por fallos del audio) |
+| PlatformCapabilities | Cada capacidad con su función real; Push honesto sin backend |
 
 ### Física de ondas (WaveField)
 
@@ -116,8 +128,8 @@ perezosa para permitirlo).
 | # | Ítem | Estado (2026-08-14) |
 |---|---|---|
 | 1 | `npm run build` | ✅ 6 páginas, 150 kB JS (gzip 48 kB) |
-| 2 | `npm test` (diagnósticos) | ✅ 47/47 (Node) |
-| 3 | Suite en el navegador | ✅ 47/47 (`window.runBineuralDiagnostics()`) |
+| 2 | `npm test` (diagnósticos) | ✅ 54/54 (Node) |
+| 3 | Suite en el navegador | ✅ 54/54 (`window.runBineuralDiagnostics()`) |
 | 4 | GPU (WebGL2) | ✅ contexto GL2 detectado; fallback GL1 (GLSL ES 1.00) + `OES_texture_float`; fallback CPU |
 | 5 | CPU fallback | ✅ presente en el código (`buildGLProgram` → null → rasterizador) |
 | 6 | Móvil | ⚠️ sin dispositivo físico disponible; canvas adaptativo (`devicePixelRatio`), rotación forzada en vertical |
@@ -131,8 +143,13 @@ perezosa para permitirlo).
 
 - **Entorno**: Windows (Git Bash), Node ≥ 18, Chrome (runtime del preview).
 - **Build**: `✓ built in ~1.3 s` — `dist/` regenerado (6 páginas + assets).
-- **Tests**: 47/47 en Node y 47/47 en el navegador (corridas consecutivas, sin
+- **Tests**: 54/54 en Node y 54/54 en el navegador (corridas consecutivas, sin
   flakiness tras fijar semilla del test 1/f).
+- **Robustez de sistema** (fase P0–P40, núcleo implementado): `AudioClock`
+  (reloj maestro), `AppLifecycle` (máquina de estados), `ExperimentEventLog`
+  (eventos + integridad de sesión), `PlatformCapabilities` (etiquetas
+  honestas), SW con `notificationclick`/acciones y render congelado en
+  segundo plano. Documentado en `docs/system-robustness.md`.
 
 ## Auditoría Lighthouse (2026-08-14)
 

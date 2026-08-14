@@ -44,12 +44,16 @@
 | SimulationEngine | `src/core/simulation.js` | Activo (orquestador + bucle) |
 | Profiles (científicos) | `src/models/profiles.js` | Activo (28 perfiles + hipótesis) |
 | ScientificHUD | `src/ui/hud.js` | Activo (dominios agrupados + etiquetas de honestidad) |
-| Diagnósticos | `src/validation/*` | Activo (47 tests headless) |
+| Diagnósticos | `src/validation/*` | Activo (54 tests headless) |
 | Reproducibilidad | `src/core/reproducibility.js` | Activo (Phase 12) |
 | Experimental Mode | `src/core/experiments.js` | Activo (Phase 10: 5 condiciones, FFT/PSD, export JSON) |
 | Audio watchdog | `src/core/audio-health.js` | Activo (lógica pura, testeada) |
 | Ancla de medios | `src/core/media-anchor.js` | Activo (WAV mudo en bucle; registra la pestaña como reproductor) |
 | Lógica de permisos | `src/core/permissions.js` | Activo (decisiones puras, testeada — no adornos) |
+| AudioClock (reloj maestro) | `src/core/audio-clock.js` | Activo (fase del latido desde AudioContext.currentTime) |
+| AppLifecycle | `src/core/lifecycle.js` | Activo (máquina de estados FOREGROUND/BACKGROUND/SUSPENDED/…) |
+| Integridad de sesión | `src/core/experiment-events.js` | Activo (eventos con audioTime + integridad %) |
+| PlatformCapabilities | `src/core/capabilities.js` | Activo (capacidades reales + etiquetas honestas) |
 
 Módulos legacy conservados pero **no** conectados al pipeline científico:
 `src/starfield.js` (fondo decorativo), `src/site.js` (páginas secundarias).

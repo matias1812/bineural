@@ -90,11 +90,62 @@ export function getAlarmDeepLink(alarm) {
 }
 
 // ---------------------------------------------------------------- Notificación
+// ¿Hay un Service Worker registrado (para notificaciones "de sistema")?
+export function swReady() {
+  return typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+}
+
+// ¿La plataforma soporta acciones en las notificaciones (botones)?
+// Android sí; Safari iOS no; no mostrar botones que no pueden funcionar.
+export function notificationActionsSupported() {
+  return typeof Notification !== 'undefined' && 'actions' in Notification.prototype;
+}
+
+// Notificación de alarma "de sistema". Preferencia:
+//   1. registration.showNotification() → click y acciones gestionados por
+//      el Service Worker (notificationclick), incluso si la pestaña está
+//      congelada en ese momento.
+//   2. new Notification() (fallback sin SW) con onclick en la página.
+// Limitación honesta: ninguna de las dos dispara con la app cerrada; para
+// eso hace falta Web Push con backend (docs/system-robustness.md) o el
+// respaldo de calendario (Google Calendar / .ics).
 export function showSessionAlarmNotification(alarm) {
   if (permissionsDisabled()) return false;
   if (!notificationSupported() || Notification.permission !== 'granted') return false;
   try {
     const url = getAlarmDeepLink(alarm);
+    const actions = notificationActionsSupported()
+      ? [
+          { action: 'start', title: '▶ Iniciar sesión' },
+          { action: 'dismiss', title: 'Descartar' },
+        ]
+      : [];
+
+    if (swReady()) {
+      navigator.serviceWorker.ready
+        .then((reg) => {
+          if (!reg.showNotification) throw new Error('sin showNotification');
+          reg.showNotification('¡Hora de tu sesión en Vyneural!', {
+            body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
+            tag: `vyneural-alarm-${alarm.id}`,
+            icon: '/icons/icon-192.png',
+            badge: '/icons/icon-192.png',
+            renotify: true,
+            data: { url },
+            actions,
+          });
+        })
+        .catch(() => fallbackNotification(alarm, url));
+      return true;
+    }
+    return fallbackNotification(alarm, url);
+  } catch {
+    return false;
+  }
+}
+
+function fallbackNotification(alarm, url) {
+  try {
     const n = new Notification('¡Hora de tu sesión en Vyneural!', {
       body: `Toca aquí para iniciar tu frecuencia de ${Math.round(alarm.freq)} Hz.`,
       tag: `vyneural-alarm-${alarm.id}`,
@@ -126,11 +177,21 @@ export function fireAlarm(alarm) {
 }
 
 // Campanita sutil con Web Audio (sin despertar el motor binaural).
+// Reutiliza el contexto del motor si ya existe y está running (evita un
+// segundo AudioContext efímero cuando hay sesión activa); si no, crea uno
+// temporal que se cierra a los 4 s.
 export function playChime() {
   try {
+    const probe =
+      typeof window !== 'undefined' && typeof window.__audioProbe === 'function'
+        ? window.__audioProbe()
+        : null;
+    const engineCtx =
+      probe && probe.ctx && probe.ctx.state === 'running' ? probe.ctx : null;
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
+    if (!Ctx && !engineCtx) return;
+    const ctx = engineCtx || new Ctx();
+    const own = !engineCtx;
     const now = ctx.currentTime;
     const notes = [880, 1174.66, 1567.98]; // A5 · D6 · G6
     notes.forEach((f, i) => {
@@ -147,9 +208,11 @@ export function playChime() {
       osc.start(t0);
       osc.stop(t0 + 1.2);
     });
-    window.setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 4000);
+    if (own) {
+      window.setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 4000);
+    }
   } catch {
     /* sin soporte de audio */
   }

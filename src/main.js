@@ -31,6 +31,9 @@ import {
   wakeStateText,
   enabledStateText,
 } from './core/permissions.js';
+import { AppLifecycle } from './core/lifecycle.js';
+import { ExperimentEventLog } from './core/experiment-events.js';
+import { probeCapabilities } from './core/capabilities.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -45,6 +48,36 @@ const cymatics = new CymaticsRenderer();
 const simulation = new SimulationEngine(cymatics);
 const ambient = new AmbientEngine();
 simulation.ambient = ambient; // Link for auditory masking model
+
+// ── Monitor de ciclo de vida e integridad de sesión (P5/P19/P20) ────────────
+// El estado del ciclo de vida lo decide la máquina pura AppLifecycle a partir
+// de eventos reales (visibilitychange + ctx.onstatechange), nunca de
+// suposiciones sobre la pestaña. El registro de eventos guarda cada cambio
+// con su audioTime para reconstruir la sesión y calcular su integridad.
+const lifecycle = new AppLifecycle();
+const sessionLog = new ExperimentEventLog({
+  audioTime: () => (simulation.audio.ctx ? simulation.audio.ctx.currentTime : 0),
+});
+window.__lifecycle = lifecycle;
+window.__sessionLog = sessionLog;
+// Hook de diagnóstico (solo lectura): estado real del motor para CI y para
+// verificación en dispositivo (conteo de osciladores, contexto, RMS…).
+window.__audioProbe = () => ({
+  ctx: simulation.audio.ctx,
+  stats: simulation.audio.getAudioStats(),
+});
+// Estado real del AudioContext como fuente de verdad: iOS al bloquear y la
+// pérdida de audio focus suspenden el contexto sin disparar visibilitychange.
+simulation.audio.onCtxStateChange = (state) => {
+  lifecycle.transition('ctx', { ctxState: state, visible: !document.hidden, playing });
+  if (state === 'suspended') {
+    sessionLog.suspend({ reason: 'ctx-suspended' });
+  } else if (state === 'running') {
+    // Si estábamos volviendo (RETURNING), completar la transición real.
+    if (lifecycle.state === 'RETURNING') lifecycle.transition('resume', { resumeOk: true });
+    sessionLog.recover({ reason: 'ctx-running' });
+  }
+};
 
 // ---------------------------------------------------------------- Iconos SVG
 // Reemplazan a los emojis: iconos de trazo (estilo Lucide) que heredan el
@@ -352,6 +385,17 @@ function selectState(state) {
   
   // Set the profile on the simulation engine
   simulation.setProfile(state, currentParams().base);
+
+  // Registro de eventos: el cambio de estímulo queda documentado (P19), solo
+  // durante una sesión activa (seleccionar estados sin sesión es ruido).
+  if (playing) {
+    sessionLog.note('stimulusChanged', {
+      state: state.name,
+      band: state.band,
+      base: currentParams().base,
+      beat: currentParams().beat,
+    });
+  }
   
   if (playing) {
     applyAmbient();
@@ -411,6 +455,19 @@ function start() {
   playing = true;
   sessionStartTime = Date.now();
   sessionAmbient = [...ambientTypes];
+  const p0 = currentParams();
+  lifecycle.transition('start');
+  // Sesión nueva = registro nuevo: si la sesión anterior terminó, se
+  // descarta (start() solo se llama desde el estado detenido).
+  sessionLog.reset();
+  sessionLog.start({
+    state: selected.name,
+    band: selected.band,
+    base: p0.base,
+    beat: p0.beat,
+    wave: p0.wave,
+    condition: 'BINAURAL',
+  });
   // Reclama la Media Session ANTES de que suene el audio: el navegador
   // asocia el controlador de notificaciones a la sesión en marcha y algunos
   // Android solo lo muestran si el metadata ya estaba asignado al empezar.
@@ -490,6 +547,11 @@ function stop(withSummary) {
   const summary = withSummary ? captureSessionSummary() : null;
   recordHistory();
   saveSession();
+  // Cierre sincronizado (P31): audio, UI, MediaSession, timer y registro de
+  // eventos quedan alineados; nunca dejan MediaSession en 'playing' con la
+  // UI en stop.
+  lifecycle.transition('stop');
+  sessionLog.stop({ reason: withSummary ? 'completed' : 'stopped' });
   if (summary) showSessionSummary(summary);
 }
 
@@ -719,6 +781,9 @@ function captureSessionSummary() {
     elapsed,
     freq: `${selected.name} · ${p.base} / ${+(p.base + p.beat).toFixed(1)} Hz · latido ${p.beat} Hz`,
     ambient: amb.length ? amb.join(' + ') : 'Ninguno',
+    // Honestidad experimental (P20): si el SO interrumpió el audio, el
+    // resumen lo dice en vez de fingir una sesión continua.
+    integrity: sessionLog.integrityText(),
   };
 }
 
@@ -728,6 +793,8 @@ function showSessionSummary(s) {
     s.elapsed >= 60 ? `${Math.floor(s.elapsed / 60)} min ${s.elapsed % 60} s` : `${s.elapsed} s`;
   document.getElementById('summary-freq').textContent = s.freq;
   document.getElementById('summary-ambient').textContent = s.ambient;
+  const intEl = document.getElementById('summary-integrity');
+  if (intEl) intEl.textContent = s.integrity || '—';
   summaryModal.classList.remove('hidden');
 }
 
@@ -764,7 +831,10 @@ function setVolume(v) {
   simulation.setVolume(volumeLevel);
   saveSession();
 }
-volume.addEventListener('input', () => setVolume(volume.value));
+volume.addEventListener('input', () => {
+  setVolume(volume.value);
+  sessionLog.note('volumeChanged', { to: volumeLevel });
+});
 
 // ---------------------------------------------------------------- Temporizador
 function armTimer() {
@@ -918,6 +988,7 @@ customBase.addEventListener('input', () => {
   // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
   updateStatus();
   updateCarrierWarning();
+  if (playing) sessionLog.note('stimulusChanged', { base: parseFloat(customBase.value) });
   saveSession();
   updateUrl();
 });
@@ -929,6 +1000,7 @@ customBeat.addEventListener('input', () => {
   }
   // El reproductor (estado, leyenda y frecuencias) refleja el valor nuevo.
   updateStatus();
+  if (playing) sessionLog.note('stimulusChanged', { beat: parseFloat(customBeat.value) });
   saveSession();
 });
 // ---------------------------------------------------------------- Forma de onda
@@ -979,6 +1051,7 @@ function applyWave(wave) {
   // El tipo del oscilador es mutable: se cambia en vivo sin cortar el sonido.
   if (playing) simulation.audio.setWave(selectedWave);
   updateStatus();
+  if (playing) sessionLog.note('stimulusChanged', { wave: selectedWave });
   saveSession();
 }
 
@@ -1374,11 +1447,16 @@ function restoreFromBackground() {
   if (!playing) return;
   const audio = simulation.audio;
   const ctx = audio.ctx;
+  const wasSuspended = !!(ctx && ctx.state === 'suspended');
+  // Máquina de ciclo de vida: visible + suspendido → RETURNING; la llegada
+  // real a 'running' (ctx.onstatechange) completa la transición a FOREGROUND.
+  lifecycle.transition('visibility', { visible: true, ctxState: ctx ? ctx.state : null, playing });
+  sessionLog.foreground();
   // Reanudación sin clics: si el SO suspendió el contexto (iOS al bloquear,
   // pérdida de audio focus en Android), se baja la ganancia al piso, se
   // reanuda y se sube con una rampa (recoverFade). Si el contexto siguió
   // corriendo, solo se re-afirma el nivel de la sesión.
-  if (ctx && ctx.state === 'suspended') {
+  if (wasSuspended) {
     audio.recoverFade(volumeLevel, 0.8);
   } else {
     audio.fadeTo(volumeLevel, 0.4);
@@ -1403,6 +1481,12 @@ document.addEventListener('visibilitychange', () => {
     if (playing && iosNeedsInstall() && simulation.audio.ctx) {
       simulation.audio.fadeTo(0, 0.35);
     }
+    const ctx = simulation.audio.ctx;
+    const audioRunning = !!(ctx && ctx.state === 'running');
+    lifecycle.transition('visibility', { visible: false, ctxState: ctx ? ctx.state : null, playing });
+    // Si el audio sigue sonando en segundo plano (Android con ancla, PWA
+    // instalada), la exposición continúa; si no, se marca la interrupción.
+    sessionLog.background(audioRunning);
   } else {
     restoreFromBackground();
   }
@@ -1499,15 +1583,17 @@ async function requestAllPermissions() {
     iosNeedsInstall: iosNeedsInstall(),
   });
 
-  // 1. Notificaciones: necesarias para la MediaSession en algunos Android
-  //    y para las alarmas cuando la pestaña está oculta.
+  // 1. Notificaciones: SOLO para alarmas y recordatorios del sistema. El
+  //    control del reproductor (Media Session) es una capacidad propia que
+  //    NO depende de este permiso (P6).
   if (decision.willPromptNotifications) {
     try {
       await Notification.requestPermission();
     } catch (_) { /* denegado o no soportado */ }
   }
 
-  // 2. WakeLock: mantiene el audio sin interferencias al bloquear la pantalla.
+  // 2. WakeLock: mantiene la pantalla activa (no es una garantía de audio
+  //    en segundo plano — P11; eso lo decide el navegador).
   if (decision.shouldAcquireWakeLock) await acquireWakeLock();
 
   // 3. Marcar como solicitado para no volver a preguntar
@@ -1926,12 +2012,34 @@ function permissionStateText() {
 function renderPermissionState() {
   if (!permNotif) return;
   const notifPerm = notificationSupported() ? Notification.permission : null;
-  permNotif.textContent = permissionStateText();
+  const caps = probeCapabilities({
+    notificationSupported: notificationSupported(),
+    notificationPermission: notifPerm,
+    mediaSessionSupported: MEDIA_SESSION != null,
+    mediaSessionActive: playing,
+    wakeLockSupported: 'wakeLock' in navigator,
+    wakeLockActive: !!(_wakeLock && !_wakeLock.released),
+    pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
+    pushConfigured: false, // sin backend de Web Push (P13): honesto en la UI
+    iosNeedsInstall: iosNeedsInstall(),
+  });
+  permNotif.textContent = caps.notifications.label;
   permNotif.className = 'perm-state' + (notifPerm === 'granted' ? ' ok' : ' warn');
-  const hasWake = 'wakeLock' in navigator;
-  const wakeActive = !!(hasWake && _wakeLock && !_wakeLock.released);
-  permWakelock.textContent = wakeStateText({ wakeLockSupported: hasWake, wakeLockHeld: wakeActive });
+  const wakeActive = caps.wakeLock.active;
+  permWakelock.textContent = caps.wakeLock.label;
   permWakelock.className = 'perm-state' + (wakeActive ? ' ok' : ' warn');
+  // Fila Media Session: no es un permiso; es una capacidad del navegador.
+  const permMs = document.getElementById('perm-mediasession');
+  if (permMs) {
+    permMs.textContent = caps.mediaSession.label;
+    permMs.className = 'perm-state' + (caps.mediaSession.active ? ' ok' : ' warn');
+  }
+  // Fila Push: sin backend no puede funcionar; se muestra honestamente.
+  const permPush = document.getElementById('perm-push');
+  if (permPush) {
+    permPush.textContent = caps.push.label;
+    permPush.className = 'perm-state warn';
+  }
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
@@ -2125,6 +2233,10 @@ function drawField(field, rgb, cx, cy, r, composite, alpha = 1) {
 
 function drawVisual() {
   requestAnimationFrame(drawVisual);
+  // Segundo plano: no hay nada que renderizar. La simulación visual se
+  // congela (P21) y, al volver, la fase se reconstruye desde el reloj de
+  // audio (AudioClock) — no se repiten frames perdidos ni se quema CPU.
+  if (document.hidden) return;
   const dpr = devicePixelRatio;
   const w = canvas.width;
   const h = canvas.height;
