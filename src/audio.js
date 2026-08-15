@@ -28,6 +28,14 @@ export class BinauralEngine {
     // ritmo; noise = ruido sin contenido tonal; none = silencio (control).
     this._condition = 'binaural';
     this._playing = false;
+    // P1 — instrumentación forense (M2): identificador de sesión de pipeline y
+    // secuencia de ids por fuente, para demostrar que nunca coexisten dos
+    // sets de fuentes. `_pendingTeardown` registra los nodos cuyo teardown se
+    // difirió (fade de stop()) y que un start() nuevo debe ejecutar de forma
+    // SÍNCRONA antes de crear fuentes nuevas.
+    this._sessionId = 0;
+    this._sourceSeq = 0;
+    this._pendingTeardown = [];
     this.onBeatPulse = null;
     // Hook para el monitor de ciclo de vida: se dispara con cada cambio real
     // del AudioContext (running ↔ suspended) aunque no haya visibilitychange.
@@ -154,14 +162,40 @@ export class BinauralEngine {
     return Math.sqrt(sum / fft);
   }
 
-  start({ base = 200, beat = 10, volume = 0.5, wave = 'sine', condition }) {
+  start({ base = 200, beat = 10, volume = 0.5, wave = 'sine', condition } = {}) {
     const ctx = this.ensure();
-    this.stopInstant();
+    const cond = condition || this._condition;
+    // P1 — IDEMPOTENCIA (forense M2): si ya hay una sesión viva con los MISMOS
+    // parámetros, un start() duplicado (eventos del sistema, doble play) NO
+    // reconstruye nada: mismo sessionId, mismas fuentes, mismo pipeline. Solo
+    // se re-afirma el nivel objetivo y el transporte si el SO lo pausó.
+    if (
+      this._playing &&
+      this._base === base &&
+      this.beat === beat &&
+      this._wave === wave &&
+      this._condition === cond
+    ) {
+      this._volume = volume;
+      if (this.transport && this.transport.element && this.transport.element.paused) {
+        this.transport.play();
+      }
+      return { idempotent: true, sessionId: this._sessionId };
+    }
+    // P1 — TEARDOWN SÍNCRONO antes de crear un pipeline nuevo (stop-before-
+    // start): nunca se permite una ventana donde dos sets de fuentes produzcan
+    // audio a la vez.
+    //   1. fuentes vivas de una sesión anterior → detener/desconectar YA;
+    //   2. teardown diferido de un stop() previo → ejecutar YA;
+    //   3. recién después se crean las fuentes nuevas.
+    this._teardownSources();
+    this._flushPendingTeardown();
     if (condition) this._condition = condition;
     this._base = base;
     this.beat = beat;
     this._wave = wave;
     this._playing = true;
+    this._sessionId += 1;
     this._createSources(base, beat, wave);
     // En modo 'element', arranca el elemento real dentro del gesto de play:
     // es ÉL el que el SO ve como reproducción (MediaSession, audio focus).
@@ -199,7 +233,7 @@ export class BinauralEngine {
         g.gain.value = 0.5;
         osc.connect(g).connect(this.masterGain);
         osc.start();
-        this.leftOsc = osc;
+        this.leftOsc = this._tag(osc);
         this.rightOsc = null;
         break;
       }
@@ -218,10 +252,10 @@ export class BinauralEngine {
         osc.connect(am).connect(this.masterGain);
         osc.start();
         lfo.start();
-        this.leftOsc = osc;
+        this.leftOsc = this._tag(osc);
         this.rightOsc = null;
         this.amGain = am;
-        this.amLfo = lfo;
+        this.amLfo = this._tag(lfo);
         break;
       }
       case 'noise': {
@@ -243,7 +277,7 @@ export class BinauralEngine {
         g.gain.value = 0.32;
         src.connect(bp).connect(g).connect(this.masterGain);
         src.start();
-        this.leftOsc = src;
+        this.leftOsc = this._tag(src);
         this.rightOsc = null;
         break;
       }
@@ -273,8 +307,8 @@ export class BinauralEngine {
         right.connect(rightGain).connect(rightPanner).connect(this.masterGain);
         left.start();
         right.start();
-        this.leftOsc = left;
-        this.rightOsc = right;
+        this.leftOsc = this._tag(left);
+        this.rightOsc = this._tag(right);
       }
     }
   }
@@ -318,6 +352,37 @@ export class BinauralEngine {
     this.rightOsc = null;
     this.amLfo = null;
     this.amGain = null;
+    nodes.forEach((n) => {
+      if (!n) return;
+      try {
+        if (typeof n.stop === 'function') n.stop();
+      } catch (_) {
+        /* ya detenido */
+      }
+      try {
+        n.disconnect();
+      } catch (_) {
+        /* ya desconectado */
+      }
+    });
+  }
+
+  /** Asigna un id de secuencia a una fuente viva (instrumentación forense). */
+  _tag(node) {
+    if (node) node._vyneuralId = ++this._sourceSeq;
+    return node;
+  }
+
+  /**
+   * Ejecuta YA el teardown diferido de nodos (P1): un stop() con fade
+   * aplaza la destrucción de nodos para que el fade del masterGain termine;
+   * si llega un start() antes de que dispare el timer, aquí se destruyen de
+   * forma SÍNCRONA para que NUNCA coexistan dos pipelines.
+   */
+  _flushPendingTeardown() {
+    if (!this._pendingTeardown || !this._pendingTeardown.length) return;
+    const nodes = this._pendingTeardown;
+    this._pendingTeardown = [];
     nodes.forEach((n) => {
       if (!n) return;
       try {
@@ -464,7 +529,23 @@ export class BinauralEngine {
       rms: this.getRms(),
       oscillatorCount: (this.leftOsc ? (this.rightOsc ? 2 : 1) : 0) + (this.amLfo ? 1 : 0),
       condition: this._condition,
+      // P1 — instrumentación forense (M2): identidad de la sesión de pipeline
+      // y de las fuentes vivas, más teardown pendiente. Un salto de sessionId
+      // con fuentes viejas vivas = doble pipeline (FAIL).
+      sessionId: this._sessionId,
+      sourceSeq: this._sourceSeq,
+      pendingTeardown: this._pendingTeardown.length,
+      liveSourceIds: this._liveSourceIds(),
     };
+  }
+
+  /** Ids de las fuentes vivas (orden: left, right, amLfo). */
+  _liveSourceIds() {
+    const ids = [];
+    for (const n of [this.leftOsc, this.rightOsc, this.amLfo]) {
+      if (n && n._vyneuralId != null) ids.push(n._vyneuralId);
+    }
+    return ids;
   }
 
   // Época del latido actual (para alinear el LFO de los ambientes).
@@ -489,23 +570,12 @@ export class BinauralEngine {
       clearTimeout(this._pulseTimer);
       this._pulseTimer = null;
     }
-    setTimeout(
-      () =>
-        nodes.forEach((n) => {
-          if (!n) return;
-          try {
-            n.stop();
-          } catch (_) {
-            /* ya detenido */
-          }
-          try {
-            n.disconnect();
-          } catch (_) {
-            /* ya desconectado */
-          }
-        }),
-      fade ? 1100 : 80,
-    );
+    // P1 — el teardown de nodos se DIERE (el fade del masterGain debe terminar
+    // antes de matar las fuentes: cortarlas al instante cortaría el fade), pero
+    // los nodos se REGISTRAN: un start() posterior ejecuta _flushPendingTeardown()
+    // de forma síncrona y no existe ventana de doble pipeline.
+    this._pendingTeardown = nodes.filter(Boolean);
+    setTimeout(() => this._flushPendingTeardown(), fade ? 1100 : 80);
   }
 
   stopInstant() {

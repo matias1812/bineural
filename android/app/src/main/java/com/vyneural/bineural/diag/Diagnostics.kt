@@ -23,6 +23,25 @@ object Diagnostics {
     @Volatile
     var focusState: String = "NONE"
 
+    /** P2 — política de focus visible: veces que el watchdog re-solicitó el
+     *  foco tras una pérdida/interrupción (incluido UNKNOWN). */
+    @Volatile
+    var focusReacquireCount: Int = 0
+
+    /** P2 — política de focus visible: veces que se recibió un callback de
+     *  Audio Focus NO reconocido (UNKNOWN, visible como tal, nunca pérdida
+     *  genérica silenciosa). */
+    @Volatile
+    var focusUnknownCount: Int = 0
+
+    /** MediaSession activa y reproduciendo (P1.5). */
+    @Volatile
+    var mediaSessionActive: Boolean = false
+
+    /** 'playing' | 'paused' | 'stopped' — estado real de la MediaSession. */
+    @Volatile
+    var mediaSessionPlaybackState: String = "stopped"
+
     @Volatile
     var bridgeStatus: String = "UNAVAILABLE"
 
@@ -47,7 +66,8 @@ object Diagnostics {
         b.appendLine("AUDIO:")
         b.appendLine("  Service running: ${AudioForegroundService.isRunning(context)}")
         b.appendLine("  Audio active: $audioActive")
-        b.appendLine("  Focus: $focusState")
+        b.appendLine("  Focus: $focusState (re-adquisiciones del watchdog: $focusReacquireCount, callbacks UNKNOWN: $focusUnknownCount)")
+        b.appendLine("  MediaSession: ${if (mediaSessionActive) "ACTIVE" else "INACTIVE"} ($mediaSessionPlaybackState)")
         b.appendLine()
         b.appendLine("NOTIFICATIONS:")
         val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

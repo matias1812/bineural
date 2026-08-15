@@ -261,6 +261,19 @@ export function nextAlarmAt(time) {
 }
 
 // ---------------------------------------------------------------- Respaldo calendario
+// días de repetición (JS Date.getDay: 0=domingo…6=sábado) → BYDAY de RFC 5545.
+const ICS_DAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+// Regla de repetición semanal para una rutina, o null si no repite.
+// Ej.: [1, 4] (lunes y jueves) → 'FREQ=WEEKLY;BYDAY=MO,TH'.
+export function rruleFor(days) {
+  if (!days || days.length === 0) return null;
+  // Orden semanal natural (L M X J V S D) para un BYDAY legible.
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const sorted = [...new Set(days)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return `FREQ=WEEKLY;BYDAY=${sorted.map((d) => ICS_DAY[d]).join(',')}`;
+}
+
 function fmtGCal(d) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}00`;
@@ -277,6 +290,9 @@ export function buildGoogleCalendarUrl(alarm) {
     details: `Inicia tu sesión de ${Math.round(alarm.freq)} Hz en Vyneural:\n${getAlarmDeepLink(alarm)}`,
     location: location.origin,
   });
+  // Rutina recurrente → el evento se repite semanalmente en los días elegidos.
+  const rrule = rruleFor(alarm.days);
+  if (rrule) p.set('recur', rrule);
   return `https://calendar.google.com/calendar/render?${p.toString()}`;
 }
 
@@ -289,6 +305,7 @@ export function buildIcs(alarm) {
   const mins = alarm.minutes > 0 ? alarm.minutes : 60;
   const end = new Date(start.getTime() + mins * 60000);
   const fmt = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}00`;
+  const rrule = rruleFor(alarm.days);
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -298,8 +315,15 @@ export function buildIcs(alarm) {
     `DTSTAMP:${fmt(new Date())}`,
     `DTSTART:${fmt(start)}`,
     `DTEND:${fmt(end)}`,
+    // Rutina recurrente → RRULE semanal (RFC 5545) con los días elegidos.
+    ...(rrule ? [`RRULE:${rrule}`] : []),
     `SUMMARY:${escIcs(`Sesión de ondas binaurales (${Math.round(alarm.freq)} Hz)`)}`,
     `DESCRIPTION:${escIcs(`Inicia tu sesión de ${Math.round(alarm.freq)} Hz en Vyneural: ${getAlarmDeepLink(alarm)}`)}`,
+    // P2 (FASE 10): LOCATION y SEQUENCE explícitos (RFC 5545). UID estable por
+    // alarma → un evento solo puede descargarse una vez (el mismo evento
+    // re-generado tiene el mismo UID; los calendarios lo deduplican).
+    `LOCATION:${escIcs(location.origin)}`,
+    'SEQUENCE:0',
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');

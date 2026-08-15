@@ -25,7 +25,15 @@ class AlarmReceiver : BroadcastReceiver() {
             record.optString("title", "Vyneural"),
             record.optString("body", "Hora de tu sesión"),
         )
-        prefs.edit().remove(id).apply()
+        // P5 — rutina: si la alarma tiene días de repetición, se reprograma a la
+        // PRÓXIMA ocurrencia (misma hora, próximo día del patrón). Si no, se
+        // consume (una sola vez).
+        val days = record.optJSONArray("days")
+        if (days != null && days.length() > 0) {
+            AlarmScheduler(context).rescheduleAlarm(id)
+        } else {
+            prefs.edit().remove(id).apply()
+        }
     }
 
     companion object {

@@ -39,12 +39,30 @@ export function alarmStateOnTick(alarm, now, graceMs = 5 * 60 * 1000) {
   if (!alarm || !alarm.nextAt) return 'skip';
   if (alarm.state && alarm.state !== ALARM_STATES.SCHEDULED) return 'skip';
   if (alarm.cancelled) return 'skip';
+  // P2 — alarma gestionada externamente (APK: la dispara el AlarmManager nativo
+  // del SO, no el scheduler web). El web scheduler la conserva SOLO para la
+  // lista de la UI; el disparo es responsabilidad del propietario externo.
+  // Así nunca hay doble alarma/notificación para el mismo evento (I6).
+  if (alarm.external) return 'skip';
   if (now < alarm.nextAt) return 'wait';
   if (now - alarm.nextAt <= graceMs) return 'fire';
   return 'miss';
 }
 
 // ── Stores (backend inyectable; testeable con memoria) ─────────────────────
+
+/**
+ * P2 — dueño único de la alarma por plataforma (I6). Decisión pura y testeable:
+ * APK con bridge nativo real → dueño NATIVO (AlarmManager del SO, sobrevive
+ * app cerrada/reboot); Web/PWA → dueño WEB (scheduler de pestaña viva, honesto).
+ * El espejo web marca `external` y nunca dispara en paralelo (un solo
+ * disparador por evento lógico). La cadena completa nativa
+ * (UI→bridge→AlarmScheduler→PendingIntent→AlarmReceiver→NotificationHelper)
+ * se valida por evidencia de emulador (no cubierta por unit tests).
+ */
+export function alarmOwnerForPlatform(platformKind, nativeBridgeAvailable) {
+  return platformKind === 'android-native' && nativeBridgeAvailable ? 'native' : 'web';
+}
 
 export function inMemoryAlarmStore() {
   const map = new Map();

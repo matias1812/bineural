@@ -63,8 +63,9 @@
         <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
-        <a href="/descargar">APK (Android)</a>
         <a href="/codigo-abierto">Código abierto</a>
+        <a href="/hoja-de-ruta">Hoja de ruta</a>
+        <a class="in-app-only" href="/rutina">Tu rutina</a>
       </nav>
     </header>
 
@@ -128,6 +129,10 @@
           <button class="diag-btn" id="btn-beep">🔊 Probar tono (432 Hz, 1 s)</button>
           <button class="diag-btn" id="btn-bg">🎧 Servicio de audio nativo</button>
         </div>
+        <ul class="diag-list">
+          <li>Focus de audio: <b id="diag-focus-state">—</b></li>
+          <li class="diag-muted"><span id="diag-focus-counters">—</span></li>
+        </ul>
         <pre class="diag-console" id="diag-audio-log">—</pre>
 
         <!-- ═══ Permisos ═══ -->
@@ -151,6 +156,20 @@
         <ul class="diag-list">
           <li>Alarmas guardadas: <b id="diag-alarms">—</b></li>
           <li>Última sesión: <b id="diag-session">—</b></li>
+        </ul>
+
+        <!-- ═══ Navegación (P4-B) ═══ -->
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v.5"/></svg></span>Navegación de la app (APK)</h2>
+        <p>
+          El historial manual de páginas (P4-B) que usa el botón BACK del sistema: la página
+          actual, si BACK está habilitado y la pila de páginas anteriores. La navegación nunca
+          toca el audio: lo sostiene el servicio nativo aparte.
+        </p>
+        <ul class="diag-list">
+          <li>Página actual: <b id="diag-nav-current">—</b></li>
+          <li>BACK habilitado: <b id="diag-nav-back">—</b></li>
+          <li>Historial (de la más reciente a la primera): <b id="diag-nav-stack">—</b></li>
+          <li class="diag-muted"><span id="diag-nav-note">Solo visible en la APK (bridge nativo).</span></li>
         </ul>
 
         <!-- ═══ Plataforma y lógica ═══ -->
@@ -184,6 +203,8 @@
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
           <a href="/descargar">Descargar APK (Android)</a>
+          <a class="in-app-only" href="/rutina">Tu rutina</a>
+          <a href="/hoja-de-ruta">Hoja de ruta</a>
           <a href="/codigo-abierto">Código abierto</a>
         </div>
         <div class="footer-col">

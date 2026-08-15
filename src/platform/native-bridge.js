@@ -35,6 +35,10 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'SET_WAVE',
   'SET_AUDIO_LEVEL',
   'RETUNE_BACKGROUND_AUDIO',
+  'GET_AUDIO_STATE',
+  'GET_MEDIA_SESSION_STATE',
+  'GET_NAV_STATE',
+  'OPEN_NOTIFICATION_SETTINGS',
 ]);
 
 /**
@@ -97,6 +101,46 @@ export function validateCommand(command, payload) {
  * Adaptador seguro: cada método consulta el bridge si existe y, si no,
  * devuelve el estado honesto de "no disponible" (la web sigue funcionando).
  */
+/**
+ * P4-B — parsea la respuesta de un comando del bridge (GET_AUDIO_STATE etc.):
+ * el objeto nativo (addJavascriptInterface) responde un STRING JSON crudo; el
+ * wrapper Kotlin responde un objeto {status, command, data}. Acepta ambos y
+ * devuelve el `data` (o null ante cualquier error: aislamiento de fallos).
+ */
+export function parseBridgeResponse(r) {
+  try {
+    if (!r || !r.ok) return null;
+    let o = r.response;
+    if (typeof o === 'string') o = JSON.parse(o);
+    if (o && typeof o === 'object' && o.data) return o.data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lee getPlatformInfo() normalizándolo: el objeto nativo (addJavascriptInterface)
+ * lo devuelve como STRING JSON crudo; el wrapper Kotlin lo devuelve como objeto.
+ * Aceptamos ambos. Devuelve null ante cualquier error (aislamiento de fallos).
+ */
+function readInfo(raw) {
+  if (!raw || typeof raw.getPlatformInfo !== 'function') return null;
+  try {
+    const v = raw.getPlatformInfo();
+    if (typeof v === 'string') {
+      try {
+        return JSON.parse(v);
+      } catch {
+        return null;
+      }
+    }
+    return v && typeof v === 'object' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createNativeBridgeAdapter(env = {}) {
   // Lee el bridge (wrapper o nativo) de forma viva: el wrapper se inyecta
   // después de que main.js corre, así que no se captura una sola vez.
@@ -108,12 +152,7 @@ export function createNativeBridgeAdapter(env = {}) {
   const bridge = detectNativeBridge(env);
   // Aislamiento de fallos: un getPlatformInfo que lance NO debe impedir
   // crear el adaptador (la web sigue funcionando).
-  let info = null;
-  try {
-    if (raw && typeof raw.getPlatformInfo === 'function') info = raw.getPlatformInfo();
-  } catch {
-    info = null;
-  }
+  let info = readInfo(raw);
   // Handshake (P0 gate §9): si el bridge no responde getPlatformInfo, el
   // estado es UNAVAILABLE — nunca asumimos que existe por el user-agent.
   let bridgeStatus = !bridge ? 'UNAVAILABLE' : info ? 'CONNECTED' : 'PENDING';
@@ -148,7 +187,9 @@ export function createNativeBridgeAdapter(env = {}) {
    */
   async function handshake({ timeoutMs = 250 } = {}) {
     if (!bridge) return { status: 'UNAVAILABLE', platform: 'web' };
-    // Respuesta síncrona: ya la tenemos (getPlatformInfo).
+    // Respuesta síncrona: ya la tenemos (getPlatformInfo), re-leída en vivo.
+    const fresh = readInfo(raw);
+    if (fresh) info = fresh;
     if (info) {
       bridgeStatus = 'CONNECTED';
       return { status: 'CONNECTED', platform: 'android', info };
@@ -192,6 +233,12 @@ export function createNativeBridgeAdapter(env = {}) {
     // ---- Permisos (Fase 10) ----
     requestNotificationPermission: () => send('REQUEST_NOTIFICATION_PERMISSION'),
     requestExactAlarmPermission: () => send('REQUEST_EXACT_ALARM_PERMISSION'),
+    openNotificationSettings: () => send('OPEN_NOTIFICATION_SETTINGS'),
+
+    // ---- Estado real (P1.5 Fase 13) ----
+    getAudioState: () => send('GET_AUDIO_STATE'),
+    getMediaSessionState: () => send('GET_MEDIA_SESSION_STATE'),
+    getNavState: () => send('GET_NAV_STATE'),
 
     // ---- Sesión experimental (Fase 9) ----
     openExperiment: (experimentId) =>
@@ -206,6 +253,14 @@ export function createNativeBridgeAdapter(env = {}) {
 
     // ---- Diagnóstico ----
     getState() {
+      // Re-lee la info en VIVO en cada consulta: el wrapper Kotlin se inyecta
+      // en onPageFinished (después de main.js) y el estado nativo cambia con
+      // el servicio (P2 — el emulador reveló que la info capturada al crear el
+      // adaptador era un string crudo y nunca se actualizaba: capabilities
+      // siempre falsas y el retune caía al fallback con re-solicitud de focus).
+      const fresh = readInfo(raw);
+      if (fresh) info = fresh;
+      if (info) bridgeStatus = 'CONNECTED';
       return {
         present: this.present,
         platform: this.platform,

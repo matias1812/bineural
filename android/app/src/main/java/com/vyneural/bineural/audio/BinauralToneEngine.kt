@@ -31,6 +31,7 @@ class BinauralToneEngine {
     private val volume = AtomicReference(0.6)
     private val wave = AtomicReference(0) // 0 sine · 1 triangle · 2 sawtooth · 3 square
     private val playing = AtomicBoolean(false)
+    private val trackStarted = AtomicBoolean(false)
     private var phaseL = 0.0
     private var phaseR = 0.0
     @Volatile private var track: AudioTrack? = null
@@ -39,6 +40,7 @@ class BinauralToneEngine {
     fun start() {
         if (playing.getAndSet(true)) return
         if (track == null) track = createTrack()
+        trackStarted.set(false)
         thread = Thread({ runLoop() }, "bineural-audio").apply { start() }
     }
 
@@ -95,6 +97,7 @@ class BinauralToneEngine {
     fun stop() {
         if (!playing.getAndSet(false)) return
         targetGain.set(0.0)
+        trackStarted.set(false)
         try {
             track?.stop()
         } catch (_: Exception) {
@@ -137,6 +140,16 @@ class BinauralToneEngine {
         val dt = 1.0 / sampleRate
         while (playing.get()) {
             val tr = track ?: break
+            // P2 — bug real encontrado en emulador: en MODE_STREAM el AudioTrack
+            // queda idle y write() bloquea para siempre si nunca se llama a
+            // play(). Sin esto el motor nativo compilaba pero JAMÁS sonaba.
+            if (!trackStarted.getAndSet(true)) {
+                try {
+                    tr.play()
+                } catch (_: Exception) {
+                    /* emulador/dispositivo sin salida de audio */
+                }
+            }
             val f1 = base.get() + (targetBase.get() - base.get()) * 0.05
             val bt = beat.get() + (targetBeat.get() - beat.get()) * 0.05
             base.set(f1)
@@ -158,7 +171,11 @@ class BinauralToneEngine {
                 var off = 0
                 while (off < samples.size) {
                     val w = tr.write(samples, off, samples.size - off)
-                    if (w <= 0) break
+                    if (w <= 0) {
+                        // Sin espacio/salida: dormir un poco en vez de girar en vacío.
+                        Thread.sleep(2)
+                        break
+                    }
                     off += w
                 }
             } catch (_: Exception) {
@@ -169,5 +186,6 @@ class BinauralToneEngine {
             track?.stop()
         } catch (_: Exception) {
         }
+        trackStarted.set(false)
     }
 }

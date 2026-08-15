@@ -89,12 +89,21 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
         label: 'No garantizado sin la app (requiere calendario o web abierta)',
       };
 
-  // Media Session: nativa en la APK; web depende del navegador.
+  // Media Session: nativa en la APK; web depende del navegador. supported =
+  // implementación REAL (no teórica); active y playbackState reflejan el
+  // estado que el servicio nativo reporta (P1.5 Fase 14 — sin falsos
+  // positivos).
   const mediaSession = isNative
     ? {
         provider: 'native',
         supported: !!native.info && !!native.info.mediaSession,
         active: !!native.info && !!native.info.mediaSessionActive,
+        playbackState: native.info && native.info.mediaSessionPlaybackState
+          ? native.info.mediaSessionPlaybackState
+          : null,
+        controls: native.info && native.info.mediaSessionControls
+          ? native.info.mediaSessionControls
+          : (native.info && native.info.mediaSession ? ['play', 'pause', 'stop'] : []),
         label: native.info && native.info.mediaSession
           ? (native.info.mediaSessionActive ? 'Controles activos ✓' : 'Disponible (al reproducir)')
           : 'No soportado',

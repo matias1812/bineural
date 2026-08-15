@@ -27,14 +27,31 @@ import { ExperimentEventLog } from '../core/experiment-events.js';
 import { probeCapabilities } from '../core/capabilities.js';
 import { AudioTransport } from '../core/audio-transport.js';
 import { planRecovery, RECOVERY } from '../core/audio-health.js';
-import { AlarmManager, inMemoryAlarmStore, alarmStateOnTick } from '../core/alarm-manager.js';
+import { AlarmManager, inMemoryAlarmStore, alarmStateOnTick, alarmOwnerForPlatform } from '../core/alarm-manager.js';
+// P2 — endurecimiento UNKNOWN: contrato puro de la política de audio focus
+// (held = operacional, Diagnostics = observabilidad; DUCK mantiene el foco).
+import { focusPolicy, shouldRequestFocus, FOCUS_STATES } from '../core/audio-focus-policy.js';
+// P3 — sanitización de datos persistidos (crash recovery / corrupción).
+import { sanitizeSession, sanitizeFavorites, sanitizeHistory } from '../core/session-store.js';
 import { detectNotificationCapabilities, capabilitySummary } from '../core/notification-capabilities.js';
+// P4 — contrato de plataforma: parseo del bridge (string crudo vs wrapper) y
+// dueño único por perfil (Web/PWA = runtime web · APK = runtime Android).
+import { parseBridgeResponse } from '../platform/native-bridge.js';
 // P0 — Separación Core / Platform (plan APK): bridge nativo y fusión de
 // capacidades. Se testean con bridge inyectado y sin él (la web debe seguir
 // funcionando idéntica cuando no hay APK).
 import { detectNativeBridge, validateCommand, createNativeBridgeAdapter, BRIDGE_COMMANDS } from '../platform/native-bridge.js';
 import { mergePlatformCapabilities, detectPlatformKind } from '../platform/platform-capabilities.js';
+// P1.5 Fase 5 — proveedor único de audio (WEB | NATIVE | NONE).
+import { selectAudioProvider, assertSingleAudioProvider, providerLabel } from '../core/audio-provider.js';
+// P2 Fase 1 — máquina de estados central del audio.
+import { AudioStateMachine, AUDIO_STATES, AUDIO_EVENTS } from '../core/audio-state.js';
 import { createNotificationManager } from '../core/notification-manager.js';
+// P1 — forense de duplicación de audio: motor real con contexto fake, gate de
+// restore y política de cancelación de automation.
+import { BinauralEngine } from '../audio.js';
+import { RestoreGate } from '../core/restore-gate.js';
+import { muteMasterGain, restoreMasterGain, setParamValueCancelingAutomation } from '../core/audio-automation.js';
 
 export async function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
@@ -919,6 +936,18 @@ export async function runBineuralDiagnostics() {
     am.dispose();
   });
 
+  runTest('P2 I6: alarma external (nativa) NUNCA dispara el scheduler web (dueño único)', () => {
+    const now = 1_700_000_000_000;
+    const external = { id: 'al-native-1', nextAt: now - 1000, state: 'SCHEDULED', external: true };
+    const web = { id: 'al-web-1', nextAt: now - 1000, state: 'SCHEDULED' };
+    if (alarmStateOnTick(external, now) !== 'skip') {
+      throw new Error('la alarma external no debe disparar el scheduler web (la dispara el SO nativo)');
+    }
+    if (alarmStateOnTick(web, now) !== 'fire') {
+      throw new Error('la alarma web vencida debe disparar (owner web)');
+    }
+  });
+
   runTest('AlarmManager: alarma vencida se marca MISSED, no se ejecuta tarde', async () => {
     let fired = 0;
     const am = new AlarmManager({
@@ -1139,6 +1168,32 @@ export async function runBineuralDiagnostics() {
     }
   });
 
+  runTest('P2 ICS FASE 10: UID estable, LOCATION/SEQUENCE, sin evento duplicado', async () => {
+    // Import ANTES de tocar location (los tests corren concurrentes y
+    // comparten globalThis.location: cualquier await entre el set y el uso
+    // permitiría a otro test restaurarlo). El uso de location es síncrono.
+    const { buildIcs } = await import('../notifications.js');
+    const prev = globalThis.location;
+    globalThis.location = { origin: 'https://vyneural.test', pathname: '/' };
+    try {
+      const alarm = { id: 'al-uid-stable', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
+      const a = buildIcs(alarm);
+      const b = buildIcs(alarm);
+      // Mismo evento re-generado → mismo UID (los calendarios deduplican).
+      const uidA = a.match(/^UID:(.*)$/m)?.[1];
+      const uidB = b.match(/^UID:(.*)$/m)?.[1];
+      if (!uidA || uidA !== uidB) throw new Error(`UID debe ser estable, ${uidA} vs ${uidB}`);
+      for (const needle of ['DTSTAMP:', 'LOCATION:https://vyneural.test', 'SEQUENCE:0']) {
+        if (!a.includes(needle)) throw new Error(`.ics sin ${needle}`);
+      }
+      // Un solo evento por sesión: nunca dos BEGIN:VEVENT para la misma alarma.
+      const vevents = a.split('BEGIN:VEVENT').length - 1;
+      if (vevents !== 1) throw new Error(`debe haber 1 evento, hay ${vevents}`);
+    } finally {
+      globalThis.location = prev;
+    }
+  });
+
   // ──────────────────────────────────────────────────────────────────────────
   // P0 — CORE / PLATFORM (plan Bineural → APK Android)
   // ──────────────────────────────────────────────────────────────────────────
@@ -1189,6 +1244,10 @@ export async function runBineuralDiagnostics() {
     if (!BRIDGE_COMMANDS.includes('REQUEST_EXACT_ALARM_PERMISSION') || !BRIDGE_COMMANDS.includes('OPEN_SETTINGS')) {
       throw new Error('whitelist incompleta');
     }
+    if (!BRIDGE_COMMANDS.includes('GET_AUDIO_STATE') || !BRIDGE_COMMANDS.includes('GET_MEDIA_SESSION_STATE')) {
+      throw new Error('whitelist P1.5 sin comandos de estado');
+    }
+    if (!BRIDGE_COMMANDS.includes('OPEN_NOTIFICATION_SETTINGS')) throw new Error('whitelist P1.5 sin ajustes de notificación');
     const ok = validateCommand('SCHEDULE_ALARM', { alarmId: 'a' });
     if (!ok.ok) throw new Error('comando whitelisted rechazado');
     if (validateCommand('EXEC_SHELL', {}).error !== 'DENIED') throw new Error('comando arbitrario debe ser DENIED');
@@ -1307,6 +1366,626 @@ export async function runBineuralDiagnostics() {
     if (apk.exactAlarms.supported !== true) throw new Error('APK debe soportar alarmas exactas');
     if (apk.exactAlarms.granted !== false) throw new Error('granted ≠ supported: el SO aún no la autorizó');
     if (!/configuración del sistema/i.test(apk.exactAlarms.label)) throw new Error('label debe ser honesto sobre la autorización');
+  });
+
+  runTest('AudioState: máquina central — la UI no puede detener el audio (P2 Fase 1)', () => {
+    const m = new AudioStateMachine();
+    if (m.state !== 'IDLE') throw new Error('estado inicial IDLE');
+    // Eventos de UI/visuales NO son transiciones válidas de audio.
+    if (m.transition('scroll').ok) throw new Error('scroll no puede transicionar el audio');
+    if (m.transition('open_menu').ok) throw new Error('abrir menú no puede transicionar');
+    if (m.transition('open_hud').ok) throw new Error('abrir HUD no puede transicionar');
+    if (!AUDIO_STATES.includes('INTERRUPTED') || !AUDIO_STATES.includes('DUCKED')) throw new Error('estados P2 faltantes');
+    // Ciclo completo del usuario.
+    m.transition('user_play');
+    if (m.state !== 'INITIALIZING') throw new Error('user_play → INITIALIZING');
+    m.transition('started');
+    if (m.state !== 'PLAYING') throw new Error('started → PLAYING');
+    m.transition('user_pause');
+    if (m.state !== 'PAUSED') throw new Error('user_pause → PAUSED');
+    m.transition('user_play');
+    if (m.state !== 'PLAYING') throw new Error('resume → PLAYING');
+    m.transition('user_stop');
+    if (m.state !== 'STOPPED') throw new Error('user_stop → STOPPED');
+    // Interrupción del sistema (otra app, llamada) ≠ pause del usuario.
+    m.transition('user_play');
+    m.transition('started');
+    m.transition('focus_loss');
+    if (m.state !== 'INTERRUPTED') throw new Error('focus_loss → INTERRUPTED');
+    m.transition('focus_gain');
+    if (m.state !== 'PLAYING') throw new Error('focus_gain → PLAYING');
+    // Duck baja el volumen pero NO corta el audio.
+    m.transition('focus_duck');
+    if (m.state !== 'DUCKED') throw new Error('focus_duck → DUCKED');
+    if (!m.isAudible) throw new Error('DUCKED sigue audible');
+    m.transition('focus_gain');
+    if (m.state !== 'PLAYING') throw new Error('duck → gain vuelve a PLAYING');
+    // Background no detiene la sesión.
+    m.transition('app_background');
+    if (m.state !== 'BACKGROUND') throw new Error('app_background → BACKGROUND');
+    if (!m.isAudible) throw new Error('BACKGROUND sigue audible');
+    m.transition('app_foreground');
+    if (m.state !== 'PLAYING') throw new Error('app_foreground → PLAYING');
+    // El historial registra fuente y timestamp (integridad experimental).
+    const last = m.history[m.history.length - 1];
+    if (!last || last.source !== 'app_foreground' || !last.ts || last.from !== 'BACKGROUND') {
+      throw new Error('historial con fuente, desde/hacia y timestamp');
+    }
+    // Un evento estale se ignora: el estado nunca se corrompe.
+    m.transition('focus_duck');
+    m.transition('user_stop');
+    const st = m.transition('focus_duck');
+    if (st.ok || m.state !== 'STOPPED') throw new Error('evento inválido debe ignorarse');
+    if (!AUDIO_EVENTS.includes('system_pause') || !AUDIO_EVENTS.includes('call_ended')) {
+      throw new Error('fuentes P2 faltantes');
+    }
+  });
+
+  runTest('NativeBridge: la info cruda (string) del objeto nativo se normaliza (P2 emulador)', () => {
+    // El objeto real (addJavascriptInterface) devuelve JSON string; el adapter
+    // debe normalizarlo a objeto o capabilities quedan falsas y el retune cae
+    // al fallback con re-solicitud de audio focus (bug encontrado en emulador).
+    const rawString = JSON.stringify({
+      nativeAudio: true,
+      notifications: true,
+      backgroundService: true,
+      mediaSession: true,
+      mediaSessionActive: false,
+      retuneNative: true,
+      exactAlarms: true,
+    });
+    const adapter = createNativeBridgeAdapter({
+      bridge: { version: '1.0.0', postMessage: () => null, getPlatformInfo: () => rawString },
+    });
+    const st = adapter.getState();
+    if (!st.info || typeof st.info === 'string') throw new Error('info debe normalizarse a objeto');
+    if (st.supported.retuneNative !== true) throw new Error('retuneNative debe propagarse desde el string');
+    if (st.supported.backgroundAudio !== true || st.supported.notifications !== true) {
+      throw new Error('capabilities deben propagarse desde el string');
+    }
+    if (st.bridgeStatus !== 'CONNECTED') throw new Error('bridge CONNECTED con info válida');
+  });
+
+  runTest('AudioProvider: proveedor ÚNICO — nativo activo ⇒ web muda (P1.5 Fase 5)', () => {
+    if (selectAudioProvider({ bridgePresent: true, nativeActive: true, playing: true }) !== 'native') {
+      throw new Error('APK reproduciendo debe ser NATIVE');
+    }
+    if (selectAudioProvider({ bridgePresent: false, playing: true }) !== 'web') {
+      throw new Error('web reproduciendo sin APK debe ser WEB');
+    }
+    if (selectAudioProvider({ bridgePresent: true, nativeActive: false, playing: false }) !== 'none') {
+      throw new Error('sin reproducción debe ser NONE');
+    }
+    // Invariante estricto: native ⇒ la ganancia del motor web es 0.
+    if (!assertSingleAudioProvider({ provider: 'native', webGain: 0 })) {
+      throw new Error('native con web muda debe cumplir el invariante');
+    }
+    if (assertSingleAudioProvider({ provider: 'native', webGain: 0.5 })) {
+      throw new Error('¡doble motor! native + web con ganancia > 0 DEBE fallar el invariante');
+    }
+    if (!assertSingleAudioProvider({ provider: 'web', webGain: 0.5 })) {
+      throw new Error('el motor web solo no está restringido por el invariante');
+    }
+    if (providerLabel('native') !== 'NATIVE' || providerLabel('none') !== 'NONE') throw new Error('labels');
+  });
+
+  runTest('NativeBridge: MediaSession honesta — supported/active/playbackState reales (P1.5 Fase 14)', () => {
+    const web = probeCapabilities({ mediaSessionSupported: true, mediaSessionActive: false });
+    // Bridge que declara soporte pero NO reproducción: la fusión NO puede
+    // mostrar la sesión como activa (false positive prohibido).
+    const idle = createNativeBridgeAdapter({
+      bridge: {
+        version: '1.0.0',
+        postMessage: () => null,
+        getPlatformInfo: () => ({
+          nativeAudio: true,
+          notifications: true,
+          exactAlarms: true,
+          backgroundService: true,
+          backgroundServiceActive: false,
+          notificationPermission: 'granted',
+          mediaSession: true,
+          mediaSessionActive: false,
+          mediaSessionPlaybackState: 'stopped',
+          mediaSessionControls: ['play', 'pause', 'stop'],
+        }),
+      },
+    });
+    const m1 = mergePlatformCapabilities({ web, native: idle.getState() });
+    if (m1.mediaSession.supported !== true) throw new Error('MediaSession soportada en la APK');
+    if (m1.mediaSession.active !== false) throw new Error('no debe reportar activa sin reproducción real');
+    if (m1.mediaSession.playbackState !== 'stopped') throw new Error('playbackState debe reflejar el estado real');
+    if (!m1.mediaSession.controls.includes('pause') || !m1.mediaSession.controls.includes('stop')) {
+      throw new Error('controles play/pause/stop esperados');
+    }
+    // Bridge que reporta reproducción real: la sesión aparece activa.
+    const playing = createNativeBridgeAdapter({
+      bridge: {
+        version: '1.0.0',
+        postMessage: () => null,
+        getPlatformInfo: () => ({
+          nativeAudio: true,
+          notifications: true,
+          exactAlarms: true,
+          backgroundService: true,
+          backgroundServiceActive: true,
+          notificationPermission: 'granted',
+          mediaSession: true,
+          mediaSessionActive: true,
+          mediaSessionPlaybackState: 'playing',
+          mediaSessionControls: ['play', 'pause', 'stop'],
+        }),
+      },
+    });
+    const m2 = mergePlatformCapabilities({ web, native: playing.getState() });
+    if (m2.mediaSession.active !== true || m2.mediaSession.playbackState !== 'playing') {
+      throw new Error('debe reflejar la reproducción real del servicio');
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P1 — AUDIO DUPLICATION FORENSIC (lock/unlock, doble start, restore)
+  // ──────────────────────────────────────────────────────────────────────────
+  // Harness mínimo de Web Audio para ejercitar BinauralEngine headless.
+  class FakeAudioParam {
+    constructor(value = 0) {
+      this.value = value;
+      this.cancelCount = 0;
+      this.setValueCount = 0;
+    }
+    cancelScheduledValues() { this.cancelCount += 1; }
+    setValueAtTime(v) { this.setValueCount += 1; this.value = v; }
+    linearRampToValueAtTime(v) { this.value = v; }
+    exponentialRampToValueAtTime(v) { this.value = v; }
+    setTargetAtTime(v) { this.value = v; }
+  }
+  class FakeNode {
+    constructor() {
+      this.gain = new FakeAudioParam(1);
+      this.frequency = new FakeAudioParam(0);
+      this.pan = new FakeAudioParam(0);
+      this.type = 'sine';
+      this.connectedTo = [];
+      this.stopped = false;
+      this.disconnected = false;
+    }
+    connect(n) { this.connectedTo.push(n); return n; }
+    disconnect() { this.disconnected = true; }
+    start() {}
+    stop() { this.stopped = true; }
+  }
+  class FakeAudioContext {
+    constructor() {
+      this.state = 'running';
+      this.sampleRate = 48000;
+      this.currentTime = 0;
+      this.onstatechange = null;
+      this.destination = new FakeNode();
+      this.createdOscillators = 0;
+    }
+    createGain() { return new FakeNode(); }
+    createOscillator() { this.createdOscillators += 1; return new FakeNode(); }
+    createStereoPanner() { return new FakeNode(); }
+    createDynamicsCompressor() {
+      const n = new FakeNode();
+      n.threshold = new FakeAudioParam(-18);
+      n.knee = new FakeAudioParam(20);
+      n.ratio = new FakeAudioParam(4);
+      n.attack = new FakeAudioParam(0.005);
+      n.release = new FakeAudioParam(0.25);
+      return n;
+    }
+    createAnalyser() {
+      const n = new FakeNode();
+      n.fftSize = 2048;
+      n.smoothingTimeConstant = 0.8;
+      n.getByteTimeDomainData = (buf) => buf.fill(128);
+      return n;
+    }
+    resume() { this.state = 'running'; }
+  }
+  // El motor usa window.AudioContext en ensure(); se inyecta el fake y se
+  // restaura al terminar (funciona en Node y en el navegador).
+  const withFakeWindow = (fn) => {
+    const saved = globalThis.window;
+    globalThis.window = Object.assign({}, saved, { AudioContext: FakeAudioContext });
+    try {
+      return fn();
+    } finally {
+      if (saved === undefined) delete globalThis.window;
+      else globalThis.window = saved;
+    }
+  };
+
+  runTest('P1: start() duplicado → 1 pipeline, 1 set de fuentes (doble start §3)', () =>
+    withFakeWindow(() => {
+      const engine = new BinauralEngine();
+      const ctx = engine.ensure();
+      const p = { base: 200, beat: 6, volume: 0.5 };
+      const r1 = engine.start(p);
+      const r2 = engine.start(p);
+      const r3 = engine.start(p);
+      const live = engine.getAudioStats();
+      if (ctx.createdOscillators !== 2) {
+        throw new Error(`start x3 debe crear 2 osciladores (una sesión binaural), creó ${ctx.createdOscillators}`);
+      }
+      if (!r2.idempotent || !r3.idempotent) throw new Error('start duplicado con mismos parámetros debe ser idempotente');
+      if (live.sessionId !== 1) throw new Error(`sessionId debe ser 1 (una sesión), es ${live.sessionId}`);
+      if (live.liveSourceIds.length !== 2) throw new Error(`fuentes vivas deben ser 2, son ${live.liveSourceIds.length}`);
+      if (live.oscillatorCount !== 2) throw new Error(`oscillatorCount debe ser 2, es ${live.oscillatorCount}`);
+      if (live.pendingTeardown !== 0) throw new Error('no debe haber teardown pendiente');
+    }),
+  );
+
+  runTest('P1: lock/unlock ×3 → start() nunca duplica (lock_unlock_no_duplicate_pipeline §8)', () =>
+    withFakeWindow(() => {
+      const engine = new BinauralEngine();
+      const ctx = engine.ensure();
+      // p coincide con los defaults del motor (200 / 10 / sine): así el
+      // re-start sin parámetros (que en la realidad llega con los mismos
+      // valores de sesión) es idempotente y nunca crea un segundo set.
+      const p = { base: 200, beat: 10, volume: 0.5 };
+      // START → LOCK → UNLOCK repetido: en el unlock la web re-afirma con los
+      // mismos parámetros (o sin ellos) y NUNCA debe crear un segundo set.
+      for (let i = 0; i < 3; i++) {
+        engine.start(p); // START
+        engine.start(p); // LOCK → UNLOCK (re-start idempotente)
+        engine.start(); // unlock sin parámetros: defaults = sesión activa
+      }
+      const live = engine.getAudioStats();
+      if (ctx.createdOscillators !== 2) {
+        throw new Error(`9 starts con mismos parámetros deben crear 2 osciladores, creó ${ctx.createdOscillators}`);
+      }
+      if (live.sessionId !== 1) throw new Error('una sola sesión de pipeline');
+      if (live.liveSourceIds.length !== 2 || live.pendingTeardown !== 0) {
+        throw new Error('deben quedar exactamente 2 fuentes vivas y 0 teardown pendiente');
+      }
+    }),
+  );
+
+  runTest('P1: stop→start inmediato → teardown SÍNCRONO, sin ventana de doble pipeline (§5)', () =>
+    withFakeWindow(() => {
+      const engine = new BinauralEngine();
+      engine.start({ base: 200, beat: 6 });
+      const oldLeft = engine.leftOsc;
+      const oldRight = engine.rightOsc;
+      engine.stop(true); // fade: el teardown de nodos queda diferido
+      const afterStop = engine.getAudioStats();
+      if (afterStop.oscillatorCount !== 0) throw new Error('tras stop no debe haber fuentes vivas');
+      if (afterStop.pendingTeardown !== 2) {
+        throw new Error(`stop(fade) debe diferir 2 nodos (para terminar el fade), difirió ${afterStop.pendingTeardown}`);
+      }
+      // start() con otros parámetros ANTES de que dispare el timer del fade:
+      // debe ejecutar el teardown pendiente de forma síncrona.
+      engine.start({ base: 240, beat: 8 });
+      const afterStart = engine.getAudioStats();
+      if (afterStart.pendingTeardown !== 0) {
+        throw new Error('el start debe flushear el teardown pendiente de forma síncrona');
+      }
+      if (afterStart.liveSourceIds.length !== 2) throw new Error('el pipeline nuevo debe tener 2 fuentes');
+      if (afterStart.sessionId !== 2) throw new Error('debe ser una sesión nueva (sessionId 2)');
+      if (!oldLeft.stopped || !oldRight.stopped) throw new Error('los nodos viejos deben estar DETENIDOS antes de crear los nuevos');
+      if (!oldLeft.disconnected || !oldRight.disconnected) throw new Error('los nodos viejos deben estar DESCONECTADOS antes de crear los nuevos');
+      if (afterStart.liveSourceIds.length > 0 && afterStart.liveSourceIds[0] === 1) {
+        throw new Error('la fuente viva no puede ser la del pipeline viejo');
+      }
+    }),
+  );
+
+  runTest('P1: stop(false) libera completamente tras el teardown diferido (§10)', () =>
+    withFakeWindow(
+      () =>
+        new Promise((resolve, reject) => {
+          const engine = new BinauralEngine();
+          engine.start({ base: 200, beat: 6 });
+          engine.stop(false); // teardown diferido 80 ms
+          const s0 = engine.getAudioStats();
+          if (s0.pendingTeardown !== 2) {
+            reject(new Error(`stop(false) debe diferir 2 nodos, difirió ${s0.pendingTeardown}`));
+            return;
+          }
+          setTimeout(() => {
+            try {
+              const s1 = engine.getAudioStats();
+              if (s1.pendingTeardown !== 0) throw new Error('el timer del teardown debe liberar los nodos');
+              if (s1.liveSourceIds.length !== 0) throw new Error('sin fuentes vivas tras el stop completo');
+              if (engine.isPlaying) throw new Error('el motor no debe estar en play tras el stop');
+              resolve();
+            } catch (e) {
+              reject(e);
+            }
+          }, 150);
+        }),
+    ),
+  );
+
+  runTest('P1: start() con parámetros distintos reconstruye SIN solape (§3)', () =>
+    withFakeWindow(() => {
+      const engine = new BinauralEngine();
+      const ctx = engine.ensure();
+      engine.start({ base: 200, beat: 6 });
+      const r = engine.start({ base: 240, beat: 8 }); // retune distinto → reconstruye
+      if (r && r.idempotent) throw new Error('parámetros distintos NO deben ser idempotentes');
+      const live = engine.getAudioStats();
+      if (ctx.createdOscillators !== 4) throw new Error('dos builds → 4 osciladores totales');
+      if (live.liveSourceIds.length !== 2) throw new Error('solo 2 fuentes vivas (las nuevas)');
+      if (live.sessionId !== 2) throw new Error('segunda sesión de pipeline');
+      if (live.pendingTeardown !== 0) throw new Error('sin teardown pendiente');
+    }),
+  );
+
+  runTest('P1: RestoreGate — burst de unlock deduplica a 1 restore; force atraviesa (§4)', () => {
+    let now = 1000;
+    const gate = new RestoreGate({ settleMs: 1500, now: () => now });
+    const r1 = gate.request();
+    if (r1.action !== 'run') throw new Error('primer trigger debe ejecutar');
+    gate.complete(); // → SETTLED
+    const r2 = gate.request();
+    const r3 = gate.request();
+    if (r2.action !== 'skip' || r3.action !== 'skip') {
+      throw new Error('triggers dentro de la ventana de settle deben deduplicarse (skip)');
+    }
+    // Un toque posterior con el contexto aún suspendido (iOS) debe reintentar.
+    const forced = gate.request({ force: true });
+    if (forced.action !== 'run') throw new Error('force debe atravesar la ventana de settle');
+    if (gate.state !== 'RESTORING') throw new Error('estado debe ser RESTORING tras el force');
+    gate.complete();
+    // Fuera de la ventana: vuelve a ejecutar.
+    now += 2000;
+    const after = gate.request();
+    if (after.action !== 'run') throw new Error('fuera de la ventana debe volver a ejecutar');
+    // Coalesce durante RESTORING (restore async).
+    const g2 = new RestoreGate({ settleMs: 1500, now: () => now });
+    g2.request();
+    const coalesced = g2.request();
+    if (coalesced.action !== 'coalesce') throw new Error('request durante RESTORING debe coalescer');
+    const done = g2.complete();
+    if (done.action !== 'rerun-pending') throw new Error('debe quedar pendiente un segundo restore');
+  });
+
+  runTest('P1: muteMasterGain cancela automation antes de fijar 0 (M1 §6)', () => {
+    const gain = new FakeAudioParam(0.5);
+    gain.linearRampToValueAtTime(0.6, 100); // rampa residual del motor
+    muteMasterGain({ gain }, 10);
+    if (gain.value !== 0) throw new Error('el gain debe quedar en 0, quedó ' + gain.value);
+    if (gain.cancelCount < 1) throw new Error('debe cancelar scheduled values antes de fijar el 0');
+    if (gain.setValueCount < 1) throw new Error('el 0 debe fijarse con setValueAtTime (sin rampa residual)');
+    // El caso asimétrico del audit: assign value = X sin cancelar deja la rampa
+    // programada; la política P1 lo impide por contrato.
+    const g2 = new FakeAudioParam(0.2);
+    g2.linearRampToValueAtTime(0.9, 50);
+    restoreMasterGain({ gain: g2 }, 0.7, 0);
+    if (g2.value !== 0.7 || g2.cancelCount < 1) throw new Error('restoreMasterGain debe cancelar y fijar el nivel');
+    // setParamValueCancelingAutomation con null no lanza (aislamiento).
+    setParamValueCancelingAutomation(null, 0, 0);
+    setParamValueCancelingAutomation(undefined, 0, 0);
+  });
+
+  // ── P2 — endurecimiento UNKNOWN + política de focus (dictamen §1/§2) ───────
+
+  runTest('P2 focus: UNKNOWN es estado explícito y recuperable (NO pérdida genérica)', () => {
+    const p = focusPolicy(FOCUS_STATES.UNKNOWN);
+    if (p.held !== false) throw new Error('UNKNOWN: held debe ser false (el foco no está garantizado)');
+    if (p.action !== 'pause') throw new Error('UNKNOWN: pausa defensiva esperada, acción=' + p.action);
+    if (p.watch !== true) throw new Error('UNKNOWN: debe programar watchdog (recuperación), watch=' + p.watch);
+    if (p.critical !== true) throw new Error('UNKNOWN: debe quedar visible como CRITICAL, critical=' + p.critical);
+    // No debe confundirse con LOSS genérico: la firma lo distingue.
+    const loss = focusPolicy(FOCUS_STATES.LOSS);
+    if (loss.critical !== false) throw new Error('LOSS no es CRITICAL; solo UNKNOWN lo es');
+    if (p.critical === loss.critical && p.watch === loss.watch && p.action === loss.action && p.held === loss.held) {
+      throw new Error('UNKNOWN no puede ser idéntico a LOSS: la firma debe diferenciarlos');
+    }
+  });
+
+  runTest('P2 focus: DUCK mantiene held=true (el foco NO se pierde al duplicar)', () => {
+    const p = focusPolicy(FOCUS_STATES.DUCK);
+    if (p.held !== true) throw new Error('DUCK: held debe ser true (foco poseído, solo baja volumen)');
+    if (p.action !== 'duck') throw new Error('DUCK: acción duck esperada, acción=' + p.action);
+    if (p.watch !== false) throw new Error('DUCK: no debe programar watchdog (ya tenemos el foco)');
+    if (p.critical !== false) throw new Error('DUCK: no es CRITICAL');
+  });
+
+  runTest('P2 focus: held es la autoridad del watchdog, NO la observabilidad', () => {
+    // El caso del emulador: el SO concede (request devuelve GRANTED) pero el
+    // callback no llega → Diagnostics podría decir otra cosa. Si held=false,
+    // hay que re-solicitar SIEMPRE, aunque el estado observado diga GAIN.
+    if (shouldRequestFocus(false, FOCUS_STATES.GAIN) !== true) {
+      throw new Error('held=false + focusState=GAIN debe re-solicitar (callback perdido)');
+    }
+    if (shouldRequestFocus(false, FOCUS_STATES.LOSS) !== true) {
+      throw new Error('held=false + LOSS debe re-solicitar');
+    }
+    if (shouldRequestFocus(true, FOCUS_STATES.LOSS) !== false) {
+      throw new Error('held=true nunca re-solicita (tenemos el foco, p. ej. en DUCK)');
+    }
+    // Defensa: UNKNOWN observado fuerza la re-solicitud aunque held diga lo
+    // contrario (estado incoherente → reintentar).
+    if (shouldRequestFocus(true, FOCUS_STATES.UNKNOWN) !== true) {
+      throw new Error('UNKNOWN observado debe forzar re-solicitud (estado incoherente)');
+    }
+  });
+
+  runTest('P2 I6: dueño de alarma por plataforma — APK nativo vs Web/PWA (un solo disparador)', () => {
+    if (alarmOwnerForPlatform('android-native', true) !== 'native') {
+      throw new Error('APK con bridge real → dueño nativo (AlarmManager del SO)');
+    }
+    if (alarmOwnerForPlatform('android-native', false) !== 'web') {
+      throw new Error('APK sin bridge real → dueño web (fallback honesto)');
+    }
+    if (alarmOwnerForPlatform('android-browser', true) !== 'web') {
+      throw new Error('Chrome Android ≠ APK: nunca dueño nativo (P16-3)');
+    }
+    if (alarmOwnerForPlatform('desktop', false) !== 'web') {
+      throw new Error('Web/PWA → dueño web');
+    }
+    if (alarmOwnerForPlatform('ios', false) !== 'web') {
+      throw new Error('iOS → dueño web');
+    }
+  });
+
+  // ── P3 — persistencia / crash recovery (tolerancia a corrupción) ──────────
+
+  runTest('P3: sesión corrupta (NaN/fuera de rango) se descarta, no rompe la restauración', () => {
+    // NaN es typeof number: sin validación rompería el volumen de la UI.
+    const s = sanitizeSession({
+      state: 'meditacion',
+      volume: NaN,
+      ambientVolume: 1.7, // fuera de rango
+      ambient: ['lluvia', 'hack', 42], // tipo inválido + desconocido
+      timer: -5,
+      wave: 'sine',
+      custom: { base: 528, beat: NaN },
+      goal: 'dormir',
+    });
+    if (!s || s.state !== 'meditacion') throw new Error('state válido debe pasar');
+    if ('volume' in s) throw new Error('volume NaN debe descartarse');
+    if ('ambientVolume' in s) throw new Error('ambientVolume fuera de rango debe descartarse');
+    if (s.ambient && s.ambient.length !== 1) throw new Error('solo lluvia debe sobrevivir al filtro de tipos');
+    if ('timer' in s) throw new Error('timer negativo debe descartarse');
+    if (!s.custom || s.custom.base !== 528 || 'beat' in s.custom) {
+      throw new Error('custom: base válida pasa, beat NaN se descarta');
+    }
+    if (s.goal !== 'dormir') throw new Error('goal string pasa (la app lo valida contra los chips)');
+  });
+
+  runTest('P3: sesión completamente inválida → null (nada que restaurar)', () => {
+    if (sanitizeSession(null) !== null) throw new Error('null → null');
+    if (sanitizeSession('cadena') !== null) throw new Error('string → null');
+    if (sanitizeSession([]) !== null) throw new Error('array → null');
+    if (sanitizeSession({ volume: NaN }) !== null) throw new Error('solo campos corruptos → null');
+  });
+
+  runTest('P3: favoritos corruptos se filtran (solo ids string, acotados)', () => {
+    const f = sanitizeFavorites(['meditacion', 42, null, '', 'concentracion']);
+    if (f.length !== 2 || f[0] !== 'meditacion' || f[1] !== 'concentracion') {
+      throw new Error('favoritos: solo strings no vacíos, got ' + JSON.stringify(f));
+    }
+    if (sanitizeFavorites('no-array').length !== 0) throw new Error('no-array → []');
+  });
+
+  runTest('P3: historial corrupto se filtra y acota a 50 registros', () => {
+    const h = sanitizeHistory([
+      { id: 'alpha', min: 12, ts: Date.now() },
+      { id: 'bad', min: NaN, ts: Date.now() },
+      { id: 'no-ts', min: 5 },
+      null,
+      { id: 'no-min', ts: Date.now() },
+    ]);
+    if (h.length !== 1 || h[0].id !== 'alpha') {
+      throw new Error('solo registros con forma válida, got ' + JSON.stringify(h));
+    }
+    if (h[0].min !== 12) throw new Error('min se conserva');
+    const many = sanitizeHistory(
+      Array.from({ length: 70 }, (_, i) => ({ id: 's' + i, min: 1, ts: i })),
+    );
+    if (many.length !== 50) throw new Error('historial acotado a 50, got ' + many.length);
+    if (sanitizeHistory('x').length !== 0) throw new Error('no-array → []');
+  });
+
+  runTest('P3: alarma corrupta (nextAt inválido) nunca dispara (skip seguro)', () => {
+    const now = Date.now();
+    const corrupt = { id: 'al-x', nextAt: NaN, state: 'SCHEDULED' };
+    if (alarmStateOnTick(corrupt, now) !== 'skip') {
+      throw new Error('nextAt NaN debe ser skip (nunca fire/miss)');
+    }
+    const noNext = { id: 'al-y', state: 'SCHEDULED' };
+    if (alarmStateOnTick(noNext, now) !== 'skip') throw new Error('sin nextAt → skip');
+    const expired = { id: 'al-z', nextAt: now - 400000, state: 'SCHEDULED' }; // > gracia 5 min
+    if (alarmStateOnTick(expired, now) !== 'miss') {
+      throw new Error('vencida → miss (no se ejecuta una alarma vieja)');
+    }
+  });
+
+  runTest('P3: store durable corrupto (basura en IndexedDB) no rompe la carga ni dispara', async () => {
+    const now = 2_000_000_000_000;
+    const corruptStore = {
+      async getAll() {
+        // Lo que puede devolver un IndexedDB corrupto/migrado mal:
+        // (la vencida dentro de gracia dispara NORMALMENTE — probado en otros
+        // tests; aquí se aísla la corrupción: nada debe romper ni disparar).
+        return [
+          null,
+          'basura',
+          42,
+          { id: 'ok', nextAt: now + 60000 },
+          { id: 'bad-nextat', nextAt: NaN },
+          { id: 'no-nextat', state: 'SCHEDULED' },
+        ];
+      },
+      async put() {},
+      async remove() {},
+      async clear() {},
+    };
+    let fired = 0;
+    const am = new AlarmManager({ store: corruptStore, now: () => now, tickMs: 60000, onFire: () => fired++ });
+    await am.init();
+    const list = am.list();
+    if (list.length !== 1 || list[0].id !== 'ok') {
+      throw new Error('solo la alarma válida debe sobrevivir, got ' + JSON.stringify(list.map((a) => a.id)));
+    }
+    if (fired !== 0) throw new Error('un store corrupto no debe disparar nada al cargar');
+    // 'bad-nextat'/'no-nextat' jamás fire/miss: el tick inicial las descarta
+    // sin ejecutarlas.
+    await am.tick();
+    if (fired !== 0) throw new Error('los registros corruptos jamás se disparan');
+    am.dispose();
+  });
+
+  runTest('P3: carrera multi-tab — dos schedulers con el MISMO store disparan UNA sola vez', async () => {
+    const now = 2_000_000_000_000;
+    const store = inMemoryAlarmStore();
+    const fireA = [];
+    const fireB = [];
+    const amA = new AlarmManager({ store, now: () => now, tickMs: 60000, onFire: (a) => fireA.push(a.id) });
+    const amB = new AlarmManager({ store, now: () => now, tickMs: 60000, onFire: (a) => fireB.push(a.id) });
+    await amA.init();
+    await amB.init();
+    await amA.create({ id: 'race-1', nextAt: now - 1000 });
+    // Ambos schedulers tienen la alarma en memoria; el tick de A dispara y la
+    // remueve del store durable; el tick de B confirma en el store antes de
+    // disparar y la descarta (cierra la carrera sin Web Locks).
+    await amA.tick();
+    await amB.tick();
+    if (fireA.length !== 1) throw new Error('A debe disparar exactamente 1, got ' + fireA.length);
+    if (fireB.length !== 0) {
+      throw new Error('B NO debe disparar (confirmación en el store), got ' + JSON.stringify(fireB));
+    }
+    amA.dispose();
+    amB.dispose();
+  });
+
+  runTest('P4: parseBridgeResponse — string crudo, wrapper Kotlin y error aislado', () => {
+    // addJavascriptInterface crudo: respuesta como STRING JSON.
+    const fromString = parseBridgeResponse({ ok: true, response: '{"status":"OK","command":"GET_AUDIO_STATE","data":{"serviceRunning":true,"playbackState":"playing","base":210,"beat":6}}' });
+    if (!fromString || fromString.playbackState !== 'playing' || fromString.base !== 210) {
+      throw new Error('debe parsear el string crudo del bridge, got ' + JSON.stringify(fromString));
+    }
+    // Wrapper Kotlin: objeto ya parseado.
+    const fromObject = parseBridgeResponse({ ok: true, response: { status: 'OK', data: { serviceRunning: false, playbackState: 'stopped' } } });
+    if (!fromObject || fromObject.playbackState !== 'stopped') {
+      throw new Error('debe aceptar el objeto del wrapper, got ' + JSON.stringify(fromObject));
+    }
+    // Aislamiento de fallos: respuesta inválida / comando fallido → null (la
+    // UI web sigue funcionando; nunca lanza).
+    if (parseBridgeResponse(null) !== null) throw new Error('null → null');
+    if (parseBridgeResponse({ ok: false, error: 'DENIED' }) !== null) throw new Error('comando denegado → null');
+    if (parseBridgeResponse({ ok: true, response: 'not json' }) !== null) throw new Error('json inválido → null');
+    if (parseBridgeResponse({ ok: true, response: { status: 'OK' } }) !== null) throw new Error('sin data → null');
+  });
+
+  runTest('P4: perfiles de plataforma — alarma/audio/notificación con dueño único por runtime', () => {
+    // La decisión pura del dueño de alarma (I6) ya distingue runtime:
+    // APK con bridge → dueño nativo; Web/PWA/Chrome-Android → dueño web.
+    const web = alarmOwnerForPlatform('web', null);
+    const pwa = alarmOwnerForPlatform('pwa', null);
+    const chromeAndroid = alarmOwnerForPlatform('android-browser', null);
+    const apkNoBridge = alarmOwnerForPlatform('android-native', null);
+    const apkBridge = alarmOwnerForPlatform('android-native', { scheduleAlarm: () => ({}) });
+    if (web !== 'web' || pwa !== 'web' || chromeAndroid !== 'web') {
+      throw new Error('Web/PWA/Chrome Android jamás son dueño nativo: ' + web + '/' + pwa + '/' + chromeAndroid);
+    }
+    if (apkNoBridge !== 'web') throw new Error('APK sin bridge real cae al dueño web (fallback honesto)');
+    if (apkBridge !== 'native') throw new Error('APK con bridge real es dueño nativo');
   });
 
   // ──────────────────────────────────────────────────────────────────────────

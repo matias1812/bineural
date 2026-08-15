@@ -1,4 +1,5 @@
 import './site.css';
+import './report-bug.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
 
@@ -19,17 +20,10 @@ const IN_APP =
   (typeof window.AndroidBridgeNative !== 'undefined' || location.protocol === 'file:');
 if (IN_APP) document.documentElement.classList.add('in-app');
 
-// En la app ya instalada no se descarga la app: el botón principal del hero
-// pasa a "Comenzar sesión" y lleva directo a los estados (la web conserva
-// "Descargar la app ↓").
+// Dentro de la app instalada, la tarjeta de descarga se convierte en un aviso
+// de que la aplicación ya está en uso (sin botón de instalar). El botón del
+// hero "Descargar APK" se oculta por CSS (.in-app .hero-cta-download).
 if (IN_APP) {
-  const heroDownload = document.querySelector('.hero-cta-row a[href="/descargar"]');
-  if (heroDownload) {
-    heroDownload.setAttribute('href', '#estados');
-    heroDownload.textContent = 'Comenzar sesión';
-  }
-  // En la app ya instalada, la tarjeta de descarga se convierte en un aviso de
-  // que la aplicación ya está en uso (sin botón de instalar).
   const card = document.querySelector('.download-card');
   if (card) {
     card.innerHTML = `

@@ -26,6 +26,10 @@ object BridgeCommands {
         "SET_WAVE",
         "SET_AUDIO_LEVEL",
         "RETUNE_BACKGROUND_AUDIO",
+        "GET_AUDIO_STATE",
+        "GET_MEDIA_SESSION_STATE",
+        "GET_NAV_STATE",
+        "OPEN_NOTIFICATION_SETTINGS",
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

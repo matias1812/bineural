@@ -109,8 +109,9 @@
         <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
-        <a href="/descargar">APK (Android)</a>
         <a href="/codigo-abierto">Código abierto</a>
+        <a href="/hoja-de-ruta">Hoja de ruta</a>
+        <a class="in-app-only" href="/rutina">Tu rutina</a>
 
       </nav>
     </header>
@@ -125,7 +126,8 @@
           que necesitas hoy.
         </p>
         <div class="hero-cta-row">
-          <a class="hero-cta" href="/descargar">Descargar la app ↓</a>
+          <a class="hero-cta" href="#estados">Comenzar ahora ↓</a>
+          <a class="hero-cta hero-cta-ghost hero-cta-download" href="/descargar">📲 Descargar APK (Android)</a>
           <a class="hero-cta hero-cta-ghost" href="/beneficios">Ver beneficios</a>
         </div>
         <ul class="trust-row" aria-label="Confianza">
@@ -314,7 +316,10 @@
         <h2 class="section-title">Recordatorios programados</h2>
         <p class="section-hint">Tus alarmas de sesión. Tocá la campana para agregar o editar una.</p>
         <ul id="alarms-view-list" class="alarms-view-list"></ul>
-        <button id="alarms-view-add" class="alarms-view-add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Agregar recordatorio</button>
+        <div class="alarms-view-actions">
+          <button id="alarms-view-add" class="alarms-view-add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Agregar recordatorio</button>
+          <a class="alarms-view-link in-app-only" href="/rutina">📋 Ver mi rutina</a>
+        </div>
       </section>
 
       <section class="info" id="como-funciona">
@@ -392,20 +397,9 @@
       <section class="final-cta">
         <h2>¿Listo para tu primera sesión?</h2>
         <p>Gratis, sin cuenta y listo en segundos. Solo necesitas unos audífonos.</p>
-        <a class="hero-cta" href="#estados">Comenzar ahora</a>
-      </section>
-
-      <section class="apk-cta" id="apk-cta">
-        <div class="apk-cta-inner">
-          <div>
-            <h2>📱 ¿Android? Llevá Vyneural en tu bolsillo</h2>
-            <p>
-              La APK mantiene el audio en segundo plano, muestra los controles en la pantalla
-              bloqueada y dispara notificaciones y alarmas con la app cerrada. Mismo núcleo
-              científico, todo offline y sin backend.
-            </p>
-          </div>
-          <a class="apk-cta-btn" href="/descargar">Descargar APK →</a>
+        <div class="hero-cta-row" style="margin-top: 0">
+          <a class="hero-cta" href="#estados">Comenzar ahora</a>
+          <a class="hero-cta hero-cta-ghost hero-cta-download" href="/descargar">📲 Descargar APK (Android)</a>
         </div>
       </section>
 
@@ -466,6 +460,22 @@
           <input id="alarm-time" type="time" class="alarm-input" />
         </label>
 
+        <!-- P5 — rutina: días de repetición (vacío = una sola vez).
+             Exclusivo de la APK (.in-app-only): el reloj del sistema puede
+             reprogramar alarmas con la app cerrada; la web no puede repetir. -->
+        <div class="alarm-field in-app-only">
+          <span class="alarm-label">Se repite <em class="alarm-days-hint">(vacío = una sola vez)</em></span>
+          <div id="alarm-days" class="alarm-days" role="group" aria-label="Días de la semana">
+            <button type="button" class="alarm-day" data-day="1" aria-pressed="false">L</button>
+            <button type="button" class="alarm-day" data-day="2" aria-pressed="false">M</button>
+            <button type="button" class="alarm-day" data-day="3" aria-pressed="false">X</button>
+            <button type="button" class="alarm-day" data-day="4" aria-pressed="false">J</button>
+            <button type="button" class="alarm-day" data-day="5" aria-pressed="false">V</button>
+            <button type="button" class="alarm-day" data-day="6" aria-pressed="false">S</button>
+            <button type="button" class="alarm-day" data-day="0" aria-pressed="false">D</button>
+          </div>
+        </div>
+
         <label class="alarm-field">
           <span class="alarm-label">Frecuencia a activar</span>
           <select id="alarm-state" class="alarm-input"></select>
@@ -504,6 +514,24 @@
         </label>
 
         <p id="alarm-perm" class="alarm-perm"></p>
+        <!-- P4: si Android bloqueó las notificaciones de la APK, se ofrece
+             abrir los ajustes del sistema (OPEN_NOTIFICATION_SETTINGS). -->
+        <button id="alarm-perm-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar notificaciones en Android</button>
+
+        <!-- P5: estado real de las alarmas exactas (SCHEDULE_EXACT_ALARM). En
+             Android 14+ no se conceden por defecto → alarma aproximada ±60 s. -->
+        <p id="alarm-exact" class="alarm-perm"></p>
+        <button id="alarm-exact-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar alarmas exactas en Android</button>
+
+        <!-- P5: notas honestas solo visibles en la APK (la web ya tiene la suya). -->
+        <div id="alarm-native-note" class="alarm-native-note hidden">
+          <p>📵 <strong>La alarma no aparece en la app Reloj de tu teléfono:</strong> Android no
+            permite escribir en la app de Reloj. La hora la dispara el reloj del sistema y
+            Vyneural muestra su propia notificación a esa hora.</p>
+          <p>🔋 <strong>En Xiaomi, Huawei o Samsung:</strong> si cierras la app con “Eliminar”
+            desde recientes o la fuerzas a detener, Android puede no entregar la notificación.
+            No fuerces el cierre: sal con la tecla atrás o con “Inicio”.</p>
+        </div>
 
         <div class="alarm-actions">
           <button id="alarm-save" class="quick-start">Guardar recordatorio</button>
@@ -649,6 +677,8 @@
           <button id="perm-on" class="quick-start">Activar permisos</button>
           <button id="perm-off" class="perm-off">Desactivar</button>
           <button id="perm-test" class="perm-test hidden">Probar notificación</button>
+          <button id="perm-notif-settings" class="perm-test hidden">Abrir ajustes de notificación</button>
+          <button id="perm-exact-settings" class="perm-test hidden">Autorizar alarmas exactas</button>
         </div>
         <p id="perm-note" class="perm-note"></p>
       </div>
@@ -694,6 +724,8 @@
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
           <a href="/descargar">Descargar APK (Android)</a>
+          <a class="in-app-only" href="/rutina">Tu rutina</a>
+          <a href="/hoja-de-ruta">Hoja de ruta</a>
           <a href="/codigo-abierto">Código abierto</a>
         </div>
         <div class="footer-col">

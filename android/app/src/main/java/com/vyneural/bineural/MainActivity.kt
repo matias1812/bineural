@@ -32,6 +32,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var scheduler: AlarmScheduler
     private lateinit var permissions: PermissionManager
+    // P4-B — historial MANUAL de páginas: con file:// + shouldOverrideUrlLoading
+    // el WebView no acumula historial (canGoBack() siempre false), así que el
+    // BACK del sistema salía de la app en vez de volver a la página anterior.
+    // Este stack es la fuente de verdad de la navegación hacia atrás. NUNCA
+    // toca el audio: el sonido lo sostiene el Foreground Service aparte.
+    private val pageStack = ArrayDeque<String>()
+    // Página actual cacheada: `webView.url` solo puede leerse desde el hilo
+    // main, y el bridge (GET_NAV_STATE) corre en el hilo JavaBridge. Este
+    // campo se actualiza en loadLocalPageInternal (main) y es @Volatile para
+    // que el diagnóstico lo lea sin tocar el WebView desde otro hilo.
+    @Volatile
+    private var currentPage = "index"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +54,16 @@ class MainActivity : ComponentActivity() {
 
         webView = WebView(this)
         setContentView(webView)
+        // P4-B — BACK (tecla y gesto Android 13+) usa el historial manual de
+        // páginas; cuando se agota, el callback se deshabilita y el sistema
+        // cierra la Activity como siempre.
+        onBackPressedDispatcher.addCallback(this, onBack)
+        // Solo debug: permite inspeccionar/controlar la WebView por CDP
+        // (adb forward → chrome://inspect) para la validación P2 en
+        // dispositivo/emulador. Nunca en release (BuildConfig.DEBUG=false).
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         val s = webView.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
@@ -60,6 +82,12 @@ class MainActivity : ComponentActivity() {
         // audio, Bluetooth) para el log de interferencias del HUD / /diagnostico.
         AudioForegroundService.onFocusStateChange = { label ->
             pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:audiofocus',{detail:{state:'$label'}}))")
+        }
+        // Cambios de reproducción desde los controles del SO (lock screen,
+        // notificación, Bluetooth): pause/resume/stop para sincronizar la UI
+        // de la WebView con el motor nativo (P1.5 — la UI nunca inventa estado).
+        AudioForegroundService.onPlaybackStateChange = { state ->
+            pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:audioplayback',{detail:{state:'$state'}}))")
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -90,7 +118,9 @@ class MainActivity : ComponentActivity() {
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) {
                     BineuralLog.e("webview", "error ${error.errorCode} → ${request.url}")
-                    loadLocalPage("index")
+                    // P4-B — el fallback a index NO debe empujar la página rota
+                    // al historial (si no, BACK volvería al error y rebotaría).
+                    loadLocalPageInternal("index", push = false)
                 }
             }
         }
@@ -137,9 +167,34 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Carga una página local (MPA de Vite): /privacidad → privacidad.html. */
-    private fun loadLocalPage(page: String) {
+    private fun loadLocalPage(page: String) = loadLocalPageInternal(page, push = true)
+
+    private fun loadLocalPageInternal(page: String, push: Boolean) {
         val clean = page.replace(Regex("[^A-Za-z0-9_-]"), "").ifEmpty { "index" }
+        if (push) {
+            val current = currentPage
+            // No empujar si ya estamos en esa página (evita stack infinito) ni
+            // duplicar entradas consecutivas iguales.
+            if (current != clean && (pageStack.isEmpty() || pageStack.last() != current)) {
+                pageStack.addLast(current)
+            }
+        }
+        currentPage = clean
         webView.loadUrl("file:///android_asset/bineural/$clean.html")
+    }
+
+    /** Nombre de la página actual (cacheado; nunca toca el WebView desde
+     *  hilos no-main — el bridge corre en JavaBridge). */
+    private fun currentPageName(): String = currentPage
+
+    /** Estado de navegación para el diagnóstico (P4-B): página actual, historial
+     *  manual y si el BACK está habilitado. Nunca toca el audio. */
+    fun navState(): String {
+        val j = org.json.JSONObject()
+            .put("current", currentPageName())
+            .put("stack", org.json.JSONArray(pageStack.toList()))
+            .put("backEnabled", pageStack.isNotEmpty())
+        return j.toString()
     }
 
     /** Inyecta window.AndroidBridge con el contrato exacto del JS (P0). */
@@ -188,8 +243,18 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    // P4-B — BACK del sistema (tecla y gesto) navega al historial manual. Al
+    // agotarse (estamos en la home) el callback se deshabilita y el sistema
+    // cierra la actividad como siempre. Nada de esto toca el audio nativo.
+    private val onBack = object : androidx.activity.OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val prev = pageStack.removeLastOrNull()
+            if (prev != null) {
+                loadLocalPageInternal(prev, push = false)
+            } else {
+                finish()
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

@@ -27,11 +27,11 @@ import {
   isIos,
   isStandalone,
 } from './notifications.js';
-import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
+import { AlarmManager, createDurableStore, alarmOwnerForPlatform } from './core/alarm-manager.js';
 import { createNotificationManager } from './core/notification-manager.js';
 // P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
 // la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
-import { createNativeBridgeAdapter } from './platform/native-bridge.js';
+import { createNativeBridgeAdapter, parseBridgeResponse } from './platform/native-bridge.js';
 import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 
@@ -43,10 +43,20 @@ import {
   enabledStateText,
 } from './core/permissions.js';
 import { AppLifecycle } from './core/lifecycle.js';
+// P2 Fase 1 — máquina de estados CENTRAL del audio (UI ≠ AUDIO ≠ EXPERIMENTO).
+import { AudioStateMachine } from './core/audio-state.js';
 import { ExperimentEventLog } from './core/experiment-events.js';
 import { probeCapabilities } from './core/capabilities.js';
 import { AudioTransport } from './core/audio-transport.js';
 import { planRecovery } from './core/audio-health.js';
+// P1 — forense de duplicación de audio: cancelación de automation (M1) y
+// deduplicación de restores de sesión por máquina de estados (M3).
+import { muteMasterGain, restoreMasterGain } from './core/audio-automation.js';
+import { RestoreGate } from './core/restore-gate.js';
+// P3 — sanitización de datos persistidos (crash recovery / corrupción).
+import { sanitizeSession, sanitizeFavorites, sanitizeHistory } from './core/session-store.js';
+// P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
+import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -78,6 +88,25 @@ simulation.audio.transport = new AudioTransport({ isIos: isIos() });
 const nativeBridge = createNativeBridgeAdapter();
 window.__nativeBridge = nativeBridge;
 
+// ── Proveedor único de audio (P1.5 Fase 5) ──────────────────────────────────
+// 'native' | 'web' | 'none'. El invariante assertSingleAudioProvider() falla
+// si ambos motores suenan a la vez (la WebView mutea su motor cuando el
+// servicio nativo reproduce). Se expone para el HUD, /diagnostico y tests.
+let audioProvider = 'none';
+window.__audioProvider = () => audioProvider;
+window.__assertSingleAudioProvider = () =>
+  assertSingleAudioProvider({
+    provider: audioProvider,
+    webGain: simulation.audio && simulation.audio.masterGain ? simulation.audio.masterGain.gain.value : 0,
+  });
+function setAudioProvider(p) {
+  audioProvider = p;
+  ilog('provider', providerLabel(p));
+  if (!window.__assertSingleAudioProvider()) {
+    console.warn('[vyneural] ¡doble motor de audio detectado: nativo activo y web con ganancia > 0!');
+  }
+}
+
 function updatePlatformUI() {
   const badge = document.getElementById('platform-badge');
   if (!badge) return;
@@ -108,21 +137,50 @@ function nativeAudio() {
   }
   return null;
 }
-// Arranca/retunea el servicio nativo con los parámetros actuales de sesión.
+// Arranca el servicio nativo con los parámetros actuales de sesión. Envía
+// START explícito (no RETUNE): el retune NO arranca el motor (P2 — el
+// emulador reveló que delegar aquí en syncNativeAudioRetune dejaba el
+// servicio corriendo pero mudo cuando retuneNative=true).
 function syncNativeAudioStart() {
   const b = nativeAudio();
   if (!b) return;
-  syncNativeAudioRetune();
+  const p = currentParams();
+  // P4-D — el nivel viaja en el START: el motor nativo arranca con el volumen
+  // del usuario (si llegara después vía SET_AUDIO_LEVEL, el fade-in arrancaría
+  // al default 0.6 y haría un overshoot breve audible al pulsar play).
+  b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave, title: selected.name, level: volumeLevel });
   if (b.setAudioLevel) b.setAudioLevel({ level: volumeLevel });
   // En la APK el sonido lo genera el servicio nativo (audio focus + notif de
   // control); la web queda muda pero su AudioContext sigue corriendo para el
-  // visualizador (el analyser se alimenta antes de masterGain). Así nunca hay
-  // doble tono (interferencia de fase entre dos motores iguales).
+  // visualizador (los visualizadores son model-driven: leen el estado del
+  // motor, no el analyser). Así nunca hay doble tono (interferencia de fase
+  // entre dos motores iguales).
+  // P2 — el emulador reveló que asignar gain.value=0 no basta: el ramp
+  // programado por el motor web (linearRampToValueAtTime al arrancar) pisa el
+  // 0 y la web suena al 60 % con el nativo. Se cancelan los valores
+  // programados y se fija el 0.
   if (simulation.audio && simulation.audio.masterGain) {
     try {
-      simulation.audio.masterGain.gain.value = 0;
+      const g = simulation.audio.masterGain.gain;
+      const now = simulation.audio.ctx ? simulation.audio.ctx.currentTime : 0;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0, now);
     } catch (_) {
       /* contexto cerrado */
+    }
+  }
+  // P2 — propietario único de Media Session (I2/I3): en la APK el audio y los
+  // controles los posee el servicio NATIVO. El elemento <audio> del transporte
+  // web, aunque mudo, hace que Chromium (WebView) reclame SU PROPIA Media
+  // Session ante el SO (dos sesiones: nativa + WebView). Se pausa el elemento
+  // en modo nativo: la WebView queda sin reproducción de medios, el OS ve una
+  // sola MediaSession (la nativa con su notificación MediaStyle) y no hay
+  // doble ownership.
+  if (simulation.audio && simulation.audio.transport) {
+    try {
+      simulation.audio.transport.pause();
+    } catch (_) {
+      /* elemento no disponible */
     }
   }
 }
@@ -142,15 +200,99 @@ function syncNativeAudioRetune() {
 function syncNativeAudioStop() {
   const b = nativeAudio();
   if (b) b.stopBackgroundAudio();
-  // Al volver a la web (no-APK) o al pausar, restaura el nivel web.
+  // Al volver a la web (no-APK) o al pausar, restaura el nivel web. P1 (M1):
+  // se cancela la automation pendiente ANTES de fijar el valor — una rampa
+  // residual (fade-in del start, recoverFade del watchdog) pisa el valor
+  // asignado y puede dejar el motor web audible sobre el nativo.
   if (simulation.audio && simulation.audio.masterGain && !b) {
-    try {
-      simulation.audio.masterGain.gain.value = volumeLevel;
-    } catch (_) {
-      /* contexto cerrado */
-    }
+    const ctx = simulation.audio.ctx;
+    restoreMasterGain(simulation.audio.masterGain, volumeLevel, ctx ? ctx.currentTime : 0);
   }
 }
+// ── P4-B — re-sincronización UI ↔ servicio nativo tras navegar ──────────────
+// Navegar dentro de la APK (otra página, back/forward) recarga el JavaScript
+// pero NO detiene el audio: el servicio nativo lo sostiene aparte. Sin esto la
+// UI volvería a mostrar "Comenzar sesión" con el audio sonando (mentira de
+// estado) y un play del usuario re-arrancaría la sesión. Aquí se lee el estado
+// REAL (GET_AUDIO_STATE) y, si la sesión nativa sigue en playing, la UI se
+// alinea con esos parámetros SIN tocar el servicio (nunca re-START).
+// Arranca el motor web MUDO (solo visualizador) sin enviar ningún comando al
+// servicio nativo: aplica la sesión y cancela la rampa audible de inmediato.
+function startWebVisualizerMuted(base) {
+  try {
+    applyAudio();
+    if (simulation.audio && simulation.audio.masterGain) {
+      const g = simulation.audio.masterGain.gain;
+      const now = simulation.audio.ctx ? simulation.audio.ctx.currentTime : 0;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0, now);
+    }
+    if (simulation.audio && simulation.audio.transport) {
+      simulation.audio.transport.pause();
+    }
+  } catch (_) {
+    /* sin visualizador (pestaña sin gesto previo): el audio nativo sigue */
+  }
+}
+
+// Lee la sesión nativa y sincroniza la UI. Devuelve true si se alineó.
+function syncUiWithNativeSession() {
+  const b = nativeAudio();
+  if (!b || typeof b.getAudioState !== 'function') return false;
+  const data = parseBridgeResponse(b.getAudioState());
+  if (!data || !data.serviceRunning || data.playbackState !== 'playing') return false;
+  // Alinear la UI a la sesión REAL (frecuencias, onda, volumen).
+  const base = typeof data.base === 'number' && data.base > 0 ? data.base : null;
+  const beat = typeof data.beat === 'number' && data.beat > 0 ? data.beat : null;
+  const wave = typeof data.wave === 'string' && data.wave ? data.wave : null;
+  const vol = typeof data.volume === 'number' && data.volume > 0 && data.volume <= 1 ? data.volume : null;
+  const customState = STATES.find((s) => s.custom);
+  if (base && customState) {
+    selectState(customState);
+    customBase.value = String(Math.round(base * 10) / 10);
+    if (beat) customBeat.value = String(Math.round(beat * 10) / 10);
+    if (wave) selectedWave = wave;
+    syncWaveButtons();
+    syncCarrierChips();
+    updateCustomPanel();
+    updateCarrierWarning();
+    updateCustomLabels();
+  }
+  if (vol !== null) {
+    volumeLevel = vol;
+    volume.value = String(vol);
+    if (volumeLabel) volumeLabel.textContent = `${Math.round(vol * 100)}%`;
+  }
+  if (playing) return true;
+  // Marcar la sesión como ACTIVA sin re-arrancar el servicio nativo: solo la
+  // UI y el visualizador web (mudo). El estado real lo sigue poseyendo el SO.
+  playing = true;
+  sessionStartTime = Date.now();
+  lifecycle.transition('start');
+  audioState.transition('system_play', { reason: 'page-reload-sync' });
+  sessionLog.reset();
+  sessionLog.start({
+    state: selected.name,
+    band: selected.band,
+    base: currentParams().base,
+    beat: currentParams().beat,
+    wave: selectedWave,
+    condition: EXP_CONDITION_TO_SESSION[expCondition] || 'BINAURAL',
+  });
+  playBtn.classList.add('playing');
+  playBtn.innerHTML = ICONS.pause;
+  playBtn.setAttribute('aria-label', 'Pausar sesión');
+  updateStatus();
+  armTimer();
+  saveSession();
+  // P4-B — el proveedor REAL de la sesión restaurada es el servicio nativo:
+  // la UI no debe declarar 'none' con audio sonando (mentira de estado).
+  setAudioProvider('native');
+  startWebVisualizerMuted(base);
+  ilog('playback', 'ui-resynced-from-native');
+  return true;
+}
+
 // Capacidades fusionadas (web + nativo) para la UI de permisos y diagnóstico.
 function mergedCapabilities() {
   return mergePlatformCapabilities({
@@ -178,10 +320,14 @@ function mergedCapabilities() {
 // suposiciones sobre la pestaña. El registro de eventos guarda cada cambio
 // con su audioTime para reconstruir la sesión y calcular su integridad.
 const lifecycle = new AppLifecycle();
+// P2 Fase 1 — el audio tiene su PROPIO estado, independiente de la UI: ningún
+// evento visual (menú, scroll, HUD, diagnóstico, pestañas) puede transicionarlo.
+const audioState = new AudioStateMachine();
 const sessionLog = new ExperimentEventLog({
   audioTime: () => (simulation.audio.ctx ? simulation.audio.ctx.currentTime : 0),
 });
 window.__lifecycle = lifecycle;
+window.__audioState = audioState;
 window.__sessionLog = sessionLog;
 // Hook de diagnóstico (solo lectura): estado real del motor para CI y para
 // verificación en dispositivo (conteo de osciladores, contexto, RMS,
@@ -212,10 +358,92 @@ window.__interferenceLog = __interferenceLog;
 window.__interferenceLogPush = ilog;
 // Evento nativo (APK): cambios de audio focus del shell (llamada, otro audio…).
 window.addEventListener('vyneural:audiofocus', (e) => {
-  ilog('focus', e.detail && e.detail.state ? e.detail.state : 'event');
+  const label = e.detail && e.detail.state ? e.detail.state : 'event';
+  ilog('focus', label);
+  if (label === 'GAIN') audioState.transition('focus_gain', { reason: 'audio-focus' });
+  else if (label === 'DUCK') audioState.transition('focus_duck', { reason: 'audio-focus' });
+  else if (label === 'LOSS_TRANSIENT' || label === 'LOSS') {
+    audioState.transition('focus_loss', { reason: label.toLowerCase() });
+  } else if (label === 'UNKNOWN') {
+    // P2 — UNKNOWN es un estado EXPLÍCITO y visible (nunca pérdida genérica
+    // silenciosa): interrupción defensiva; la APK aplica pausa + watchdog.
+    audioState.transition('focus_loss', { reason: 'unknown-focus' });
+  }
+});
+// Evento nativo (APK): cambios de reproducción desde los controles del SO
+// (lock screen, notificación, Bluetooth). La UI de la WebView NUNCA inventa
+// estado: se sincroniza con lo que el servicio nativo realmente hizo.
+window.addEventListener('vyneural:audioplayback', (e) => {
+  const state = e.detail && e.detail.state ? e.detail.state : 'event';
+  ilog('playback', state);
+  if (state === 'paused' && playing) pauseUiOnly();
+  else if (state === 'stopped') {
+    audioState.transition('system_stop', { reason: 'lock-screen' });
+    if (playing) stop(false);
+  } else if (state === 'playing') {
+    audioState.transition('system_play', { reason: 'lock-screen' });
+    audioState.transition('started', { reason: 'engine-running' });
+    if (!playing) start();
+  }
 });
 document.addEventListener('fullscreenchange', () => {
   ilog('fullscreen', document.fullscreenElement ? 'enter' : 'exit');
+});
+
+// ── Guardia UI → audio (P2 Fase 9) ──────────────────────────────────────────
+// Instrumenta TODOS los caminos de interacción (click, scroll, orientación,
+// resize, apertura de menú/HUD/modal) y verifica que NINGUNO cambie el estado
+// de audio salvo los controles explícitos de audio. Si un evento UI detuviera
+// la sesión (el bug histórico "el audio se corta al interactuar"), queda
+// registrado con event/ts/before/after en __uiAudioGuard y se marca WARN —
+// nunca se aplica un workaround sin ver la causa.
+const __uiAudioGuard = [];
+window.__uiAudioGuard = __uiAudioGuard;
+// Controles que SÍ pueden modificar el audio por diseño.
+const AUDIO_CONTROL_HINTS = [
+  'play-btn',
+  'volume',
+  'custom-base',
+  'custom-beat',
+  'carrier-options',
+  'wave-options',
+  'custom-wave-options',
+  'viz-switch',
+  'timer-options',
+  'ambient-options',
+  'ambient-volumes',
+  'exp-condition',
+  'exp-run',
+];
+function guardUiEvent(kind, target) {
+  // Sin sesión activa no hay nada que proteger.
+  if (audioState.state === 'IDLE' || audioState.state === 'STOPPED' || audioState.state === 'ERROR') return;
+  const before = audioState.state;
+  const el = target && target.nodeType === 1 ? target.closest('button,input,select,[id]') : null;
+  const id = el ? String(el.id || el.className || el.tagName || '') : '';
+  const expected = AUDIO_CONTROL_HINTS.some((c) => id.includes(c));
+  // El estado se lee tras el tick del evento (los handlers ya corrieron).
+  setTimeout(() => {
+    const after = audioState.state;
+    const changed = before !== after;
+    __uiAudioGuard.push({ kind, ts: Date.now(), id: id || null, before, after, changed, expected });
+    if (__uiAudioGuard.length > 60) __uiAudioGuard.shift();
+    if (changed) {
+      ilog('ui-guard', `${kind}:${id || '?'}:${before}→${after}`);
+      if (!expected) {
+        console.warn('[vyneural] ¡evento UI cambió el estado de audio!', { kind, id, before, after });
+      }
+    }
+  }, 80);
+}
+document.addEventListener('click', (e) => guardUiEvent('click', e.target), true);
+document.addEventListener('pointerdown', (e) => guardUiEvent('touch', e.target), true);
+document.addEventListener('scroll', (e) => guardUiEvent('scroll', e.target), { capture: true, passive: true });
+window.addEventListener('orientationchange', () => guardUiEvent('orientation', null));
+let _resizeT = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeT);
+  _resizeT = setTimeout(() => guardUiEvent('resize', null), 200);
 });
 
 // Métricas del bucle de dibujo (EMA) + memoria del heap JS.
@@ -402,7 +630,7 @@ if (!(carrier in CARRIER_BASE)) carrier = 'estandar';
 const carrierOptions = document.getElementById('carrier-options');
 const carrierWarning = document.getElementById('carrier-warning');
 
-let favorites = new Set(lsGet(LS_FAVS, []));
+let favorites = new Set(sanitizeFavorites(lsGet(LS_FAVS, [])));
 
 // ---------------------------------------------------------------- Tarjetas
 // Los estados se organizan por objetivo (Dormir, Meditar, Relajarse…):
@@ -510,6 +738,13 @@ function saveSession() {
 window.addEventListener('beforeunload', saveSession);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveSession();
+  // P2 Fase 1: el fondo/foreground ES un evento de audio (la WebView se
+  // pausa), pero no detiene la sesión: PLAYING → BACKGROUND (sigue sonando).
+  if (document.visibilityState === 'hidden') {
+    audioState.transition('app_background', { reason: 'visibility' });
+  } else {
+    audioState.transition('app_foreground', { reason: 'visibility' });
+  }
 });
 
 function hexToRgba(hex, a) {
@@ -598,6 +833,11 @@ function currentParams() {
 
 function applyAudio() {
   simulation.start(currentParams().base);
+  // P5 — la onda elegida se re-afirma SIEMPRE tras el arranque: el motor
+  // (core) arranca con la onda del perfil del estado ('sine' en Personalizado)
+  // y aquí se aplica la onda que eligió el usuario (bug: custom + onda ≠ sine).
+  // setWave muta el tipo del oscilador en vivo, sin cortar el sonido.
+  simulation.audio.setWave(selectedWave);
   // Aplica el volumen del slider a la sesión: el motor arranca con un valor
   // por defecto y aquí se re-afirma el nivel real elegido por el usuario.
   simulation.setVolume(volumeLevel);
@@ -625,6 +865,7 @@ function start() {
   sessionAmbient = [...ambientTypes];
   const p0 = currentParams();
   lifecycle.transition('start');
+  audioState.transition('user_play', { reason: 'ui-play' });
   // Sesión nueva = registro nuevo: si la sesión anterior terminó, se
   // descarta (start() solo se llama desde el estado detenido).
   sessionLog.reset();
@@ -646,6 +887,7 @@ function start() {
   // el sonido al navegar o bloquear (la WebView no puede reproducir sin su
   // documento). En la web esto es no-op.
   syncNativeAudioStart();
+  setAudioProvider(nativeAudio() ? 'native' : 'web');
   // Ancla de medios: registra la pestaña como reproducción ante el SO para que
   // el controlador del reproductor aparezca y el AudioContext no se suspenda
   // al cambiar de app o bloquear la pantalla (mismo gesto de usuario que play).
@@ -714,6 +956,7 @@ function stopAnchor() {
 
 function stop(withSummary) {
   syncNativeAudioStop();
+  setAudioProvider('none');
   stopAnchor();
   simulation.stop();
   ambient.stopAll();
@@ -731,8 +974,30 @@ function stop(withSummary) {
   // eventos quedan alineados; nunca dejan MediaSession en 'playing' con la
   // UI en stop.
   lifecycle.transition('stop');
+  audioState.transition('user_stop', { reason: withSummary ? 'completed' : 'ui-stop' });
   sessionLog.stop({ reason: withSummary ? 'completed' : 'stopped' });
   if (summary) showSessionSummary(summary);
+}
+
+// Pausa iniciada desde los controles del SO (lock screen / notificación): el
+// motor nativo YA quedó en pausa (evento vyneural:audioplayback). Aquí solo
+// se sincroniza la UI y el visualizador web (mudo en APK), sin reenviar STOP
+// al servicio — así un play posterior retoma la MISMA sesión nativa.
+function pauseUiOnly() {
+  if (!playing) return;
+  audioState.transition('system_pause', { reason: 'lock-screen' });
+  simulation.stop();
+  ambient.stopAll();
+  playing = false;
+  playBtn.classList.remove('playing');
+  playBtn.innerHTML = ICONS.play;
+  playBtn.setAttribute('aria-label', 'Comenzar sesión');
+  updateStatus();
+  disarmTimer();
+  lifecycle.transition('stop');
+  sessionLog.pause({ source: 'lock-screen' });
+  setAudioProvider('none');
+  ilog('playback', 'ui-paused');
 }
 
 // ---------------------------------------------------------------- Historial
@@ -748,7 +1013,7 @@ function recordHistory() {
     min: durMin,
     ts: Date.now(),
   };
-  const h = lsGet(LS_HISTORY, []);
+  const h = sanitizeHistory(lsGet(LS_HISTORY, []));
   h.push(rec);
   lsSet(LS_HISTORY, h.slice(-50));
   sessionStartTime = 0;
@@ -762,7 +1027,7 @@ function updateHistory() {
   const btn = document.getElementById('history-btn');
   if (!btn) return;
   btn.innerHTML = ICONS.history;
-  const h = lsGet(LS_HISTORY, []);
+  const h = sanitizeHistory(lsGet(LS_HISTORY, []));
   const today = h.filter((r) => new Date(r.ts).toDateString() === new Date().toDateString());
   if (today.length) {
     const mins = today.reduce((a, r) => a + r.min, 0);
@@ -785,7 +1050,7 @@ function closeHistory() {
 }
 
 function renderHistory() {
-  const h = lsGet(LS_HISTORY, []);
+  const h = sanitizeHistory(lsGet(LS_HISTORY, []));
   const todayEl = document.getElementById('history-today');
   const list = document.getElementById('history-list');
   const empty = document.getElementById('history-empty');
@@ -1529,7 +1794,7 @@ fullscreenBtn.addEventListener('click', async () => {
         setFullscreenIcon(true);
         lockPortrait();
         updateRotateOverlay();
-        setTimeout(restoreFromBackground, 250);
+        setTimeout(() => requestRestore(true), 250);
       }
       // Soporte parcial (iOS): si no llegó a entrar de verdad, activa el modo CSS.
       setTimeout(() => {
@@ -1540,7 +1805,7 @@ fullscreenBtn.addEventListener('click', async () => {
           updateRotateOverlay();
         }
         resizeCanvas();
-        setTimeout(restoreFromBackground, 250);
+        setTimeout(() => requestRestore(true), 250);
       }, 250);
     } else {
       document.body.classList.add('immersive');
@@ -1548,7 +1813,7 @@ fullscreenBtn.addEventListener('click', async () => {
       lockPortrait();
       updateRotateOverlay();
       resizeCanvas();
-      setTimeout(restoreFromBackground, 250);
+      setTimeout(() => requestRestore(true), 250);
     }
   } else {
     document.body.classList.remove('immersive');
@@ -1566,7 +1831,7 @@ fullscreenBtn.addEventListener('click', async () => {
     requestAnimationFrame(resizeCanvas);
     // En el modo CSS (sin fullscreen real) no llega fullscreenchange: se
     // reanuda el audio igualmente al salir.
-    setTimeout(restoreFromBackground, 200);
+    setTimeout(() => requestRestore(true), 200);
   }
 });
 document.addEventListener('fullscreenchange', () => {
@@ -1584,7 +1849,7 @@ document.addEventListener('fullscreenchange', () => {
   // Al entrar o salir de pantalla completa algunos navegadores (Android/iOS)
   // suspenden el AudioContext: se reanuda para que la sesión no quede muda
   // con el botón en play.
-  setTimeout(restoreFromBackground, on ? 250 : 200);
+  setTimeout(() => requestRestore(true), on ? 250 : 200);
 });
 
 // ---------------------------------------------------------------- Orientación de las gotas
@@ -1636,6 +1901,22 @@ updateRotateOverlay();
 // (Spotify no se calla al bloquear la pantalla). El sistema puede suspender
 // el AudioContext —p. ej. iOS al bloquear—; al volver se reanuda solo y con
 // suavidad, sin cortes ni interferencias externas.
+// P1 (M3) — RestoreGate: el unlock dispara restore desde hasta 5 vías
+// (visibilitychange, pageshow, focus, resume, pointerdown) en el mismo burst.
+// El gate deduplica por máquina de estados: el primer trigger ejecuta, los
+// siguientes dentro de la ventana de settle se ignoran (salvo force, p. ej.
+// un toque posterior que reintenta porque el AudioContext sigue suspendido).
+const restoreGate = new RestoreGate();
+window.__restoreGate = restoreGate;
+function requestRestore(force = false) {
+  const d = restoreGate.request({ force });
+  if (d.action === 'run') {
+    restoreFromBackground();
+    restoreGate.complete();
+  }
+  return d;
+}
+
 function restoreFromBackground() {
   if (!playing) return;
   const audio = simulation.audio;
@@ -1658,11 +1939,20 @@ function restoreFromBackground() {
   // (si se desmutea al volver, suenan dos motores a la vez).
   const nb = nativeAudio();
   if (nb) {
+    // P1 (M1): enmudecer el motor web con CANCELACIÓN de automation. Asignar
+    // gain.value=0 sin cancelar deja una rampa pendiente (fade-in del start o
+    // recoverFade del watchdog) que re-eleva la ganancia y hace audible el
+    // segundo motor → batido/acoplamiento con el servicio nativo al volver.
     if (audio.masterGain) {
+      muteMasterGain(audio.masterGain, ctx ? ctx.currentTime : 0);
+    }
+    // P2 (I2/I3): dueño único de Media Session — el elemento web queda pausado
+    // para que la WebView no reclame una segunda MediaSession ante el SO.
+    if (audio.transport) {
       try {
-        audio.masterGain.gain.value = 0;
+        audio.transport.pause();
       } catch (_) {
-        /* contexto cerrado */
+        /* elemento no disponible */
       }
     }
   } else if (plan.action === 'recover') {
@@ -1706,18 +1996,28 @@ document.addEventListener('visibilitychange', () => {
     // instalada), la exposición continúa; si no, se marca la interrupción.
     sessionLog.background(audioRunning);
   } else {
-    restoreFromBackground();
+    requestRestore();
   }
 });
-window.addEventListener('pageshow', restoreFromBackground);
-window.addEventListener('focus', restoreFromBackground);
+window.addEventListener('pageshow', () => requestRestore());
+window.addEventListener('focus', () => requestRestore());
 // Ciclo de vida de la página (Chrome): al "descongelarse" una pestaña que el
 // navegador congeló en segundo plano, se re-afirma la sesión para que el audio
 // nunca se quede mudo con el botón en play.
-document.addEventListener('resume', restoreFromBackground);
+document.addEventListener('resume', () => requestRestore());
 // iOS suele exigir un gesto del usuario para reanudar el contexto: si al
 // volver seguía suspendido, se reanuda con el primer toque sobre la página.
-window.addEventListener('pointerdown', restoreFromBackground, { passive: true });
+// P2 Fase 11: SOLO se actúa si el contexto quedó suspendido. Con la sesión
+// sana, un toque en la UI (menú, scroll, slider, HUD…) NO debe re-ejecutar
+// el restore completo: re-crea MediaMetadata, re-rampa la ganancia y
+// registra un evento de log por toque (ruido + micro-interferencia).
+window.addEventListener('pointerdown', () => {
+  if (!playing) return;
+  const ctx = simulation.audio && simulation.audio.ctx;
+  // force=true: el toque posterior es el gesto que iOS exige para reanudar;
+  // debe reintentarse aunque un restore anterior esté en la ventana de settle.
+  if (ctx && ctx.state === 'suspended') requestRestore(true);
+}, { passive: true });
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {
@@ -1888,6 +2188,36 @@ if (MEDIA_SESSION) {
     const next = visible[(idx + dir + visible.length) % visible.length];
     selectState(STATES.find((st) => st.id === next.dataset.id));
   };
+  // P5 — API de control web estable para integraciones (teclado, scripts,
+  // bookmarks, home automation): window.__vyneural con las mismas acciones
+  // que Media Session + lectura de estado. Nunca rompe el flujo de la UI.
+  window.__vyneural = {
+    play: () => { if (!playing) start(); return window.__vyneural.state(); },
+    pause: () => { if (playing) stop(); return window.__vyneural.state(); },
+    toggle: () => { if (playing) stop(); else start(); return window.__vyneural.state(); },
+    stop: () => { if (playing) stop(); return window.__vyneural.state(); },
+    next: () => moveTrack(1),
+    prev: () => moveTrack(-1),
+    seekBy,
+    selectState: (id) => {
+      const st = STATES.find((s) => s.id === id);
+      if (st) selectState(st);
+    },
+    state: () => {
+      const p = currentParams();
+      return {
+        playing,
+        state: selected.id,
+        name: selected.name,
+        base: p.base,
+        beat: p.beat,
+        wave: p.wave,
+        volume: p.volume,
+        timeLeft: timerEnd ? Math.max(0, Math.round((timerEnd - Date.now()) / 1000)) : null,
+      };
+    },
+  };
+  window.__vyneural.state();
   try {
     MEDIA_SESSION.setActionHandler('play', () => { if (!playing) start(); });
     MEDIA_SESSION.setActionHandler('pause', () => { if (playing) stop(); });
@@ -1959,7 +2289,7 @@ function setVizMode(mode) {
   // que el navegador suspenda el AudioContext; se re-afirma la sesión para
   // que el cambio de visualización nunca deje el audio mudo con el botón
   // "en play". restoreFromBackground() ya ignora el caso en pausa.
-  if (playing) setTimeout(restoreFromBackground, 150);
+  if (playing) setTimeout(() => requestRestore(true), 150);
 }
 if (vizSwitch) {
   vizSwitch.addEventListener('click', (e) => {
@@ -2354,6 +2684,19 @@ function renderPermissionState() {
   if (permTest) {
     permTest.classList.toggle('hidden', !isNative);
   }
+  // Botones nativos contextuales: solo cuando la APK existe y el estado real
+  // del sistema lo amerita (denegado para siempre / no autorizado).
+  const btnNotifSettings = document.getElementById('perm-notif-settings');
+  if (btnNotifSettings) {
+    btnNotifSettings.classList.toggle('hidden', !(isNative && notifPerm !== 'granted'));
+  }
+  const btnExactSettings = document.getElementById('perm-exact-settings');
+  if (btnExactSettings) {
+    btnExactSettings.classList.toggle(
+      'hidden',
+      !(isNative && caps.exactAlarms.supported && !caps.exactAlarms.granted),
+    );
+  }
 
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
@@ -2387,6 +2730,23 @@ if (permissionsModal) {
     btnTest.addEventListener('click', () => {
       const b = nativeAudio();
       if (b && b.testNotification) b.testNotification();
+    });
+  }
+  // Ajustes reales de la APK (P1.5 Fase 9/10): notificaciones denegadas →
+  // botón directo a los ajustes del SO; alarmas exactas sin autorizar →
+  // botón al diálogo de autorización. Nunca se fingen permisos concedidos.
+  const btnNotifSettings = document.getElementById('perm-notif-settings');
+  if (btnNotifSettings) {
+    btnNotifSettings.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.openNotificationSettings) b.openNotificationSettings();
+    });
+  }
+  const btnExactSettings = document.getElementById('perm-exact-settings');
+  if (btnExactSettings) {
+    btnExactSettings.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.requestExactAlarmPermission) b.requestExactAlarmPermission();
     });
   }
 }
@@ -2919,7 +3279,10 @@ drawVisual();
 // temporizador (el estado lo elige el deep link o el guardado).
 function restoreSession(saved) {
   if (!saved) return;
-  if (typeof saved.volume === 'number') {
+  // P3 — validación de corrupción: los valores se aceptan solo si son finitos
+  // y están en rango. Un localStorage corrupto (NaN, fuera de rango) no debe
+  // romper la UI ni dejar el volumen/sesión en un estado imposible.
+  if (typeof saved.volume === 'number' && Number.isFinite(saved.volume) && saved.volume >= 0 && saved.volume <= 1) {
     volumeLevel = saved.volume;
     volume.value = String(saved.volume);
     if (volumeLabel) volumeLabel.textContent = `${Math.round(saved.volume * 100)}%`;
@@ -2930,16 +3293,16 @@ function restoreSession(saved) {
       saved.ambient.filter((t) => ['lluvia', 'rio', 'bosque', 'pajaros', 'oceano', 'fuego'].includes(t)),
     );
   }
-  if (typeof saved.ambientVolume === 'number') {
+  if (typeof saved.ambientVolume === 'number' && Number.isFinite(saved.ambientVolume) && saved.ambientVolume >= 0 && saved.ambientVolume <= 1) {
     ambientVolumeLevel = saved.ambientVolume;
     ambientVolume.value = String(saved.ambientVolume);
     ambientVolumeLabel.textContent = `${Math.round(saved.ambientVolume * 100)}%`;
     ambient.setVolume(ambientVolumeLevel);
   }
-  if (saved.layerVolumes) {
+  if (saved.layerVolumes && typeof saved.layerVolumes === 'object') {
     document.querySelectorAll('#ambient-volumes input').forEach((inp) => {
       const v = saved.layerVolumes[inp.dataset.type];
-      if (typeof v === 'number') {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1) {
         inp.value = String(v);
         const label = inp.closest('.av').querySelector('b');
         label.textContent = `${Math.round(v * 100)}%`;
@@ -2947,7 +3310,7 @@ function restoreSession(saved) {
       }
     });
   }
-  if (typeof saved.timer === 'number') {
+  if (typeof saved.timer === 'number' && Number.isFinite(saved.timer) && saved.timer >= 0) {
     timerMinutes = saved.timer;
     timerOptions.querySelectorAll('.timer-btn').forEach((b) =>
       b.classList.toggle('active', parseInt(b.dataset.minutes, 10) === saved.timer),
@@ -3011,6 +3374,52 @@ function defaultAlarmTime() {
 }
 
 function refreshAlarmPerm() {
+  const settingsBtn = document.getElementById('alarm-perm-settings');
+  if (settingsBtn) settingsBtn.classList.add('hidden');
+  // Estado real de las alarmas exactas (P5): Android 14+ no concede
+  // SCHEDULE_EXACT_ALARM por defecto → alarma aproximada ±60 s. Se muestra
+  // siempre el estado verdadero y se ofrece el diálogo del sistema.
+  const exactP = document.getElementById('alarm-exact');
+  const exactBtn = document.getElementById('alarm-exact-settings');
+  const nativeNote = document.getElementById('alarm-native-note');
+  // APK: el permiso de notificaciones REAL es el de Android (POST_NOTIFICATIONS),
+  // lo consulta el bridge (nunca inventa estado). Si está denegado, la
+  // notificación nativa se omite en silencio: se avisa y se ofrece abrir los
+  // ajustes del sistema (P4 — permiso denegado ≠ alarma silenciosa).
+  const b = nativeAudio();
+  if (b) {
+    const info = b.getState ? b.getState().info : null;
+    const np = info ? info.notificationPermission : null;
+    if (nativeNote) nativeNote.classList.remove('hidden');
+    const exact = info ? info.exactAlarmsGranted : null;
+    if (exactP) {
+      if (exact === false) {
+        exactP.textContent =
+          '⏰ Alarma aproximada (±1 min): Android bloqueó las alarmas exactas para esta app. Tocá el botón para activarlas.';
+        if (exactBtn) exactBtn.classList.remove('hidden');
+      } else {
+        exactP.textContent = '⏰ Alarma exacta: dispara a la hora indicada aunque la app esté cerrada.';
+        if (exactBtn) exactBtn.classList.add('hidden');
+      }
+    }
+    if (np === 'DENIED' || np === 'DENIED_PERMANENTLY') {
+      alarmPerm.textContent =
+        np === 'DENIED_PERMANENTLY'
+          ? '🚫 Notificaciones bloqueadas de forma permanente en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes del sistema.'
+          : '⚠️ Notificaciones bloqueadas en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes.';
+      if (settingsBtn) settingsBtn.classList.remove('hidden');
+      return;
+    }
+    if (np === 'GRANTED') {
+      alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
+      return;
+    }
+    alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso de notificaciones en Android.';
+    return;
+  }
+  if (nativeNote) nativeNote.classList.add('hidden');
+  if (exactP) exactP.textContent = '';
+  if (exactBtn) exactBtn.classList.add('hidden');
   if (!notificationSupported()) {
     alarmPerm.textContent = 'Tu navegador no soporta notificaciones: usá el respaldo de calendario.';
     return;
@@ -3051,9 +3460,71 @@ alarmState.addEventListener('change', () => {
   }
 });
 
+// ── P5 — rutina: selector de días de repetición (vacío = una sola vez) ──────
+const alarmDaysEl = document.getElementById('alarm-days');
+const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+function alarmDaysSelected() {
+  if (!alarmDaysEl) return [];
+  return [...alarmDaysEl.querySelectorAll('.alarm-day[aria-pressed="true"]')]
+    .map((b) => parseInt(b.dataset.day, 10))
+    .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b));
+}
+if (alarmDaysEl) {
+  alarmDaysEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.alarm-day');
+    if (!btn) return;
+    const on = btn.getAttribute('aria-pressed') === 'true';
+    btn.setAttribute('aria-pressed', String(!on));
+  });
+}
+/** Próxima fecha ≥ fromMs cuyo día (getDay: 0=domingo…6=sábado) esté en days. */
+function nextOccurrenceAt(hh, mm, days, fromMs = Date.now()) {
+  if (!days || days.length === 0) return null;
+  for (let i = 0; i < 9; i++) {
+    const d = new Date(fromMs);
+    d.setDate(d.getDate() + i);
+    if (days.includes(d.getDay())) {
+      const cand = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0);
+      if (cand.getTime() >= fromMs) return cand.getTime();
+    }
+  }
+  return null;
+}
+function daysLabelFor(days) {
+  if (!days || days.length === 0) return '';
+  if (days.length === 7) return ' · Todos los días';
+  return ' · ' + days.map((d) => DAY_LETTERS[d]).join(' · ');
+}
+
+// Tira semanal (L M X J V S D) con los días marcados de la rutina. Solo
+// existe en la APK (la web no guarda días): muestra de un vistazo qué días
+// se repite el recordatorio.
+function weekStripEl(days) {
+  const wrap = document.createElement('span');
+  wrap.className = 'week-strip';
+  wrap.setAttribute('role', 'img');
+  wrap.setAttribute('aria-label', 'Días de la rutina');
+  DAY_LETTERS.forEach((letter, i) => {
+    const cell = document.createElement('span');
+    cell.className = 'ws-cell' + (days.includes(i) ? ' on' : '');
+    cell.textContent = letter;
+    wrap.appendChild(cell);
+  });
+  return wrap;
+}
+
+// La rutina (repetición por días) es EXCLUSIVA de la APK: solo el reloj del
+// sistema puede reprogramar alarmas con la app cerrada. En web/PWA los días
+// siempre se ignoran (recordatorio de una sola vez).
+function isNativeAlarmOwner() {
+  const b = nativeAudio();
+  return alarmOwnerForPlatform(mergedCapabilities().platformKind, !!(b && b.scheduleAlarm)) === 'native';
+}
+
 function alarmConfig() {
   const st = alarmPreset();
   const minutes = parseInt(alarmMinutes.value, 10) || 0;
+  const days = isNativeAlarmOwner() ? alarmDaysSelected() : [];
   if (st.custom) {
     return {
       name: 'Personalizado',
@@ -3061,23 +3532,69 @@ function alarmConfig() {
       beat: parseFloat(alarmBeat.value) || 10,
       wave: alarmWave.value || 'sine',
       minutes,
+      days,
     };
   }
-  return { name: st.name, freq: st.base, beat: st.beat, wave: 'sine', minutes };
+  return { name: st.name, freq: st.base, beat: st.beat, wave: 'sine', minutes, days };
+}
+
+// P2 — propietario único de alarmas por plataforma (I6): en la APK la alarma
+// la dispara el AlarmManager NATIVO del SO (sobrevive app cerrada, pantalla
+// bloqueada y reboot vía BootReceiver); el scheduler web solo la conserva
+// para la lista de la UI, marcada `external` para que NUNCA dispare en
+// paralelo (no hay doble alarma ni doble notificación). En Web/PWA el
+// scheduler web es el único dueño.
+function scheduleNativeAlarm(alarm) {
+  const b = nativeAudio();
+  // P2 — decisión PURA del dueño (I6): solo el APK con bridge real es dueño
+  // nativo; Web/PWA usan el scheduler web. Nunca ambos (un solo disparador).
+  if (alarmOwnerForPlatform(mergedCapabilities().platformKind, !!(b && b.scheduleAlarm)) !== 'native') {
+    return false;
+  }
+  const r = b.scheduleAlarm({
+    alarmId: alarm.id,
+    title: `Sesión ${Math.round(alarm.freq)} Hz`,
+    body: `${alarm.name} · ${Math.round(alarm.freq)} Hz · ${alarm.beat} Hz`,
+    atMs: alarm.nextAt,
+    days: alarm.days && alarm.days.length ? alarm.days : undefined,
+  });
+  return !!(r && r.ok);
+}
+function cancelNativeAlarm(alarmId) {
+  const b = nativeAudio();
+  if (b && b.cancelAlarm) b.cancelAlarm(alarmId);
+}
+function cancelAlarmBoth(alarmId) {
+  cancelNativeAlarm(alarmId);
+  alarmManager.cancel(alarmId);
 }
 
 alarmSave.addEventListener('click', async () => {
   const time = alarmTime.value || defaultAlarmTime();
   const cfg = alarmConfig();
+  const days = cfg.days && cfg.days.length ? cfg.days : [];
+  const [hh, mm] = time.split(':').map(Number);
+  const nextAt = days.length
+    ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime()
+    : nextAlarmAt(time).getTime();
   const alarm = {
     id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     time,
     ...cfg,
-    nextAt: nextAlarmAt(time).getTime(),
+    days,
+    nextAt,
   };
+  // APK: el dueño real es el AlarmManager nativo; el web queda como espejo
+  // de la UI (external → nunca dispara). Web/PWA: dueño web.
+  const nativeOwned = scheduleNativeAlarm(alarm);
+  if (nativeOwned) alarm.external = true;
   await alarmManager.create(alarm);
   renderAlarms();
-  showToast(`Recordatorio guardado para las ${time}`);
+  showToast(
+    days.length
+      ? `Rutina guardada: ${time}${daysLabelFor(days)}`
+      : `Recordatorio guardado para las ${time}`,
+  );
   const perm = await requestPermission();
   if (perm !== 'granted' && perm !== 'unsupported') {
     showToast('Activá las notificaciones o usá el respaldo de calendario');
@@ -3100,14 +3617,15 @@ function renderAlarms() {
     const b = document.createElement('b');
     b.textContent = a.name;
     const small = document.createElement('small');
-    small.textContent = `${a.time}${extra} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
+    small.textContent = `${a.time}${daysLabelFor(a.days)}${extra} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
     info.append(b, small);
+    if (a.days && a.days.length) info.appendChild(weekStripEl(a.days));
     const del = document.createElement('button');
     del.className = 'alarm-del';
     del.setAttribute('aria-label', 'Eliminar recordatorio');
     del.textContent = '✕';
     del.addEventListener('click', () => {
-      alarmManager.cancel(a.id);
+      cancelAlarmBoth(a.id);
       renderAlarms();
     });
     li.append(info, del);
@@ -3127,12 +3645,13 @@ function renderAlarms() {
       const small = document.createElement('small');
       small.textContent = `${a.time} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
       info.append(b, small);
+      if (a.days && a.days.length) info.appendChild(weekStripEl(a.days));
       const del = document.createElement('button');
       del.className = 'alarm-del';
       del.setAttribute('aria-label', 'Eliminar recordatorio');
       del.textContent = '✕';
       del.addEventListener('click', () => {
-        alarmManager.cancel(a.id);
+        cancelAlarmBoth(a.id);
         renderAlarms();
       });
       li.append(info, del);
@@ -3161,16 +3680,53 @@ function syncAppBadge(count) {
 // La vista en la página abre el modal para agregar o editar recordatorios.
 if (alarmViewAdd) alarmViewAdd.addEventListener('click', openAlarmModal);
 
-// Respaldo de calendario: aplican a la configuración actual del modal.
-alarmGcal.addEventListener('click', (e) => {
+// P4 — permiso denegado en Android: abre los ajustes de notificaciones de la
+// app (OPEN_NOTIFICATION_SETTINGS, whitelisted). En web no aplica (el botón
+// solo se muestra con el bridge presente y el permiso nativo denegado).
+const alarmPermSettings = document.getElementById('alarm-perm-settings');
+if (alarmPermSettings) {
+  alarmPermSettings.addEventListener('click', () => {
+    const b = nativeAudio();
+    if (b && b.openNotificationSettings) {
+      b.openNotificationSettings();
+      showToast('Abriendo los ajustes de notificaciones…');
+    }
+  });
+}
+
+// P5 — alarmas exactas denegadas por Android 14+: abre el diálogo del sistema
+// (REQUEST_EXACT_ALARM_PERMISSION, whitelisted). Sin este permiso la alarma
+// es aproximada (±1 min); con él, exacta.
+const alarmExactSettings = document.getElementById('alarm-exact-settings');
+if (alarmExactSettings) {
+  alarmExactSettings.addEventListener('click', () => {
+    const b = nativeAudio();
+    if (b && b.requestExactAlarmPermission) {
+      b.requestExactAlarmPermission();
+      showToast('Abriendo el ajuste de alarmas exactas…');
+    }
+  });
+}
+
+// Respaldo de calendario: aplican a la configuración actual del modal. En una
+// rutina (con días) se calcula la próxima ocurrencia real y el evento repite
+// en el calendario (RRULE en .ics / recur en Google Calendar).
+function calendarConfig() {
   const cfg = alarmConfig();
   const time = alarmTime.value || defaultAlarmTime();
-  e.currentTarget.href = buildGoogleCalendarUrl({ ...cfg, time, nextAt: nextAlarmAt(time).getTime() });
+  const [hh, mm] = time.split(':').map(Number);
+  const days = cfg.days && cfg.days.length ? cfg.days : [];
+  const nextAt = days.length
+    ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime()
+    : nextAlarmAt(time).getTime();
+  return { ...cfg, time, days, nextAt };
+}
+alarmGcal.addEventListener('click', (e) => {
+  const cfg = calendarConfig();
+  e.currentTarget.href = buildGoogleCalendarUrl(cfg);
 });
 alarmIcs.addEventListener('click', () => {
-  const cfg = alarmConfig();
-  const time = alarmTime.value || defaultAlarmTime();
-  downloadIcs({ ...cfg, time, nextAt: nextAlarmAt(time).getTime() });
+  downloadIcs(calendarConfig());
 });
 
 // ── Sistema de recordatorios (P0: AlarmManager + NotificationManager) ────────
@@ -3219,6 +3775,16 @@ const alarmManager = new AlarmManager({
       );
     }
     if (!playing) start();
+    // P5 — rutina en Web/PWA: si la alarma tiene días de repetición, se
+    // reprograma la siguiente ocurrencia (mientras la página esté viva;
+    // con la pestaña cerrada no puede sonar: límite honesto del navegador).
+    if (alarm.days && alarm.days.length) {
+      const [h, m] = String(alarm.time || '').split(':').map(Number);
+      const nextAt = nextOccurrenceAt(h, m, alarm.days);
+      if (nextAt) {
+        alarmManager.create({ ...alarm, id: alarm.id, nextAt }).catch(() => {});
+      }
+    }
   },
   onSync: renderAlarms,
   channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vyneural-alarms') : null,
@@ -3392,7 +3958,10 @@ else if (isFinite(deepF1) && deepF1 > 0) {
   customBase.value = String(Math.round(deepF1));
   customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
 }
-const savedSession = lsGet(LS_SESSION, null);
+// P3 — la sesión se sanitiza ANTES de restaurar: un localStorage corrupto
+// (NaN, fuera de rango) nunca rompe la restauración ni deja la UI en un
+// estado imposible.
+const savedSession = sanitizeSession(lsGet(LS_SESSION, null));
 // Deep link de alarma: ?freq={base}&beat={ritmo}&wave={onda}&autostart=true
 // configura el estado personalizado con la frecuencia exacta del recordatorio.
 const deepFreq = parseFloat(deepParams.get('freq'));
@@ -3457,6 +4026,14 @@ if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
   } catch {
     showToast('Toca play para comenzar tu sesión');
   }
+}
+
+// P4-B — re-sincronización con la sesión nativa al cargar la página: navegar
+// dentro de la APK recarga el JS sin detener el audio. Si el servicio nativo
+// sigue sonando, la UI se alinea (nunca inventa estado ni re-arranca la
+// sesión). Se omite con autostart (start() configura la sesión de la alarma).
+if (!deepAutostart) {
+  syncUiWithNativeSession();
 }
 
 // Registro del service worker para la PWA (solo en producción y solo sobre http/https:
@@ -3559,10 +4136,11 @@ function hideLoader() {
   }, remain);
 }
 
-// ── HUD en vivo (tecla D) ──────────────────────────────────────────────────
-// Panel flotante con FPS, estado del motor de audio, wake lock, lifecycle y el
-// registro de interferencias en tiempo real. Abre con la tecla D o el botón
-// flotante; el estado de apertura persiste en localStorage.
+// ── HUD en vivo (tecla D / menú ⋯ → Rendimiento y FPS) ────────────────────
+// Panel flotante con FPS, estado del motor de audio, proveedor único, wake
+// lock, lifecycle y el registro de interferencias en tiempo real. Se abre con
+// la tecla D o desde el menú ⋯ (sin botón flotante — P1.5 Fase 15); el estado
+// de apertura persiste en localStorage.
 const LS_HUD = 'vyneural_hud_v1';
 let hudEl = null;
 function byId(id) {
@@ -3584,25 +4162,16 @@ function buildHud() {
       <span>Osc</span><b id="hud-osc">—</b>
       <span>RMS</span><b id="hud-rms">—</b>
       <span>Transport</span><b id="hud-transport">—</b>
+      <span>Provider</span><b id="hud-provider">—</b>
       <span>WakeLock</span><b id="hud-wakelock">—</b>
       <span>Estado</span><b id="hud-state">—</b>
     </div>
     <ol class="hud-log" id="hud-log"></ol>
   `;
   document.body.appendChild(wrap);
-  const toggle = document.createElement('button');
-  toggle.id = 'hud-toggle';
-  toggle.className = 'hud-toggle';
-  toggle.textContent = 'D';
-  toggle.setAttribute('aria-label', 'Abrir HUD (D)');
-  document.body.appendChild(toggle);
   wrap.querySelector('.hud-close').addEventListener('click', () => {
     wrap.classList.add('collapsed');
     lsSet(LS_HUD, false);
-  });
-  toggle.addEventListener('click', () => {
-    wrap.classList.remove('collapsed');
-    lsSet(LS_HUD, true);
   });
   hudEl = wrap;
   // Actualiza el HUD solo mientras está abierto (500 ms).
@@ -3618,8 +4187,9 @@ function buildHud() {
     byId('hud-osc').textContent = st ? String(st.oscillatorCount) : '—';
     byId('hud-rms').textContent = st ? (+st.rms).toFixed(4) : '—';
     byId('hud-transport').textContent = tr ? tr.mode : '—';
+    byId('hud-provider').textContent = providerLabel(audioProvider);
     byId('hud-wakelock').textContent = _wakeLock && !_wakeLock.released ? 'activo' : '—';
-    byId('hud-state').textContent = playing ? 'reproduciendo' : 'detenido';
+    byId('hud-state').textContent = audioState.state;
     byId('hud-lifecycle').textContent = lifecycle.state;
     const log = byId('hud-log');
     log.innerHTML = __interferenceLog

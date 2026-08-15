@@ -35,9 +35,12 @@ function logLine(kind, detail) {
     logLine(ev, `${screenState().orientation || '—'} · ${document.visibilityState}`);
   });
 });
-// Evento nativo (APK): cambios de audio focus del shell.
+// Evento nativo (APK): cambios de audio focus del shell. UNKNOWN se loguea
+// como tal (nunca pérdida genérica): la política es visible en el panel.
 window.addEventListener('vyneural:audiofocus', (e) => {
-  logLine('audiofocus', (e.detail && e.detail.state) || 'event');
+  const label = (e.detail && e.detail.state) || 'event';
+  logLine('audiofocus', label === 'UNKNOWN' ? `${label} · política defensiva: pausa + watchdog + CRITICAL` : label);
+  refreshFocus();
 });
 
 // ── Pantalla: fullscreen + rotación ────────────────────────────────────────
@@ -86,6 +89,36 @@ function perfTick() {
   requestAnimationFrame(perfTick);
 }
 requestAnimationFrame(perfTick);
+
+// ── Política de audio focus (P2): estado visible + contadores del watchdog ──
+// held = estado OPERACIONAL (¿la sesión posee el foco?) · Diagnostics = solo
+// observabilidad. UNKNOWN es un estado explícito y recuperable, nunca una
+// pérdida genérica silenciosa.
+function refreshFocus() {
+  const bridge = currentBridge();
+  const info = bridge ? bridge.getState().info : null;
+  if (!info) {
+    setText('diag-focus-state', '— (web: lo gestiona el navegador)');
+    setText('diag-focus-counters', '—');
+    return;
+  }
+  const state = info.focusState || 'NONE';
+  const policy =
+    state === 'GAIN'
+      ? 'held=true · resume'
+      : state === 'DUCK'
+        ? 'held=true · duck (el foco NO se pierde)'
+        : state === 'LOSS' || state === 'LOSS_TRANSIENT'
+          ? 'held=false · pausa + watchdog'
+          : state === 'UNKNOWN'
+            ? 'held=false · CRITICAL · pausa + watchdog (visible como UNKNOWN)'
+            : 'sin foco solicitado';
+  setText('diag-focus-state', `${state} → ${policy}`);
+  setText(
+    'diag-focus-counters',
+    `watchdog re-adquisiciones: ${info.focusReacquireCount ?? '—'} · callbacks UNKNOWN: ${info.focusUnknownCount ?? '—'}`,
+  );
+}
 
 // ── Audio: tono de prueba + servicio nativo ────────────────────────────────
 let testCtx = null;
@@ -150,15 +183,18 @@ function refreshCaps() {
     iosNeedsInstall: false,
   });
   const bridge = currentBridge();
+  const native = bridge ? bridge.getState() : null;
   const merged = mergePlatformCapabilities({
     web: probe,
-    native: bridge ? bridge.getState() : null,
+    native,
     env: { ua: navigator.userAgent, bridgePresent: !!bridge },
   });
+  const info = native && native.info ? native.info : null;
   const rows = [
     ['Notificaciones', merged.notifications.label || merged.notifications.permission, merged.notifications.provider || 'web'],
     ['Audio 2.º plano', merged.backgroundAudio.label, merged.backgroundAudio.provider || 'web'],
     ['Alarmas exactas', merged.exactAlarms.label, merged.exactAlarms.provider || 'web'],
+    ['Alarmas en el reloj del sistema', info ? `${info.alarmCount ?? 0} pendiente(s)` : '—', info ? 'android' : 'n/a'],
     ['Media Session', merged.mediaSession.label, merged.mediaSession.provider || 'web'],
     ['Wake Lock', merged.wakeLock.label, 'web'],
     ['Push', merged.push.label, 'web'],
@@ -256,6 +292,41 @@ function refreshState() {
   setText('diag-session', session);
 }
 
+// ── Navegación de la app (P4-B): historial manual del BACK ────────────────
+// GET_NAV_STATE devuelve la página actual, la pila de páginas anteriores y
+// si el BACK está habilitado. Solo aplica a la APK (bridge nativo); en la
+// web la navegación es del navegador y se declara como tal.
+function refreshNav() {
+  const bridge = currentBridge();
+  const note = $('diag-nav-note');
+  if (!bridge || typeof bridge.getNavState !== 'function') {
+    setText('diag-nav-current', '—');
+    setText('diag-nav-back', '—');
+    setText('diag-nav-stack', '—');
+    if (note) note.textContent = 'Solo en la APK (bridge nativo): en web/PWA la navegación es del navegador.';
+    return;
+  }
+  const r = bridge.getNavState();
+  let o = r && r.response;
+  if (typeof o === 'string') {
+    try {
+      o = JSON.parse(o);
+    } catch (_) {
+      o = null;
+    }
+  }
+  const d = o && o.data ? o.data : null;
+  if (!d) {
+    if (note) note.textContent = 'GET_NAV_STATE sin respuesta (bridge PENDING).';
+    return;
+  }
+  setText('diag-nav-current', d.current || 'index');
+  setText('diag-nav-back', d.backEnabled ? 'sí' : 'no (BACK cierra la app)');
+  const stack = Array.isArray(d.stack) && d.stack.length ? d.stack.join(' ← ') : 'vacío';
+  setText('diag-nav-stack', stack);
+  if (note) note.textContent = 'Historial manual gestionado por MainActivity (OnBackPressedDispatcher).';
+}
+
 // ── Plataforma / lógica ────────────────────────────────────────────────────
 function refreshPlatform() {
   const merged = refreshCaps();
@@ -272,6 +343,8 @@ function refreshPlatform() {
               bridgeStatus: native.bridgeStatus,
               version: native.version,
               focusState: native.info ? native.info.focusState : null,
+              focusReacquireCount: native.info ? native.info.focusReacquireCount : null,
+              focusUnknownCount: native.info ? native.info.focusUnknownCount : null,
               backgroundServiceActive: native.supported && native.info ? native.info.backgroundServiceActive : null,
             }
           : null,
@@ -295,8 +368,12 @@ function refreshPlatform() {
 refreshScreen();
 refreshState();
 refreshPlatform();
+refreshFocus();
+refreshNav();
 setInterval(refreshState, 1000);
 setInterval(refreshPlatform, 2000);
+setInterval(refreshFocus, 2000);
+setInterval(refreshNav, 2000);
 
 function updatePlatformUI() {
   const badge = $('platform-badge');

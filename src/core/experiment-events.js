@@ -42,6 +42,9 @@ export class ExperimentEventLog {
       type,
       payload: payload || null,
     });
+    // Sesiones muy largas: el log de eventos no debe crecer sin límite
+    // (la integridad se calcula con contadores, no con el arreglo).
+    if (this.events.length > 1000) this.events.splice(0, this.events.length - 1000);
   }
 
   /** Limpia el registro para una sesión nueva (después de stop()). */

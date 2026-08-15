@@ -18,6 +18,7 @@ import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.notifications.NotificationHelper
 import com.vyneural.bineural.permissions.PermissionManager
 import com.vyneural.bineural.util.BineuralLog
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -49,17 +50,29 @@ class AndroidBridge(
         info.put("platform", "android")
         info.put("appVersion", BuildConfig.VERSION_NAME)
         info.put("nativeAudio", true)
+        // MediaSession REAL (P1.5): supported es estático (la clase está en el
+        // APK), active/playbackState reflejan el estado REAL del servicio —
+        // nunca se declara activa una sesión que no existe.
         info.put("mediaSession", true)
-        info.put("mediaSessionActive", audioRunning)
+        info.put("mediaSessionActive", AudioForegroundService.mediaSessionActive())
+        info.put("mediaSessionPlaybackState", AudioForegroundService.mediaPlaybackState())
+        info.put("mediaSessionControls", JSONArray(listOf("play", "pause", "stop")))
         info.put("notifications", true)
         info.put("notificationPermission", permissions.notificationState())
         info.put("alarmScheduler", true)
+        // P5 — conteo REAL de alarmas pendientes (las programadas en
+        // AlarmManager y aún no disparadas); 0 no significa "sin función".
+        info.put("alarmCount", runCatching { scheduler.list().size }.getOrDefault(0))
         info.put("exactAlarms", scheduler.canScheduleExact())
         info.put("exactAlarmsGranted", scheduler.canScheduleExact())
         info.put("retuneNative", true)
         info.put("backgroundService", true)
         info.put("backgroundServiceActive", audioRunning)
         info.put("focusState", Diagnostics.focusState)
+        // P2 — política de focus visible en el diagnóstico: contadores reales
+        // del watchdog y de callbacks no reconocidos (UNKNOWN).
+        info.put("focusReacquireCount", Diagnostics.focusReacquireCount)
+        info.put("focusUnknownCount", Diagnostics.focusUnknownCount)
         info.put("fullscreen", Diagnostics.immersiveActive)
         return info.toString()
     }
@@ -78,7 +91,11 @@ class AndroidBridge(
                     val base = payload?.optDouble("base", 220.0) ?: 220.0
                     val beat = payload?.optDouble("beat", 6.0) ?: 6.0
                     val wave = payload?.optString("wave", "sine") ?: "sine"
-                    AudioForegroundService.start(context, base, beat)
+                    val title = payload?.optString("title", "Sesión Vyneural") ?: "Sesión Vyneural"
+                    // P4-D — el nivel llega en el START: el motor nativo arranca
+                    // con el volumen del usuario (no 0.6) y no hay overshoot.
+                    val level = payload?.optDouble("level", -1.0) ?: -1.0
+                    AudioForegroundService.start(context, base, beat, title, level)
                     if (wave.isNotEmpty()) AudioForegroundService.setWave(context, wave)
                     respond("OK", command, null)
                 }
@@ -118,7 +135,13 @@ class AndroidBridge(
                     val body = payload.optString("body", "Hora de tu sesión")
                     val at = payload.optLong("atMs", 0L)
                     if (id.isEmpty() || at <= 0L) return respond("INVALID", command, null)
-                    scheduler.schedule(id, title, body, at)
+                    // P5 — rutina: días de repetición (0=domingo … 6=sábado).
+                    // Vacío/ausente = una sola vez.
+                    val daysArr = payload.optJSONArray("days")
+                    val days =
+                        if (daysArr != null && daysArr.length() > 0) (0 until daysArr.length()).map { daysArr.optInt(it) }
+                        else null
+                    scheduler.schedule(id, title, body, at, days)
                     respond("OK", command, null)
                 }
                 "CANCEL_ALARM" -> {
@@ -146,6 +169,66 @@ class AndroidBridge(
                     launch?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     if (launch != null) context.startActivity(launch)
                     respond("OK", command, null)
+                }
+                "GET_AUDIO_STATE" -> {
+                    val d = JSONObject()
+                        .put("provider", "native")
+                        .put("audioActive", Diagnostics.audioActive)
+                        .put("serviceRunning", AudioForegroundService.isRunning(context))
+                        .put("focusState", Diagnostics.focusState)
+                        .put("focusReacquireCount", Diagnostics.focusReacquireCount)
+                        .put("focusUnknownCount", Diagnostics.focusUnknownCount)
+                        .put("playbackState", Diagnostics.mediaSessionPlaybackState)
+                    // P4-B — parámetros de la sesión nativa en curso: la UI web
+                    // los usa para re-sincronizarse tras navegar (nunca inventa
+                    // estado y nunca re-arranca la sesión). Leídos de la sesión
+                    // persistida por el servicio (siempre al día: cada comando
+                    // llama persistSession()).
+                    runCatching {
+                        val p = context.getSharedPreferences(AudioForegroundService.PREFS_SESSION, Context.MODE_PRIVATE)
+                        d.put("base", p.getFloat("base", 0f).toDouble())
+                        d.put("beat", p.getFloat("beat", 0f).toDouble())
+                        d.put("wave", p.getString("wave", "") ?: "")
+                        d.put("volume", p.getFloat("volume", 0.6f).toDouble())
+                        d.put("title", p.getString("title", "Sesión Vyneural") ?: "Sesión Vyneural")
+                    }
+                    respond("OK", command, d)
+                }
+                "GET_MEDIA_SESSION_STATE" -> {
+                    val d = JSONObject()
+                        .put("supported", true)
+                        .put("active", AudioForegroundService.mediaSessionActive())
+                        .put("playbackState", AudioForegroundService.mediaPlaybackState())
+                        .put("controls", JSONArray(listOf("play", "pause", "stop")))
+                    respond("OK", command, d)
+                }
+                "GET_NAV_STATE" -> {
+                    // P4-B — traza de navegación para /diagnostico: página
+                    // actual, historial manual y estado del BACK.
+                    respond("OK", command, runCatching { JSONObject(activity.navState()) }.getOrNull())
+                }
+                "OPEN_NOTIFICATION_SETTINGS" -> {
+                    // Abre los ajustes de NOTIFICACIONES de esta app (Android
+                    // 8+). Fallback: ajustes generales de la aplicación.
+                    try {
+                        val i = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(i)
+                        respond("OK", command, null)
+                    } catch (e: Exception) {
+                        BineuralLog.e("bridge", "open notif settings", e)
+                        try {
+                            val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            i.data = Uri.parse("package:${context.packageName}")
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(i)
+                            respond("OK", command, null)
+                        } catch (e2: Exception) {
+                            BineuralLog.e("bridge", "open app settings fallback", e2)
+                            respond("BRIDGE_ERROR", command, null)
+                        }
+                    }
                 }
                 "OPEN_SETTINGS" -> {
                     try {
