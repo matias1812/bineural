@@ -25,6 +25,7 @@ import {
   showSwNotification,
   showLocalNotification,
   isIos,
+  isStandalone,
 } from './notifications.js';
 import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
 import { createNotificationManager } from './core/notification-manager.js';
