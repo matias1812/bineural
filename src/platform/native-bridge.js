@@ -34,6 +34,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'SAVE_ICS',
   'SET_WAVE',
   'SET_AUDIO_LEVEL',
+  'RETUNE_BACKGROUND_AUDIO',
 ]);
 
 /**
@@ -180,6 +181,7 @@ export function createNativeBridgeAdapter(env = {}) {
     stopBackgroundAudio: () => send('STOP_BACKGROUND_AUDIO'),
     pauseBackgroundAudio: () => send('PAUSE_BACKGROUND_AUDIO'),
     resumeBackgroundAudio: () => send('RESUME_BACKGROUND_AUDIO'),
+    retuneBackgroundAudio: (payload) => send('RETUNE_BACKGROUND_AUDIO', payload),
     setWave: (wave) => send('SET_WAVE', typeof wave === 'string' ? { wave } : null),
     setAudioLevel: (level) => send('SET_AUDIO_LEVEL', typeof level === 'object' && level !== null ? level : null),
 
@@ -215,6 +217,7 @@ export function createNativeBridgeAdapter(env = {}) {
           exactAlarms: !!info && !!info.exactAlarms,
           nativeAudio: !!info && !!info.nativeAudio,
           notifications: !!info && !!info.notifications,
+          retuneNative: !!info && !!info.retuneNative,
         },
       };
     },

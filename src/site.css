@@ -103,6 +103,26 @@ a:hover {
   box-shadow: 0 0 18px rgba(167, 139, 250, 0.35);
 }
 
+.platform-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: -2px;
+  margin-top: -8px;
+  text-transform: uppercase;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
+}
+
+.platform-badge.pwa {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
 .site-links {
   display: flex;
   align-items: center;

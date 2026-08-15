@@ -30,12 +30,19 @@ class AlarmScheduler(private val context: Context) {
             .put("body", body)
             .put("at", atMs)
         prefs.edit().putString(alarmId, record.toString()).apply()
-        val trigger = if (atMs < System.currentTimeMillis()) System.currentTimeMillis() + 1000 else atMs
+
+        val now = System.currentTimeMillis()
+        if (atMs <= now) {
+            // Alarma vencida: descartar para evitar ráfagas tras reinicio o retardo.
+            prefs.edit().remove(alarmId).apply()
+            return
+        }
+
         val pi = pendingIntent(alarmId)
         if (canScheduleExact()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, pi)
         } else {
-            am.setWindow(AlarmManager.RTC_WAKEUP, trigger, 60_000L, pi)
+            am.setWindow(AlarmManager.RTC_WAKEUP, atMs, 60_000L, pi)
         }
     }
 

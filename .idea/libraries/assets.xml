@@ -1,0 +1,14 @@
+<component name="libraryTable">
+  <library name="assets">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/site-BNFCtiLl.css.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/diagnostico-BPTczK-S.js.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/main-DsD_mSOh.js.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/site-BWqbQ6LJ.js.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/main-BVJ5mY3W.css.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/assets/notifications-_WwxTaCk.js.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

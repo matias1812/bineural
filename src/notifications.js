@@ -66,6 +66,20 @@ export function iosNeedsInstall() {
 }
 
 export async function requestPermission() {
+  // 1. Prioridad: Bridge Nativo (APK Android)
+  // El bridge nativo (Fase 10) permite distinguir DENIED de DENIED_PERMANENTLY
+  // y reaccionar con un botón a Ajustes.
+  if (typeof window !== 'undefined' && window.AndroidBridge && typeof window.AndroidBridge.postMessage === 'function') {
+    try {
+      const res = window.AndroidBridge.postMessage(JSON.stringify({ command: 'REQUEST_NOTIFICATION_PERMISSION' }));
+      // El bridge responde OK si lanzó la petición; el resultado real llega
+      // por getPlatformInfo() en el siguiente tick.
+      if (res && (res.status === 'OK' || res.status === 'PENDING')) return 'pending';
+    } catch (e) {
+      /* fallback a Notification API web */
+    }
+  }
+
   if (!notificationSupported()) return 'unsupported';
   if (Notification.permission === 'granted') return 'granted';
   if (Notification.permission === 'denied') return 'denied';

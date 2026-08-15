@@ -77,6 +77,22 @@ simulation.audio.transport = new AudioTransport({ isIos: isIos() });
 const nativeBridge = createNativeBridgeAdapter();
 window.__nativeBridge = nativeBridge;
 
+function updatePlatformUI() {
+  const badge = document.getElementById('platform-badge');
+  if (!badge) return;
+  const caps = mergedCapabilities();
+  if (caps.native) {
+    badge.textContent = 'APK';
+    badge.classList.remove('hidden', 'pwa');
+  } else if (isStandalone()) {
+    badge.textContent = 'PWA';
+    badge.classList.remove('hidden');
+    badge.classList.add('pwa');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
 // ── Sincronización con el servicio de audio nativo (APK) ────────────────────
 // En la APK el servicio foreground (con audio focus + notificación de
 // control) es el transporte persistente: la WebView le manda base/beat/onda
@@ -113,7 +129,14 @@ function syncNativeAudioRetune() {
   const b = nativeAudio();
   if (!b) return;
   const p = currentParams();
-  b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
+  // P1 stability: si el bridge soporta retuneNative, lo usamos para evitar
+  // re-solicitar audio focus en cada movimiento del slider (causa de clicks).
+  if (b.retuneBackgroundAudio && b.getState().supported.retuneNative) {
+    b.retuneBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
+  } else {
+    // Fallback APK vieja: re-start (provocará clicks pero mantiene sync).
+    b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
+  }
 }
 function syncNativeAudioStop() {
   const b = nativeAudio();
@@ -1969,7 +1992,14 @@ if (moreBtn && moreMenu) {
     if (!item) return;
     closeMoreMenu();
     const action = item.dataset.action;
-    if (action === 'hud') {
+    if (action === 'fps') {
+      const hud = byId('hud');
+      if (hud) {
+        const collapsed = hud.classList.contains('collapsed');
+        hud.classList.toggle('collapsed', !collapsed);
+        lsSet(LS_HUD, collapsed);
+      }
+    } else if (action === 'hud') {
       if (simulation) simulation.hud.toggleVisible();
     } else if (action === 'experiment') {
       openExperiment();
@@ -2293,12 +2323,37 @@ function renderPermissionState() {
     permPlatform.textContent = isNative ? `Android (bridge v${nativeBridge.getState().version || '?'})` : 'Web / PWA';
     permPlatform.className = 'perm-state ok';
   }
+  // Diferencias de plataforma en el cuadro informativo.
+  const pdbAudio = document.getElementById('pdb-audio');
+  const pdbAlarms = document.getElementById('pdb-alarms');
+  const pdbNotif = document.getElementById('pdb-notif');
+  if (pdbAudio) {
+    pdbAudio.innerHTML = isNative
+      ? 'APK: Foreground Service ✓<br>Audio estable en background'
+      : 'Web: Limitado<br>Requiere pestaña abierta';
+  }
+  if (pdbAlarms) {
+    pdbAlarms.innerHTML = isNative
+      ? 'APK: Scheduler del SO ✓<br>Funcionan con la app cerrada'
+      : 'Web: Solo app abierta<br>Respaldo: Calendario';
+  }
+  if (pdbNotif) {
+    pdbNotif.innerHTML = isNative
+      ? 'APK: Locales nativas ✓<br>Sin necesidad de servidor'
+      : 'Web: Web Push<br>Requiere backend (inactivo)';
+  }
+
   // Fila Push: sin backend no puede funcionar; se muestra honestamente.
   const permPush = document.getElementById('perm-push');
   if (permPush) {
     permPush.textContent = caps.push.label;
     permPush.className = 'perm-state warn';
   }
+  const permTest = document.getElementById('perm-test');
+  if (permTest) {
+    permTest.classList.toggle('hidden', !isNative);
+  }
+
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
@@ -2326,6 +2381,13 @@ if (permissionsModal) {
     lsSet(LS_PERM_DISABLED, true);
     renderPermissionState();
   });
+  const btnTest = document.getElementById('perm-test');
+  if (btnTest) {
+    btnTest.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.testNotification) b.testNotification();
+    });
+  }
 }
 
 // Pantalla táctil (móvil/tableta): el visualizador limita su resolución y
@@ -3509,7 +3571,7 @@ function buildHud() {
   if (hudEl || !document.body) return;
   const wrap = document.createElement('div');
   wrap.id = 'hud';
-  wrap.className = 'hud' + (lsGet(LS_HUD, true) ? '' : ' collapsed');
+  wrap.className = 'hud' + (lsGet(LS_HUD, false) ? '' : ' collapsed');
   wrap.innerHTML = `
     <button class="hud-close" aria-label="Cerrar HUD">✕</button>
     <div class="hud-title">HUD · <span id="hud-lifecycle">…</span></div>
@@ -3592,6 +3654,11 @@ document.addEventListener('keydown', (e) => {
     if (simulation) simulation.toggleScientificMode();
   }
 });
+
+updatePlatformUI();
+// Re-check after a bit in case the bridge was injected late (onPageFinished).
+setTimeout(updatePlatformUI, 1000);
+setTimeout(updatePlatformUI, 3000);
 
 if (document.readyState === 'complete') hideLoader();
 else window.addEventListener('load', hideLoader);

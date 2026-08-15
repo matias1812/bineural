@@ -28,14 +28,20 @@ class AudioForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        val action = intent?.action
+        if (action != null) {
+            // Asegurar que siempre llamamos a startForeground si usamos startForegroundService
+            // o si el sistema lo requiere (P1 stability).
+            startForegroundCompat()
+        }
+
+        when (action) {
             ACTION_START -> {
                 val base = intent.getDoubleExtra(EXTRA_BASE, 220.0)
                 val beat = intent.getDoubleExtra(EXTRA_BEAT, 6.0)
                 engine.retune(base, beat)
                 focus?.request()
                 engine.start()
-                startForegroundCompat()
                 running = true
                 Diagnostics.audioActive = true
             }
@@ -138,41 +144,41 @@ class AudioForegroundService : Service() {
         }
 
         fun pause(context: Context) {
-            context.startService(Intent(context, AudioForegroundService::class.java).setAction(ACTION_PAUSE))
+            val i = Intent(context, AudioForegroundService::class.java).setAction(ACTION_PAUSE)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun resume(context: Context) {
-            context.startService(Intent(context, AudioForegroundService::class.java).setAction(ACTION_RESUME))
+            val i = Intent(context, AudioForegroundService::class.java).setAction(ACTION_RESUME)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun retune(context: Context, base: Double, beat: Double, wave: String? = null) {
-            context.startService(
-                Intent(context, AudioForegroundService::class.java)
-                    .setAction(ACTION_FREQ)
-                    .putExtra(EXTRA_BASE, base)
-                    .putExtra(EXTRA_BEAT, beat)
-                    .putExtra(EXTRA_WAVE, wave ?: ""),
-            )
+            val i = Intent(context, AudioForegroundService::class.java)
+                .setAction(ACTION_FREQ)
+                .putExtra(EXTRA_BASE, base)
+                .putExtra(EXTRA_BEAT, beat)
+                .putExtra(EXTRA_WAVE, wave ?: "")
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun setWave(context: Context, wave: String) {
-            context.startService(
-                Intent(context, AudioForegroundService::class.java)
-                    .setAction(ACTION_WAVE)
-                    .putExtra(EXTRA_WAVE, wave),
-            )
+            val i = Intent(context, AudioForegroundService::class.java)
+                .setAction(ACTION_WAVE)
+                .putExtra(EXTRA_WAVE, wave)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun setVolume(context: Context, level: Double) {
-            context.startService(
-                Intent(context, AudioForegroundService::class.java)
-                    .setAction(ACTION_VOLUME)
-                    .putExtra(EXTRA_LEVEL, level),
-            )
+            val i = Intent(context, AudioForegroundService::class.java)
+                .setAction(ACTION_VOLUME)
+                .putExtra(EXTRA_LEVEL, level)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun stop(context: Context) {
-            context.startService(Intent(context, AudioForegroundService::class.java).setAction(ACTION_STOP))
+            val i = Intent(context, AudioForegroundService::class.java).setAction(ACTION_STOP)
+            context.startService(i) // Stop no necesita ser foreground service start
         }
 
         fun isRunning(context: Context): Boolean {

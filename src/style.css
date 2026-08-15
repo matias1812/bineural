@@ -3448,6 +3448,44 @@ body.immersive .controls {
   margin-top: 16px;
 }
 
+.perm-diff-box {
+  background: rgba(167, 139, 250, 0.05);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.pdb-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+
+.pdb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pdb-item {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pdb-item b {
+  display: block;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.pdb-item span {
+  color: var(--text-dim);
+}
+
 .perm-actions .quick-start {
   flex: 1;
 }
@@ -3463,6 +3501,25 @@ body.immersive .controls {
   cursor: pointer;
   font-size: 13px;
   transition: all 0.2s ease;
+}
+
+.perm-test {
+  flex: 1;
+  appearance: none;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.perm-test:hover {
+  background: rgba(167, 139, 250, 0.2);
 }
 
 .perm-off:hover {

@@ -1,0 +1,12 @@
+<component name="libraryTable">
+  <library name="assets2">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/debug/out/assets/bineural/assets/site-Ci6o-NpZ.css.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/debug/out/assets/bineural/assets/main-B76zkxYJ.css.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/debug/out/assets/bineural/assets/main-CtG7TdOb.js.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/debug/out/assets/bineural/assets/site-Bat6UMRX.js.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

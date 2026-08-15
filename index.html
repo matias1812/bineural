@@ -101,6 +101,7 @@
       <a class="site-brand" href="/">
         <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
         Vyneural
+        <span id="platform-badge" class="platform-badge hidden">APK</span>
       </a>
       <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
       <nav class="site-links" id="site-links" aria-label="Navegación principal">
@@ -189,9 +190,13 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
         </button>
         <div id="more-menu" class="more-menu hidden" role="menu" aria-label="Más opciones">
+          <button type="button" class="more-item" data-action="fps" role="menuitem">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+            <span>Rendimiento y FPS<small>Monitor de cuadros y memoria</small></span>
+          </button>
           <button type="button" class="more-item" data-action="hud" role="menuitem">
             <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            <span>Panel Bineural Engine<small>HUD científico (simulado/estimado)</small></span>
+            <span>Panel Científico (EEG)<small>Variables internas del modelo</small></span>
           </button>
           <button type="button" class="more-item" data-action="experiment" role="menuitem">
             <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.5L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
@@ -616,6 +621,24 @@
           Vyneural usa estos permisos para seguir sonando limpio fuera de la app
           (pantalla bloqueada o en segundo plano) y para avisarte de los recordatorios.
         </p>
+
+        <div class="perm-diff-box" id="perm-diff-box">
+          <div class="pdb-title">Diferencias de plataforma</div>
+          <div class="pdb-grid">
+            <div class="pdb-item">
+              <b>Audio Background</b>
+              <span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span>
+            </div>
+            <div class="pdb-item">
+              <b>Alarmas</b>
+              <span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span>
+            </div>
+            <div class="pdb-item">
+              <b>Notificaciones</b>
+              <span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span>
+            </div>
+          </div>
+        </div>
         <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
         <div class="perm-row"><span>Notificaciones</span><b id="perm-notif" class="perm-state">—</b></div>
         <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
@@ -625,6 +648,7 @@
         <div class="perm-actions">
           <button id="perm-on" class="quick-start">Activar permisos</button>
           <button id="perm-off" class="perm-off">Desactivar</button>
+          <button id="perm-test" class="perm-test hidden">Probar notificación</button>
         </div>
         <p id="perm-note" class="perm-note"></p>
       </div>

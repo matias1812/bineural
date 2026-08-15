@@ -25,6 +25,7 @@ object BridgeCommands {
         "SAVE_ICS",
         "SET_WAVE",
         "SET_AUDIO_LEVEL",
+        "RETUNE_BACKGROUND_AUDIO",
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

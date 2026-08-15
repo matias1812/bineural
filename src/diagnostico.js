@@ -297,3 +297,23 @@ refreshState();
 refreshPlatform();
 setInterval(refreshState, 1000);
 setInterval(refreshPlatform, 2000);
+
+function updatePlatformUI() {
+  const badge = $('platform-badge');
+  if (!badge) return;
+  const bridge = currentBridge();
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (bridge) {
+    badge.textContent = 'APK';
+    badge.classList.remove('hidden', 'pwa');
+  } else if (isStandalone) {
+    badge.textContent = 'PWA';
+    badge.classList.remove('hidden');
+    badge.classList.add('pwa');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+updatePlatformUI();
+setTimeout(updatePlatformUI, 1000);
+setTimeout(updatePlatformUI, 3000);

@@ -45,6 +45,7 @@ class AudioFocusHelper(
     }
 
     fun request() {
+        if (Diagnostics.focusState == "GAIN") return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val r = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(

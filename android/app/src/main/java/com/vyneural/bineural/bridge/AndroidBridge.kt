@@ -56,6 +56,7 @@ class AndroidBridge(
         info.put("alarmScheduler", true)
         info.put("exactAlarms", scheduler.canScheduleExact())
         info.put("exactAlarmsGranted", scheduler.canScheduleExact())
+        info.put("retuneNative", true)
         info.put("backgroundService", true)
         info.put("backgroundServiceActive", audioRunning)
         info.put("focusState", Diagnostics.focusState)
@@ -79,6 +80,14 @@ class AndroidBridge(
                     val wave = payload?.optString("wave", "sine") ?: "sine"
                     AudioForegroundService.start(context, base, beat)
                     if (wave.isNotEmpty()) AudioForegroundService.setWave(context, wave)
+                    respond("OK", command, null)
+                }
+                "RETUNE_BACKGROUND_AUDIO" -> {
+                    val base = payload?.optDouble("base", 220.0) ?: 220.0
+                    val beat = payload?.optDouble("beat", 6.0) ?: 6.0
+                    val wave = payload?.optString("wave", "") ?: ""
+                    val w: String? = if (wave.isNotEmpty()) wave else null
+                    AudioForegroundService.retune(context, base, beat, w)
                     respond("OK", command, null)
                 }
                 "SET_WAVE" -> {
@@ -171,7 +180,8 @@ class AndroidBridge(
                     val name = payload?.optString("fileName", "vyneural-recordatorio.ics") ?: "vyneural-recordatorio.ics"
                     val content = payload?.optString("content", "") ?: ""
                     if (content.isEmpty()) return respond("INVALID", command, null)
-                    val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "vyneural-recordatorio.ics" }
+                    val replaced = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    val safeName = if (replaced.isEmpty()) "vyneural-recordatorio.ics" else replaced
                     try {
                         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                         val file = File(dir, safeName)

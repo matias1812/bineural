@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="icons2">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/icons/icon-180.png.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/icons/icon-192.png.jar!/" />
+      <root url="jar://$PROJECT_DIR$/android/app/build/intermediates/compressed_assets/release/out/assets/bineural/icons/icon-512.png.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
