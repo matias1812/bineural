@@ -153,7 +153,20 @@ function build() {
 }
 
 // ─────────────────────────────────────────────────────────────────── Comportamiento
+// API estable para que otras páginas (p. ej. el menú ⋯ del generador) abran
+// el modal de reporte sin depender del botón flotante. La burbuja se oculta en
+// pantalla completa vía CSS (html:fullscreen / body.immersive), y el acceso
+// queda disponible desde el menú de los 3 puntos.
+let __api = null;
+export function bugReportApi() {
+  if (__api) return __api;
+  return null;
+}
+
 export function initBugReport() {
+  // Doble inicialización (p. ej. si main.js llegara a importar el módulo):
+  // la burbuja/modal solo se construyen UNA vez por página.
+  if (__api) return __api;
   const { fab, modal } = build();
   const form = modal.querySelector('#bug-form');
   const status = modal.querySelector('#bug-status');
@@ -177,6 +190,10 @@ export function initBugReport() {
     document.body.classList.remove('bug-modal-open');
     fab.focus();
   }
+
+  // Exponer la API (open/close) para el menú ⋯ y para integraciones.
+  __api = { open, close, fab };
+  window.__bugReport = __api;
 
   fab.addEventListener('click', open);
   closeBtn.addEventListener('click', close);

@@ -895,6 +895,14 @@ kbd {
   display: none !important;
 }
 
+/* En pantalla completa (real o modo CSS immersive) la burbuja flotante se
+   guarda en el menú ⋯ del generador: no flota sobre la vista inmersiva. */
+html:fullscreen .bug-fab,
+html:-webkit-full-screen .bug-fab,
+body.immersive .bug-fab {
+  display: none;
+}
+
 .bug-fab {
   position: fixed;
   right: 20px;

@@ -28,6 +28,12 @@ export class BinauralEngine {
     // ritmo; noise = ruido sin contenido tonal; none = silencio (control).
     this._condition = 'binaural';
     this._playing = false;
+    // P5.6 — frontera estructural de plataforma: en la APK el motor web es
+    // PERMANENTEMENTE inaudible (el servicio nativo es el único owner). Con
+    // `_platformMuted` activo, NINGUNA operación de ganancia (start,
+    // setCondition, setVolume, fadeTo, recoverFade) puede subir el volumen:
+    // el motor sigue corriendo solo para el visualizador (model-driven).
+    this._platformMuted = false;
     // P1 — instrumentación forense (M2): identificador de sesión de pipeline y
     // secuencia de ids por fuente, para demostrar que nunca coexisten dos
     // sets de fuentes. `_pendingTeardown` registra los nodos cuyo teardown se
@@ -126,6 +132,15 @@ export class BinauralEngine {
     } catch (_) {
       /* contexto cerrado */
     }
+    // P5.6 — frontera APK: la web jamás se recupera hacia lo audible.
+    if (this._platformMuted) {
+      try {
+        this.masterGain.gain.setValueAtTime(0, now);
+      } catch (_) {
+        /* contexto cerrado */
+      }
+      return;
+    }
     this.resume();
     if (wasSuspended) {
       // Rampa desde el piso: el fade de entrada enmascara la reanudación.
@@ -177,7 +192,9 @@ export class BinauralEngine {
       this._condition === cond
     ) {
       this._volume = volume;
-      if (this.transport && this.transport.element && this.transport.element.paused) {
+      // P5.6 — en APK (platformMuted) un start duplicado jamás re-produce el
+      // elemento web: el SO ya ve la reproducción del servicio nativo.
+      if (!this._platformMuted && this.transport && this.transport.element && this.transport.element.paused) {
         this.transport.play();
       }
       return { idempotent: true, sessionId: this._sessionId };
@@ -199,18 +216,28 @@ export class BinauralEngine {
     this._createSources(base, beat, wave);
     // En modo 'element', arranca el elemento real dentro del gesto de play:
     // es ÉL el que el SO ve como reproducción (MediaSession, audio focus).
-    if (this.transport) this.transport.play();
+    // P5.6 — en modo APK (platformMuted) el transporte web queda pausado: el
+    // SO ve una sola reproducción, la del servicio nativo.
+    if (this.transport) {
+      if (this._platformMuted) this.transport.pause();
+      else this.transport.play();
+    }
     // Volumen objetivo de la sesión (para restauraciones y el watchdog de audio).
     this._volume = volume;
     // Época del primer latido: el primer pulso del timer se dispara a +100 ms.
     this._epoch = ctx.currentTime + 0.1;
     this.clock.setEpoch(this._epoch);
 
-    // Fundido de entrada para un inicio suave.
+    // Fundido de entrada para un inicio suave. P5.6 — en APK no hay fundido:
+    // la ganancia queda en 0 (el sonido real lo genera el servicio nativo).
     const now = ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
-    this.masterGain.gain.linearRampToValueAtTime(volume, now + 1.2);
+    if (this._platformMuted) {
+      this.masterGain.gain.setValueAtTime(0, now);
+    } else {
+      this.masterGain.gain.linearRampToValueAtTime(volume, now + 1.2);
+    }
 
     this._startPulse();
   }
@@ -336,7 +363,13 @@ export class BinauralEngine {
     const t1 = now + 0.12;
     try {
       this.masterGain.gain.setValueAtTime(0.0001, t1);
-      this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, vol), t1 + 0.3);
+      // P5.6 — en APK el crossfade baja pero jamás sube: la web es inaudible
+      // por frontera (el estímulo real lo cambia el servicio nativo con RETUNE).
+      if (this._platformMuted) {
+        this.masterGain.gain.setValueAtTime(0, t1);
+      } else {
+        this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, vol), t1 + 0.3);
+      }
     } catch (_) {
       /* contexto cerrado */
     }
@@ -398,13 +431,36 @@ export class BinauralEngine {
     });
   }
 
+  /** P5.6 — frontera APK: marca el motor como inaudible por plataforma. Al
+   *  activarlo fuerza la ganancia a 0 y pausa el transporte al instante;
+   *  mientras esté activo, ninguna operación puede volverlo audible. */
+  setPlatformMuted(muted) {
+    this._platformMuted = muted;
+    if (!muted) return;
+    if (this.ctx && this.masterGain) {
+      try {
+        const now = this.ctx.currentTime;
+        this.masterGain.gain.cancelScheduledValues(now);
+        this.masterGain.gain.setValueAtTime(0, now);
+      } catch (_) {
+        /* contexto cerrado */
+      }
+    }
+    if (this.transport) this.transport.pause();
+  }
+
   setVolume(v) {
     this._volume = v;
     if (!this.ctx || !this.masterGain) return;
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
-    this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
+    // P5.6 — en APK el volumen real lo aplica el servicio nativo; la web 0.
+    if (this._platformMuted) {
+      this.masterGain.gain.setValueAtTime(0, now);
+    } else {
+      this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
+    }
   }
 
   // Fundido suave del volumen maestro a un nivel dado (0…1). Se usa al pasar
@@ -416,7 +472,12 @@ export class BinauralEngine {
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
-    this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, v), now + seconds);
+    // P5.6 — en APK un fade jamás sube (la web es inaudible por frontera).
+    if (this._platformMuted) {
+      this.masterGain.gain.setValueAtTime(0, now);
+    } else {
+      this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, v), now + seconds);
+    }
   }
 
   // Reajusta las frecuencias en marcha con una transición suave (ramp),

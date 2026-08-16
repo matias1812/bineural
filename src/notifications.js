@@ -92,13 +92,26 @@ export async function requestPermission() {
 
 // ---------------------------------------------------------------- Deep link de la alarma
 // https://vyneural.cl/?freq={base}&beat={ritmo}&wave={onda}&autostart=true
-export function getAlarmDeepLink(alarm) {
+// Origen/path base sin tocar location: en el navegador `location` no se puede
+// reemplazar y en Node no existe. El parámetro explícito manda cuando se pasa
+// (tests headless y en navegador); si no, se usa location real y como último
+// recurso la referencia de producción.
+function baseOrigin(origin) {
+  if (origin !== undefined && origin !== null) return origin;
+  return typeof location !== 'undefined' ? location.origin : 'https://vyneural.cl';
+}
+function basePathname(pathname) {
+  if (pathname !== undefined && pathname !== null) return pathname;
+  return typeof location !== 'undefined' ? location.pathname : '/';
+}
+
+export function getAlarmDeepLink(alarm, origin, pathname) {
   const p = new URLSearchParams();
   p.set('freq', String(Math.round(alarm.freq * 10) / 10));
   p.set('beat', String(Math.round(alarm.beat * 10) / 10));
   if (alarm.wave && alarm.wave !== 'sine') p.set('wave', alarm.wave);
   p.set('autostart', 'true');
-  return `${location.origin}${location.pathname}?${p.toString()}`;
+  return `${baseOrigin(origin)}${basePathname(pathname)}?${p.toString()}`;
 }
 
 // ---------------------------------------------------------------- Notificación
@@ -279,7 +292,7 @@ function fmtGCal(d) {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}00`;
 }
 
-export function buildGoogleCalendarUrl(alarm) {
+export function buildGoogleCalendarUrl(alarm, origin) {
   const start = new Date(alarm.nextAt);
   const mins = alarm.minutes > 0 ? alarm.minutes : 60;
   const end = new Date(start.getTime() + mins * 60000);
@@ -287,8 +300,8 @@ export function buildGoogleCalendarUrl(alarm) {
     action: 'TEMPLATE',
     text: `Sesión de ondas binaurales en Vyneural (${Math.round(alarm.freq)} Hz)`,
     dates: `${fmtGCal(start)}/${fmtGCal(end)}`,
-    details: `Inicia tu sesión de ${Math.round(alarm.freq)} Hz en Vyneural:\n${getAlarmDeepLink(alarm)}`,
-    location: location.origin,
+    details: `Inicia tu sesión de ${Math.round(alarm.freq)} Hz en Vyneural:\n${getAlarmDeepLink(alarm, origin)}`,
+    location: baseOrigin(origin),
   });
   // Rutina recurrente → el evento se repite semanalmente en los días elegidos.
   const rrule = rruleFor(alarm.days);
@@ -300,7 +313,7 @@ function escIcs(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 }
 
-export function buildIcs(alarm) {
+export function buildIcs(alarm, origin) {
   const start = new Date(alarm.nextAt);
   const mins = alarm.minutes > 0 ? alarm.minutes : 60;
   const end = new Date(start.getTime() + mins * 60000);
@@ -322,7 +335,7 @@ export function buildIcs(alarm) {
     // P2 (FASE 10): LOCATION y SEQUENCE explícitos (RFC 5545). UID estable por
     // alarma → un evento solo puede descargarse una vez (el mismo evento
     // re-generado tiene el mismo UID; los calendarios lo deduplican).
-    `LOCATION:${escIcs(location.origin)}`,
+    `LOCATION:${escIcs(baseOrigin(origin))}`,
     'SEQUENCE:0',
     'END:VEVENT',
     'END:VCALENDAR',

@@ -26,8 +26,13 @@ object NotificationHelper {
     // cambió el ID para que las instalaciones existentes reciban el canal nuevo
     // (con vibración) en lugar de heredar el viejo sin ella.
     const val CHANNEL_ALARMS = "bineural_alarms_v2"
+    // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
+    // vibración) para avisar que el temporizador terminó. Canal propio para
+    // no mezclarse con el reproductor ni con las alarmas.
+    const val CHANNEL_SESSION_END = "bineural_session_end"
     private const val NOTIF_PLAYER = 1001
     private const val NOTIF_ALARM = 2001
+    private const val NOTIF_SESSION_END = 2002
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -46,6 +51,13 @@ object NotificationHelper {
                 description = "Recordatorios de sesión (con vibración)"
                 enableVibration(true)
                 setVibrationPattern(VIBRATION_ALARM)
+            },
+        )
+        // M1 — fin de sesión: aviso suave (sonido del sistema, sin vibración).
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_SESSION_END, "Fin de sesión", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Aviso de que la sesión terminó"
+                setShowBadge(false)
             },
         )
     }
@@ -139,5 +151,34 @@ object NotificationHelper {
         }
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ALARM, alarmNotification(context, title, body))
+    }
+
+    /**
+     * M1 — fin de sesión nativo (id 2002, canal `bineural_session_end`): avisa
+     * que el temporizador terminó aunque la WebView esté en segundo plano (la
+     * web no puede mostrar new Notification() dentro del WebView). Toca la
+     * notificación para volver a la app. Respeta POST_NOTIFICATIONS (Android 13+).
+     */
+    fun showSessionEnd(context: Context, title: String, body: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context, 10, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_SESSION_END)
+            .setSmallIcon(R.drawable.ic_stat_bineural)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_SESSION_END, n)
     }
 }

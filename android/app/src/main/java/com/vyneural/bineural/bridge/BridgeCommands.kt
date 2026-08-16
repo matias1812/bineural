@@ -30,6 +30,7 @@ object BridgeCommands {
         "GET_MEDIA_SESSION_STATE",
         "GET_NAV_STATE",
         "OPEN_NOTIFICATION_SETTINGS",
+        "SESSION_END", // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

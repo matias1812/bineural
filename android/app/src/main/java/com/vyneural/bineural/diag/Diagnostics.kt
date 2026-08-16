@@ -52,6 +52,27 @@ object Diagnostics {
     @Volatile
     var lastError: String? = null
 
+    // ── P5.4 — instrumentación causal ─────────────────────────────────────────
+    // Cada comando, cambio de focus y restart queda en un anillo con timestamp:
+    // si "se activa sola", la traza dice EXACTAMENTE qué componente emitió el
+    // primer PLAY (y su generación de servicio).
+    private val causalRing = java.util.ArrayDeque<String>()
+    private const val MAX_CAUSAL = 80
+
+    /** Generación del servicio (++ en cada onCreate): identifica recreaciones. */
+    @Volatile
+    var serviceStartId: Long = 0L
+
+    @Synchronized
+    fun trace(kind: String, detail: String) {
+        val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        causalRing.addLast("[${ts}] gen=${serviceStartId} [$kind] $detail")
+        while (causalRing.size > MAX_CAUSAL) causalRing.removeFirst()
+    }
+
+    @Synchronized
+    fun causalLog(): List<String> = causalRing.toList()
+
     /** Texto legible de la pantalla de diagnóstico. */
     fun snapshot(context: Context): String {
         val b = StringBuilder()
@@ -68,6 +89,7 @@ object Diagnostics {
         b.appendLine("  Audio active: $audioActive")
         b.appendLine("  Focus: $focusState (re-adquisiciones del watchdog: $focusReacquireCount, callbacks UNKNOWN: $focusUnknownCount)")
         b.appendLine("  MediaSession: ${if (mediaSessionActive) "ACTIVE" else "INACTIVE"} ($mediaSessionPlaybackState)")
+        b.appendLine("  Service generation: $serviceStartId")
         b.appendLine()
         b.appendLine("NOTIFICATIONS:")
         val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -86,6 +108,9 @@ object Diagnostics {
         b.appendLine("  Next: ${s.nextAt()?.let { java.text.DateFormat.getDateTimeInstance().format(it) } ?: "—"}")
         b.appendLine()
         b.appendLine("LAST ERROR: ${lastError ?: "—"}")
+        b.appendLine()
+        b.appendLine("CAUSAL TRACE (últimas ${causalLog().size}):")
+        causalLog().forEach { b.appendLine("  $it") }
         return b.toString()
     }
 

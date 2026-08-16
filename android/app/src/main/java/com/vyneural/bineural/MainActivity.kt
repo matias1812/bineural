@@ -67,7 +67,11 @@ class MainActivity : ComponentActivity() {
         val s = webView.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
-        s.mediaPlaybackRequiresUserGesture = false
+        // P3 — P5.1: el WebView NO puede iniciar reproducción de medios sin un
+        // gesto del usuario. En la APK el audio real pertenece al servicio
+        // nativo (la WebView solo dibuja: su motor queda mudo y su <audio>
+        // pausado). Cero autoplay → una vía menos de reproducción espontánea.
+        s.mediaPlaybackRequiresUserGesture = true
         s.allowFileAccess = true
         s.useWideViewPort = true
         // Los módulos ES del build de Vite se cargan en modo CORS y el origen

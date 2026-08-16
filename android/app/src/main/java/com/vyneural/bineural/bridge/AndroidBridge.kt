@@ -256,6 +256,15 @@ class AndroidBridge(
                     NotificationHelper.showAlarm(context, "Vyneural · Prueba", "Notificaciones funcionando (diagnóstico).")
                     respond("OK", command, null)
                 }
+                // M1 — fin de sesión nativo: cuando el temporizador web termina con la
+                // app en segundo plano, la WebView no puede mostrar new Notification();
+                // la notificación REAL la publica el sistema (id propio, canal propio).
+                "SESSION_END" -> {
+                    val title = payload?.optString("title", "Vyneural") ?: "Vyneural"
+                    val body = payload?.optString("body", "Tu sesión ha terminado.") ?: "Tu sesión ha terminado."
+                    NotificationHelper.showSessionEnd(context, title, body)
+                    respond("OK", command, null)
+                }
                 "SAVE_ICS" -> {
                     // Guarda el .ics del recordatorio en Descargas. El DownloadManager
                     // no puede bajar blob: URLs (son internas del renderer), así que

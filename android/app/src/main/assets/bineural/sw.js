@@ -2,7 +2,7 @@
 // Estrategia: cache-first con revalidación en segundo plano para los assets
 // estáticos (los nombres llevan hash, así un deploy nuevo trae URLs nuevas),
 // y red-al-cache para las navegaciones (con fallback al index).
-const CACHE = 'vyneural-v2';
+const CACHE = 'vyneural-v3';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -70,18 +70,24 @@ self.addEventListener('fetch', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const data = (e.notification.data && e.notification.data.url) || '/';
+  const ndata = e.notification.data || {};
   const action = e.action || '';
   // 'dismiss' se usa solo para descartar (la notificación ya se cerró).
   if (action === 'dismiss') return;
 
-  let target = data;
+  // Acciones específicas (abrir frecuencia/itinerario/alarma) apuntan a su URL.
+  let target = ndata.url || '/';
+  if (action && ndata.actions && ndata.actions[action]) {
+    target = ndata.actions[action];
+  }
   if (action === 'start') {
     // El deep link ya lleva autostart=true; se garantiza por si llegó sin él.
-    const u = new URL(data, self.location.origin);
+    const u = new URL(target, self.location.origin);
     u.searchParams.set('autostart', 'true');
     target = u.href;
   }
+  // Abrir la UI NO inicia audio automáticamente: el arranque exige gesto
+  // del usuario en la página (autostart solo prepara la interfaz).
 
   e.waitUntil(
     self.clients
@@ -116,8 +122,14 @@ self.addEventListener('notificationclose', (e) => {
 // ── Web Push (P1) ───────────────────────────────────────────────────────────
 // Recibe un push enviado por un backend y muestra la notificación. Sin
 // backend configurado este handler nunca se dispara; la UI lo declara
-// honestamente ("No configurado — requiere servidor"). El payload esperado:
+// honestamente. La página informa al SW si el backend está configurado
+// (mensaje PUSH_CONFIG). El payload esperado:
 // { title, body, url, tag, actions }.
+//
+// REGLA DE ORO: una notificación push NUNCA reproduce audio. Aquí solo se
+// muestra la notificación; el usuario decide con un gesto (click/acción).
+let pushConfigured = false;
+
 self.addEventListener('push', (e) => {
   let data = {};
   try {
@@ -132,7 +144,15 @@ self.addEventListener('push', (e) => {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     renotify: true,
-    data: { url: data.url || '/' },
+    data: {
+      url: data.url || '/',
+      kind: data.kind || 'generic', // frequency | itinerary | alarm | generic
+      id: data.id || null,
+      actions: actions.reduce((acc, a) => {
+        acc[a.action] = a.url || '';
+        return acc;
+      }, {}),
+    },
   };
   if (actions.length) payload.actions = actions;
   e.waitUntil(self.registration.showNotification(data.title || 'Vyneural', payload));
@@ -154,9 +174,14 @@ self.addEventListener('message', (e) => {
           active: true,
           cache: CACHE,
           hasPush: 'PushManager' in self,
-          pushConfigured: false, // sin backend
+          pushConfigured, // valor real (lo informa la página vía PUSH_CONFIG)
         });
       }
+      break;
+    case 'PUSH_CONFIG':
+      // La página informa si el backend de push está configurado (solo bool;
+      // nunca se envían claves al SW).
+      if (typeof m.configured === 'boolean') pushConfigured = m.configured;
       break;
     default:
       // Tipo no reconocido: no procesar (validación de schema).

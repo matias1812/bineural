@@ -242,6 +242,11 @@ export class SimulationEngine {
   // consume batería y, si el SO vuelve a suspender, produce clics al volver.
   // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
   _audioWatchdog() {
+    // P5.6 (H2) — frontera APK EXPLÍCITA: en modo plataforma-muteada (APK)
+    // el watchdog no recupera NADA — la web es inaudible por diseño y el
+    // sonido lo sostiene el servicio nativo. Guard explícito, no accidental:
+    // si mañana alguien cambia recoverFade(), aquí no se vuelve a la ganancia.
+    if (this.audio && this.audio._platformMuted) return;
     // La condición 'none' es silencio deliberado (control): el watchdog no
     // debe intentar "recuperar" una sesión que no tiene estímulo.
     if (this.isPlaying && this.audio && this.audio.ctx && this.audio._condition !== 'none' && !document.hidden) {

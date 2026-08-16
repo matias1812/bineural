@@ -4,12 +4,17 @@ Shell Android (Kotlin + WebView) que envuelve la web Bineural. **Mismo core
 científico**: la simulación matemática es la del repo raíz y no se toca; la
 plataforma se adapta al core.
 
-> **Estado honesto: P1 = COMPILED, NOT DEVICE-TESTED.** La APK debug se
-> compiló correctamente en este entorno (JDK 17 + Gradle 8.2 + Android SDK
-> 34) → `app-debug.apk` (3,5 MB, SHA-256
-> `c53c1dce149416264bbefc1636e1b6aa3f65194346147076509342cb236f5a40`).
-> **Falta la prueba física en dispositivo** — no se puede declarar P1 PASS
-> sin correr el checklist TEST 01–16 en un Android real.
+> **Estado honesto: P1 = CODE+RUNTIME PASS (emulador) / HARDWARE PENDING.**
+> La APK se compiló en este entorno (JDK 17 + Gradle 8.2 + Android SDK 34).
+> La **release actual** (web empaquetada: fixes P5.6/P5.7/P5.8, botones de
+> descarga solo en el footer, alarma en primer plano con notificación real,
+> fin de sesión nativo M1 y módulos API del backend — SW v3, `src/api/*`,
+> proxy de dev) es `app-release.apk` (~2,95 MB, SHA-256
+> `c55c88680b260665ea71ab3e2a38f740b0c38b57c35e3f818e98d835a96a747c`), la que
+> se sirve en la web en `/vyneural.apk`.
+> **Pendiente: la prueba física en dispositivo real** (matriz P5.7/hardware)
+> — la matriz destructiva pasó en emulador (docs/RUNTIME_MATRIX.md) pero
+> falta el checklist físico TEST 01–16 en un Android real.
 
 ## Requisitos
 
@@ -22,7 +27,10 @@ plataforma se adapta al core.
 
 ```bash
 # 1. (opcional) refrescar la web empaquetada:
-#    npm run build && rm -rf app/src/main/assets/bineural && cp -r ../dist app/src/main/assets/bineural
+#    La APK se EXCLUYE de los assets de la WebView (evita una APK anidada
+#    dentro de sí misma; se distribuye vía web/tienda).
+#    npm run build && rm -rf app/src/main/assets/bineural && mkdir -p app/src/main/assets/bineural \
+#      && (cd ../dist && tar cf - --exclude=vyneural.apk .) | (cd app/src/main/assets/bineural && tar xf -)
 # 2. Compilar (o abrir android/ en Android Studio y Run ▶):
 cd android
 ./gradlew.bat assembleDebug    # Windows (./gradlew en Linux/mac)
@@ -41,8 +49,20 @@ La firma release lee las credenciales de `local.properties` (gitignored) o de
 las variables `BINEURAL_STORE_FILE/BINEURAL_STORE_PASS/BINEURAL_KEY_ALIAS/
 BINEURAL_KEY_PASS`. El keystore vive FUERA del repositorio
 (`~/.local/bineural-release.keystore`); nunca se sube. La APK release actual:
-SHA-256 `fe164eeb1bc92f81713d6da6321898a68fbb7581c886dab76a02534629411e61`
+SHA-256 `6b2146e33ad2e6b469e582b45ff2f7ce7859d8f858dcc43972d46fdb80df5c03`
 (se sirve en la web en `/vyneural.apk`).
+
+> **Nota de build (Windows, 2026-08):** con el JDK del sistema (Java 8) el
+> build falla y con el JBR de Android Studio (Java 25) `lintVitalAnalyzeRelease`
+> revienta por incompatibilidad AGP 8.2. Usar el JDK 17 del entorno:
+> `JAVA_HOME=~/.local/opt/jdk-17.0.20+8 ./gradlew assembleRelease`.
+>
+> **⚠ APK residual (P5.8):** el sync de assets DEBE excluir `vyneural.apk`
+> (Vite copia `public/` → `dist/`, así que `dist/vyneural.apk` existe y si se
+> copia a `assets/bineural/` queda una APK anidada de ~3 MB dentro de la
+> release). Verificar siempre:
+> `unzip -l app/build/outputs/apk/release/app-release.apk | grep -c '\.apk$'`
+> (debe dar 0 líneas reales; el único match válido es la línea "Archive:").
 
 ## Qué implementa
 

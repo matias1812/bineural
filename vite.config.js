@@ -25,6 +25,16 @@ export default defineConfig({
   // (file:///android_asset/bineural/index.html) cargue CSS/JS/iconos.
   base: './',
   plugins: [stripCrossorigin()],
+  // Proxy de desarrollo al backend local (FASE 17). El frontend sigue
+  // funcionando sin él; solo es necesario al integrar la API.
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       input: {

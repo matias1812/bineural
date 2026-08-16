@@ -1,0 +1,3 @@
+[2026-08-16 13:13:09] === RUN iniciado 2026-08-16 13:13:09 — APK release candidate c8b8483d… ===
+[2026-08-16 13:13:09] === dispositivo: sdk_gphone64_x86_64 · android 14 ===
+[2026-08-16 13:13:10] VERIFY-IDLE: PASS — svc=0 msess=0 js=(sin CDP) (IDLE/STOPPED + cualquier evento → NO PLAY ✓)

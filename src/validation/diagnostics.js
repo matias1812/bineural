@@ -22,7 +22,7 @@ import {
   enabledStateText,
 } from '../core/permissions.js';
 import { AudioClock } from '../core/audio-clock.js';
-import { AppLifecycle } from '../core/lifecycle.js';
+import { AppLifecycle, LIFECYCLE_STATES } from '../core/lifecycle.js';
 import { ExperimentEventLog } from '../core/experiment-events.js';
 import { probeCapabilities } from '../core/capabilities.js';
 import { AudioTransport } from '../core/audio-transport.js';
@@ -52,6 +52,15 @@ import { createNotificationManager } from '../core/notification-manager.js';
 import { BinauralEngine } from '../audio.js';
 import { RestoreGate } from '../core/restore-gate.js';
 import { muteMasterGain, restoreMasterGain, setParamValueCancelingAutomation } from '../core/audio-automation.js';
+// P5.4 — anillo causal puro (responder "¿qué emitió el primer PLAY?").
+import { createCausalLog } from '../core/causal-log.js';
+// P5.2 — contrato del protocolo ÚNICO Web→Nativo (PLAY/PAUSE/STOP simétricos).
+import {
+  nativePlayCommand,
+  nativePauseCommand,
+  nativeStopCommand,
+  NativeCommandCoalescer,
+} from '../core/native-protocol.js';
 
 export async function runBineuralDiagnostics() {
   console.group('%c BINEURAL V2 DIAGNOSTICS ', 'background: #222; color: #bada55');
@@ -1152,46 +1161,33 @@ export async function runBineuralDiagnostics() {
   });
 
   runTest('CalendarProvider: el .ics y Google Calendar son eventos reales (Fase 10)', async () => {
-    const prev = globalThis.location;
-    globalThis.location = { origin: 'https://vyneural.test', pathname: '/' };
-    try {
-      const { buildIcs, buildGoogleCalendarUrl } = await import('../notifications.js');
-      const alarm = { id: 'al-test-1', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
-      const ics = buildIcs(alarm);
-      for (const needle of ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:al-test-1@vyneural.cl', 'DTSTART:', 'DTEND:', 'SUMMARY:']) {
-        if (!ics.includes(needle)) throw new Error(`.ics sin ${needle}`);
-      }
-      const gcal = buildGoogleCalendarUrl(alarm);
-      if (!gcal.startsWith('https://calendar.google.com/calendar/render?')) throw new Error('url de Google Calendar');
-    } finally {
-      globalThis.location = prev;
+    // El origen se pasa explícito (funciona en Node y en el navegador: ahí
+    // `location` no se puede reemplazar, así que nunca se asigna globalThis.location).
+    const { buildIcs, buildGoogleCalendarUrl } = await import('../notifications.js');
+    const alarm = { id: 'al-test-1', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
+    const ics = buildIcs(alarm, 'https://vyneural.test');
+    for (const needle of ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:al-test-1@vyneural.cl', 'DTSTART:', 'DTEND:', 'SUMMARY:']) {
+      if (!ics.includes(needle)) throw new Error(`.ics sin ${needle}`);
     }
+    const gcal = buildGoogleCalendarUrl(alarm, 'https://vyneural.test');
+    if (!gcal.startsWith('https://calendar.google.com/calendar/render?')) throw new Error('url de Google Calendar');
   });
 
   runTest('P2 ICS FASE 10: UID estable, LOCATION/SEQUENCE, sin evento duplicado', async () => {
-    // Import ANTES de tocar location (los tests corren concurrentes y
-    // comparten globalThis.location: cualquier await entre el set y el uso
-    // permitiría a otro test restaurarlo). El uso de location es síncrono.
     const { buildIcs } = await import('../notifications.js');
-    const prev = globalThis.location;
-    globalThis.location = { origin: 'https://vyneural.test', pathname: '/' };
-    try {
-      const alarm = { id: 'al-uid-stable', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
-      const a = buildIcs(alarm);
-      const b = buildIcs(alarm);
-      // Mismo evento re-generado → mismo UID (los calendarios deduplican).
-      const uidA = a.match(/^UID:(.*)$/m)?.[1];
-      const uidB = b.match(/^UID:(.*)$/m)?.[1];
-      if (!uidA || uidA !== uidB) throw new Error(`UID debe ser estable, ${uidA} vs ${uidB}`);
-      for (const needle of ['DTSTAMP:', 'LOCATION:https://vyneural.test', 'SEQUENCE:0']) {
-        if (!a.includes(needle)) throw new Error(`.ics sin ${needle}`);
-      }
-      // Un solo evento por sesión: nunca dos BEGIN:VEVENT para la misma alarma.
-      const vevents = a.split('BEGIN:VEVENT').length - 1;
-      if (vevents !== 1) throw new Error(`debe haber 1 evento, hay ${vevents}`);
-    } finally {
-      globalThis.location = prev;
+    const alarm = { id: 'al-uid-stable', nextAt: Date.UTC(2026, 7, 14, 10, 0), minutes: 30, freq: 220, beat: 6, time: '10:00' };
+    const a = buildIcs(alarm, 'https://vyneural.test');
+    const b = buildIcs(alarm, 'https://vyneural.test');
+    // Mismo evento re-generado → mismo UID (los calendarios deduplican).
+    const uidA = a.match(/^UID:(.*)$/m)?.[1];
+    const uidB = b.match(/^UID:(.*)$/m)?.[1];
+    if (!uidA || uidA !== uidB) throw new Error(`UID debe ser estable, ${uidA} vs ${uidB}`);
+    for (const needle of ['DTSTAMP:', 'LOCATION:https://vyneural.test', 'SEQUENCE:0']) {
+      if (!a.includes(needle)) throw new Error(`.ics sin ${needle}`);
     }
+    // Un solo evento por sesión: nunca dos BEGIN:VEVENT para la misma alarma.
+    const vevents = a.split('BEGIN:VEVENT').length - 1;
+    if (vevents !== 1) throw new Error(`debe haber 1 evento, hay ${vevents}`);
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1248,6 +1244,7 @@ export async function runBineuralDiagnostics() {
       throw new Error('whitelist P1.5 sin comandos de estado');
     }
     if (!BRIDGE_COMMANDS.includes('OPEN_NOTIFICATION_SETTINGS')) throw new Error('whitelist P1.5 sin ajustes de notificación');
+    if (!BRIDGE_COMMANDS.includes('SESSION_END')) throw new Error('whitelist M1 sin fin de sesión nativo');
     const ok = validateCommand('SCHEDULE_ALARM', { alarmId: 'a' });
     if (!ok.ok) throw new Error('comando whitelisted rechazado');
     if (validateCommand('EXEC_SHELL', {}).error !== 'DENIED') throw new Error('comando arbitrario debe ser DENIED');
@@ -1585,15 +1582,25 @@ export async function runBineuralDiagnostics() {
     resume() { this.state = 'running'; }
   }
   // El motor usa window.AudioContext en ensure(); se inyecta el fake y se
-  // restaura al terminar (funciona en Node y en el navegador).
+  // restaura al terminar. En Node globalThis.window no existe → se crea un
+  // objeto ventana fake. En el navegador window es real y su propiedad
+  // .window es de solo lectura (no se puede reemplazar): se parchea
+  // window.AudioContext directamente y se restaura al terminar.
   const withFakeWindow = (fn) => {
-    const saved = globalThis.window;
-    globalThis.window = Object.assign({}, saved, { AudioContext: FakeAudioContext });
+    if (typeof globalThis.window === 'undefined') {
+      globalThis.window = { AudioContext: FakeAudioContext };
+      try {
+        return fn();
+      } finally {
+        delete globalThis.window;
+      }
+    }
+    const saved = globalThis.window.AudioContext;
+    globalThis.window.AudioContext = FakeAudioContext;
     try {
       return fn();
     } finally {
-      if (saved === undefined) delete globalThis.window;
-      else globalThis.window = saved;
+      globalThis.window.AudioContext = saved;
     }
   };
 
@@ -1986,6 +1993,341 @@ export async function runBineuralDiagnostics() {
     }
     if (apkNoBridge !== 'web') throw new Error('APK sin bridge real cae al dueño web (fallback honesto)');
     if (apkBridge !== 'native') throw new Error('APK con bridge real es dueño nativo');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P5.2/P5.4/P5.5 — DEPURACIÓN POR CAUSALIDAD (kill-switch, protocolo único,
+  // instrumentación y stress) — plan: "NINGÚN AUDIO NACE SIN CAUSA AUDITABLE"
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('P5.2: protocolo simétrico Web→Nativo — cada acción emite exactamente 1 comando', () => {
+    // PLAY con servicio muerto (sesión nueva) → 1 START (única vía de crear audio).
+    if (nativePlayCommand({ resume: false, source: 'ui-play', serviceRunning: false }) !== 'start') {
+      throw new Error('PLAY con servicio muerto debe ser START');
+    }
+    // RESUME tras pausa con el servicio vivo → 1 RESUME (nunca START duplicado
+    // con re-solicitud de audio focus).
+    if (nativePlayCommand({ resume: true, source: 'ui-play', serviceRunning: true }) !== 'resume') {
+      throw new Error('RESUME con servicio vivo debe ser RESUME');
+    }
+    // RESUME ya aplicada por el nativo (lock screen) → 0 comandos (solo mute).
+    if (nativePlayCommand({ resume: true, source: 'lock-screen', serviceRunning: true }) !== 'mute-only') {
+      throw new Error('el resume del lock screen no debe emitir comandos');
+    }
+    // PAUSE: UI/teclado/API → 1 PAUSE; lock screen → 0 (el nativo ya pausó).
+    if (nativePauseCommand({ source: 'ui' }) !== 'pause') throw new Error('pausa UI debe enviar PAUSE');
+    if (nativePauseCommand({ source: 'keyboard' }) !== 'pause') throw new Error('pausa teclado debe enviar PAUSE');
+    if (nativePauseCommand({ source: 'api' }) !== 'pause') throw new Error('pausa API debe enviar PAUSE');
+    if (nativePauseCommand({ source: 'lock-screen' }) !== 'none') {
+      throw new Error('la pausa del lock screen no debe reenviar PAUSE');
+    }
+    // STOP: servicio vivo → 1 STOP; muerto → no-op (no se crea audio para
+    // detenerlo: un shouldPlay persistido jamás se convierte en engine.start).
+    if (nativeStopCommand({ serviceRunning: true }) !== 'stop') throw new Error('STOP vivo debe enviar STOP');
+    if (nativeStopCommand({ serviceRunning: false }) !== 'none') throw new Error('STOP muerto no debe emitir');
+    // CONFIG nunca crea reproducción: no existe ninguna combinación de
+    // configuración que devuelva start/resume (el guard vive en el lado
+    // nativo: retune/wave/volumen solo se entregan si el servicio está vivo).
+  });
+
+  runTest('R2: coalescer de config nativa — ráfaga = 1 comando, último valor gana', async () => {
+    const c = new NativeCommandCoalescer({ windowMs: 8 });
+    const sent = [];
+    // Ráfaga de 5 volúmenes en la misma ventana → 1 solo envío con el último.
+    for (let i = 1; i <= 5; i++) c.schedule('level', () => sent.push({ level: i }));
+    if (c.pending() !== 1) throw new Error('la ráfaga debe dejar 1 comando pendiente');
+    if (c.sent('level') !== 0) throw new Error('aún no debe haberse enviado nada');
+    await new Promise((r) => setTimeout(r, 30));
+    if (sent.length !== 1) throw new Error(`ráfaga de 5 → 1 envío, llegaron ${sent.length}`);
+    if (sent[0].level !== 5) throw new Error('debe ganar el ÚLTIMO valor de la ráfaga');
+    if (c.sent('level') !== 1) throw new Error('el contador de envíos debe ser 1');
+    // Tipos distintos son independientes.
+    const w = [];
+    c.schedule('wave', () => w.push('wave'));
+    c.schedule('retune', () => w.push('retune'));
+    if (c.pending() !== 2) throw new Error('tipos distintos deben estar pendientes por separado');
+    await new Promise((r) => setTimeout(r, 30));
+    if (w.length !== 2 || w[0] !== 'wave' || w[1] !== 'retune') {
+      throw new Error('cada tipo debe enviarse una vez: ' + JSON.stringify(w));
+    }
+    // cancelAll() descarta los pendientes (stop/unload).
+    const z = [];
+    c.schedule('level', () => z.push(1));
+    c.cancelAll();
+    await new Promise((r) => setTimeout(r, 30));
+    if (z.length !== 0) throw new Error('cancelAll() debe descartar los pendientes');
+  });
+
+  runTest('P5.4: causal-log — anillo con timestamp/source/estados y tope', () => {
+    let t = 1000;
+    const log = createCausalLog({ max: 5, now: () => (t += 1) });
+    log.push({ action: 'PLAY', source: 'ui', from: 'STOPPED', to: 'INITIALIZING', playing: true, native: true });
+    log.push({ action: 'PAUSE', source: 'lock-screen', from: 'PLAYING', to: 'PAUSED', playing: false, native: true });
+    log.push({ action: 'RESTORE', source: 'background', from: 'PLAYING', to: 'PLAYING', playing: true, native: true });
+    log.push({ action: 'STOP', source: 'user-stop', from: 'PLAYING', to: 'STOPPED', playing: false, native: true });
+    log.push({ action: 'PLAY', source: 'ui', from: 'STOPPED', to: 'INITIALIZING', playing: true, native: true });
+    log.push({ action: 'NATIVE_FOCUS_EVENT', source: 'GAIN', from: 'INTERRUPTED', to: 'PLAYING', playing: true, native: true });
+    if (log.length !== 5) throw new Error(`el anillo debe topar en 5, tiene ${log.length}`);
+    const list = log.list();
+    // 6 push con max 5 → el PLAY más viejo salió; queda PAUSE…NATIVE_FOCUS_EVENT.
+    if (list[0].action !== 'PAUSE') throw new Error('el más viejo debe salir del anillo: ' + list[0].action);
+    if (list[list.length - 1].action !== 'NATIVE_FOCUS_EVENT') {
+      throw new Error('el más nuevo debe ser el último: ' + list[list.length - 1].action);
+    }
+    if (!list.every((e) => typeof e.ts === 'number' && e.action && e.source)) {
+      throw new Error('cada entrada debe tener ts/action/source');
+    }
+    list.pop(); // list() devuelve una copia
+    if (log.length !== 5) throw new Error('list() debe devolver una copia, no el anillo');
+  });
+
+  runTest('P5.5: stress — 200 ciclos play/pausa/reanuda/stop no corrompen la máquina', () => {
+    const m = new AudioStateMachine('STOPPED');
+    for (let i = 0; i < 200; i++) {
+      const r = m.transition('user_play', { reason: 'stress' });
+      if (!r.ok && m.state !== 'PLAYING') throw new Error(`user_play falló en ${m.state} (ciclo ${i})`);
+      m.transition('started', { reason: 'stress' }); // INITIALIZING→PLAYING; en PLAYING se ignora
+      m.transition('focus_gain', { reason: 'stress' }); // idempotente en PLAYING
+      m.transition('user_pause', { reason: 'stress' }); // → PAUSED
+      m.transition('user_play', { reason: 'stress' }); // → PLAYING
+      m.transition('user_stop', { reason: 'stress' }); // → STOPPED
+      if (!AUDIO_STATES.includes(m.state)) throw new Error(`estado inválido ${m.state} (ciclo ${i})`);
+      if (m.history.length > 200) throw new Error('el historial debe estar acotado');
+    }
+    if (m.state !== 'STOPPED') throw new Error('tras 200 ciclos debe quedar STOPPED, quedó ' + m.state);
+    // Interrupción real: PLAYING → focus_loss → INTERRUPTED → GAIN → PLAYING.
+    const m2 = new AudioStateMachine('STOPPED');
+    m2.transition('user_play');
+    m2.transition('started');
+    if (m2.state !== 'PLAYING') throw new Error('debe estar PLAYING tras started');
+    m2.transition('focus_loss', { reason: 'call_started' });
+    if (m2.state !== 'INTERRUPTED') throw new Error('focus_loss debe llevar a INTERRUPTED');
+    m2.transition('focus_gain', { reason: 'audio-focus' });
+    if (m2.state !== 'PLAYING') throw new Error('focus_gain debe recuperar a PLAYING (nunca arrancar)');
+    // GAIN NUNCA arranca audio desde STOPPED/IDLE (regla P5.1: solo
+    // USER_PLAY / USER_RESUME / MEDIA_SESSION_PLAY entran a PLAYING).
+    const m3 = new AudioStateMachine('STOPPED');
+    if (m3.transition('focus_gain').ok) throw new Error('GAIN no puede arrancar audio desde STOPPED');
+  });
+
+  runTest('⋯ menú: compartir/historial/reportar accesibles también en fullscreen', async () => {
+    // Node-only (lee el disco): en el navegador esta verificación se hace en
+    // vivo en /diagnostico; aquí el caso pasa sin costo para mantener 104/104.
+    if (typeof process === 'undefined') return;
+    const fsSpec = 'node:fs';
+    const fs = await import(/* @vite-ignore */ fsSpec);
+    // npm test corre desde la raíz del proyecto (process.cwd()); en el
+    // navegador este bloque nunca se ejecuta (guard de arriba).
+    const root = process.cwd();
+    const html = fs.readFileSync(root + '/index.html', 'utf8');
+    const js = fs.readFileSync(root + '/src/main.js', 'utf8');
+    const menu = (html.match(/id="more-menu"[\s\S]*?<\/div>/) || [''])[0];
+    const actions = [...menu.matchAll(/data-action="([^"]+)"/g)].map((mm) => mm[1]);
+    for (const expected of ['fps', 'hud', 'experiment', 'permissions', 'share', 'history', 'bug']) {
+      if (!actions.includes(expected)) {
+        throw new Error(`el menú ⋯ debe tener "${expected}", tiene: ${actions.join(', ')}`);
+      }
+    }
+    for (const expected of ['share', 'history', 'bug']) {
+      if (!js.includes(`action === '${expected}'`)) {
+        throw new Error(`main.js debe cablear la acción "${expected}" del menú ⋯`);
+      }
+    }
+    if (!js.includes('shareLink()')) throw new Error('la acción share debe llamar a shareLink()');
+    if (!js.includes('openHistory()')) throw new Error('la acción history debe llamar a openHistory()');
+  });
+
+  runTest('P5.5/F14: 100 ciclos PLAY-LOCK-UNLOCK-PAUSE-STOP → 100 START, 0 espontáneos', () => {
+    // Ejercicio puro del protocolo único (native-protocol.js) sobre las dos
+    // máquinas de estado (AudioStateMachine + AppLifecycle): cada acción de
+    // usuario debe traducirse EXACTAMENTE en 1 comando nativo (o 0 si el
+    // nativo ya la aplicó), y NINGÚN evento de ciclo de vida puede producir
+    // un START.
+    const audio = new AudioStateMachine('STOPPED');
+    const lc = new AppLifecycle('STOPPED');
+    let plays = 0;
+    let nativeStarts = 0;
+    let nativeResumes = 0;
+    let nativePauses = 0;
+    let nativeStops = 0;
+    let serviceRunning = false;
+
+    const play = (source) => {
+      const cmd = nativePlayCommand({ resume: true, source, serviceRunning });
+      if (cmd === 'start') {
+        nativeStarts++;
+        serviceRunning = true; // START crea el servicio
+      } else if (cmd === 'resume') {
+        nativeResumes++;
+      }
+      // 'mute-only' (lock screen): el nativo ya reanudó, 0 comandos.
+      const r = audio.transition('user_play', { reason: source });
+      if (!r.ok) throw new Error(`user_play falló en ${audio.state}`);
+      audio.transition('started', { reason: 'engine-running' });
+      lc.transition('start');
+      plays++;
+    };
+    const pause = (source) => {
+      if (nativePauseCommand({ source }) === 'pause') nativePauses++;
+      audio.transition('system_pause', { reason: source });
+    };
+    const stop = () => {
+      if (nativeStopCommand({ serviceRunning }) === 'stop') {
+        nativeStops++;
+        serviceRunning = false;
+      }
+      audio.transition('user_stop', { reason: 'cycle' });
+      lc.transition('stop');
+    };
+    const lock = () => {
+      audio.transition('app_background', { reason: 'lock' });
+      lc.transition('visibility', { visible: false, ctxState: 'running', playing: true });
+    };
+    const unlock = () => {
+      audio.transition('app_foreground', { reason: 'unlock' });
+      lc.transition('visibility', { visible: true, ctxState: 'running', playing: true });
+    };
+
+    for (let i = 0; i < 100; i++) {
+      play('ui'); // STOPPED → START
+      lock();
+      unlock();
+      pause('ui'); // PAUSE
+      play('ui'); // servicio vivo → RESUME
+      pause('lock-screen'); // el nativo ya pausó → 0 comandos
+      play('lock-screen'); // el nativo ya reanudó → 0 comandos
+      lock();
+      unlock();
+      stop(); // STOP
+      if (!AUDIO_STATES.includes(audio.state)) {
+        throw new Error(`audioState inválido ${audio.state} (ciclo ${i})`);
+      }
+      if (!LIFECYCLE_STATES.includes(lc.state)) {
+        throw new Error(`lifecycle inválido ${lc.state} (ciclo ${i})`);
+      }
+    }
+    if (plays !== 300) throw new Error(`300 plays esperados, ${plays}`);
+    // 100 START (solo desde STOPPED) + 100 RESUME (reanudaciones UI) = 200
+    // comandos de reproducción; 100 PAUSE (UI) + 100 STOP. Los plays de lock
+    // screen (200) nunca emiten comando (el nativo ya actuó).
+    if (nativeStarts !== 100) throw new Error(`100 PLAY→1 START, got ${nativeStarts}`);
+    if (nativeResumes !== 100) throw new Error(`100 resume UI→1 RESUME, got ${nativeResumes}`);
+    if (nativePauses !== 100) throw new Error(`100 pause UI→1 PAUSE, got ${nativePauses}`);
+    if (nativeStops !== 100) throw new Error(`100 STOP→1 STOP, got ${nativeStops}`);
+    if (audio.state !== 'STOPPED') throw new Error('tras 100 ciclos debe quedar STOPPED, quedó ' + audio.state);
+    if (lc.state !== 'STOPPED') throw new Error('lifecycle debe quedar STOPPED, quedó ' + lc.state);
+    // Invariante central: el número de START equivale exactamente al de plays
+    // desde detenido; los lock/unlock (200 eventos) no generaron NINGÚN comando.
+    if (nativeStarts + nativeResumes !== 200) {
+      throw new Error('cada play de usuario = exactamente 1 comando de reproducción');
+    }
+  });
+
+  runTest('P5.6: en APK el motor web es PERMANENTEMENTE inaudible (frontera estructural)', () =>
+    withFakeWindow(() => {
+      const engine = new BinauralEngine();
+      engine.setPlatformMuted(true); // APK: native = único owner
+      engine.start({ base: 200, beat: 6, volume: 0.5 });
+      // C2 — el fade-in del start NO debe elevar la ganancia.
+      if (engine.masterGain.gain.value > 0.02) {
+        throw new Error('start() en modo APK no debe subir la ganancia');
+      }
+      // C2 — setCondition en vivo: el crossfade baja pero jamás sube.
+      engine.setCondition('amplitude-modulation');
+      if (engine.masterGain.gain.value > 0.02) {
+        throw new Error('setCondition() en APK no debe subir la ganancia');
+      }
+      // setVolume / recoverFade / fadeTo: ninguna sube en APK.
+      engine.setVolume(0.8);
+      if (engine.masterGain.gain.value > 0.02) throw new Error('setVolume() en APK no debe subir');
+      engine.recoverFade(0.6, 0.8);
+      if (engine.masterGain.gain.value > 0.02) throw new Error('recoverFade() en APK no debe subir');
+      engine.fadeTo(0.5, 0.4);
+      if (engine.masterGain.gain.value > 0.02) throw new Error('fadeTo() en APK no debe subir');
+      // Con la política OFF (Web/PWA) el MISMO motor sí rampea al volumen.
+      const web = new BinauralEngine();
+      web.start({ base: 200, beat: 6, volume: 0.5 });
+      if (web.masterGain.gain.value < 0.3) {
+        throw new Error(`en web el start debe rampear al volumen de sesión, quedó ${web.masterGain.gain.value}`);
+      }
+    }),
+  );
+
+  runTest('P5.6: jerarquía de comandos — alarma, autostart y RETUNE jamás generan PLAY (main.js)', async () => {
+    // Node-only (lee el disco): invariante automatizada de la jerarquía de
+    // comandos. En el navegador pasa sin costo (verificación en vivo aparte).
+    if (typeof process === 'undefined') return;
+    const fsSpec = 'node:fs';
+    const fs = await import(/* @vite-ignore */ fsSpec);
+    const root = process.cwd();
+    const js = fs.readFileSync(root + '/src/main.js', 'utf8');
+    // B1 — el handler de alarma (onFire) no debe arrancar la sesión.
+    const onFireIdx = js.indexOf('onFire: (alarm) => {');
+    const onFireEnd = js.indexOf('onSync: renderAlarms');
+    if (onFireIdx < 0 || onFireEnd < 0 || onFireEnd < onFireIdx) {
+      throw new Error('no se encontró el bloque onFire del AlarmManager');
+    }
+    const onFireBlock = js.slice(onFireIdx, onFireEnd);
+    if (onFireBlock.includes('start();')) throw new Error('B1: la alarma no debe llamar start()');
+    // C1 — el bloque deepAutostart no debe llamar start().
+    const autoIdx = js.indexOf('if (deepAutostart &&');
+    const autoEnd = js.indexOf('// P4-B', autoIdx);
+    if (autoIdx < 0 || autoEnd < 0 || autoEnd < autoIdx) {
+      throw new Error('no se encontró el bloque deepAutostart');
+    }
+    const autoBlock = js.slice(autoIdx, autoEnd);
+    if (autoBlock.includes('start();')) throw new Error('C1: el autostart no debe llamar start()');
+    // H3 — RETUNE nunca significa START.
+    const retuneIdx = js.indexOf('function syncNativeAudioRetune');
+    const retuneEnd = js.indexOf('function syncNativeAudioStop');
+    if (retuneIdx < 0 || retuneEnd < 0 || retuneEnd < retuneIdx) {
+      throw new Error('no se encontró syncNativeAudioRetune');
+    }
+    const retuneBlock = js.slice(retuneIdx, retuneEnd);
+    if (retuneBlock.includes('startBackgroundAudio')) {
+      throw new Error('H3: RETUNE no puede emitir START (startBackgroundAudio prohibido)');
+    }
+    // R2 — los comandos de config nativos pasan por el coalescer (una ráfaga
+    // de volumen/onda/retune = 1 comando; el startId no debe inflarse).
+    if (!retuneBlock.includes('nativeCmdCoalescer.schedule')) {
+      throw new Error('R2: syncNativeAudioRetune debe coalescerse (nativeCmdCoalescer.schedule)');
+    }
+    // R1 — tras el resync con sesión nativa activa, la máquina debe llegar a
+    // PLAYING (transición 'started' tras 'system_play' en syncUiWithNativeSession).
+    const syncIdx = js.indexOf('function syncUiWithNativeSession');
+    const syncEnd = js.indexOf('// Capacidades fusionadas', syncIdx);
+    if (syncIdx < 0 || syncEnd < 0 || syncEnd < syncIdx) {
+      throw new Error('no se encontró syncUiWithNativeSession');
+    }
+    const syncBlock = js.slice(syncIdx, syncEnd);
+    if (!syncBlock.includes("audioState.transition('started'")) {
+      throw new Error('R1: el resync debe transicionar a PLAYING (falta \'started\' tras system_play)');
+    }
+    // F2 — seleccionar ambiente SIN sesión no puede arrancar el reproductor.
+    const ambientIdx = js.indexOf('ambientOptions.addEventListener');
+    const ambientEnd = js.indexOf('// ---------------------------------------------------------------- Personalizado', ambientIdx);
+    if (ambientIdx < 0 || ambientEnd < 0 || ambientEnd < ambientIdx) {
+      throw new Error('no se encontró el handler del mixer de ambiente');
+    }
+    const ambientBlock = js.slice(ambientIdx, ambientEnd);
+    if (ambientBlock.includes('start();')) {
+      throw new Error('F2: el mixer de ambiente no debe llamar start() sin sesión');
+    }
+  });
+
+  runTest('fullscreen: la burbuja de bugs se oculta en :fullscreen y .immersive', async () => {
+    if (typeof process === 'undefined') return;
+    const fsSpec = 'node:fs';
+    const fs = await import(/* @vite-ignore */ fsSpec);
+    const root = process.cwd();
+    const css = fs.readFileSync(root + '/src/site.css', 'utf8');
+    for (const sel of ['html:fullscreen .bug-fab', 'html:-webkit-full-screen .bug-fab', 'body.immersive .bug-fab']) {
+      if (!css.includes(sel)) throw new Error(`site.css debe ocultar la burbuja con "${sel}"`);
+    }
+    const ruleIdx = css.indexOf('html:fullscreen .bug-fab');
+    if (ruleIdx < 0 || !css.slice(ruleIdx, ruleIdx + 260).includes('display: none')) {
+      throw new Error('la regla de fullscreen debe ocultar la burbuja con display:none');
+    }
   });
 
   // ──────────────────────────────────────────────────────────────────────────

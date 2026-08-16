@@ -53,8 +53,23 @@ import { planRecovery } from './core/audio-health.js';
 // deduplicación de restores de sesión por máquina de estados (M3).
 import { muteMasterGain, restoreMasterGain } from './core/audio-automation.js';
 import { RestoreGate } from './core/restore-gate.js';
+// P5.4 — instrumentación causal: anillo de eventos de reproducción (quién
+// emitió cada PLAY/PAUSE/STOP y en qué estado), para auditar reproducción
+// fantasma. Espejo conceptual del anillo nativo Diagnostics.trace (Kotlin).
+import { createCausalLog } from './core/causal-log.js';
+// P5.2 — protocolo único Web→Nativo (contrato puro, testeado): PLAY/PAUSE/STOP
+// simétricos — cada acción genera exactamente un comando nativo (o ninguno
+// cuando el nativo ya la aplicó).
+import {
+  nativePlayCommand,
+  nativePauseCommand,
+  nativeStopCommand,
+  NativeCommandCoalescer,
+} from './core/native-protocol.js';
 // P3 — sanitización de datos persistidos (crash recovery / corrupción).
 import { sanitizeSession, sanitizeFavorites, sanitizeHistory } from './core/session-store.js';
+// Backend (aditivo, FASE 17): sin VITE_API_URL ni flag local no hace nada.
+import { initBackendIfConfigured } from './api/integration.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -80,12 +95,22 @@ simulation.ambient = ambient; // Link for auditory masking model
 // como fallback legacy SOLO para reclamar la MediaSession.
 simulation.audio.transport = new AudioTransport({ isIos: isIos() });
 
+// R2 — coalescing de comandos de CONFIGURACIÓN nativa (volumen/onda/retune):
+// una ráfaga de cambios (slider de volumen, clicks rápidos de onda/estado)
+// entrega SOLO el último comando al servicio nativo en vez de uno por evento
+// (forense R2: el startId se inflaba 3→78 sin crear reproducción). Los
+// comandos de reproducción (START/RESUME/PAUSE/STOP) NO pasan por aquí.
+const nativeCmdCoalescer = new NativeCommandCoalescer();
+window.__nativeCmdCoalescer = nativeCmdCoalescer;
+
 // ── Bridge nativo (P0, plan APK) ─────────────────────────────────────────────
 // Adaptador seguro hacia el shell Android (WebView → Kotlin). Sin la APK
 // (web/PWA) `present === false` y cada comando devuelve NOT_SUPPORTED: el
 // comportamiento actual no cambia. La futura APK inyecta `window.AndroidBridge`
 // y la web usa sus capacidades nativas sin tocar el core.
 const nativeBridge = createNativeBridgeAdapter();
+// P5.6 — frontera APK: el motor web nace inaudible si hay bridge nativo.
+applyPlatformMutePolicy();
 window.__nativeBridge = nativeBridge;
 
 // ── Proveedor único de audio (P1.5 Fase 5) ──────────────────────────────────
@@ -150,15 +175,31 @@ function syncNativeAudioStart() {
   // al default 0.6 y haría un overshoot breve audible al pulsar play).
   b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave, title: selected.name, level: volumeLevel });
   if (b.setAudioLevel) b.setAudioLevel({ level: volumeLevel });
-  // En la APK el sonido lo genera el servicio nativo (audio focus + notif de
-  // control); la web queda muda pero su AudioContext sigue corriendo para el
-  // visualizador (los visualizadores son model-driven: leen el estado del
-  // motor, no el analyser). Así nunca hay doble tono (interferencia de fase
-  // entre dos motores iguales).
-  // P2 — el emulador reveló que asignar gain.value=0 no basta: el ramp
-  // programado por el motor web (linearRampToValueAtTime al arrancar) pisa el
-  // 0 y la web suena al 60 % con el nativo. Se cancelan los valores
-  // programados y se fija el 0.
+  // La web queda muda: el sonido real lo genera el servicio nativo.
+  muteWebForNative();
+}
+
+// P5.6 — política de plataforma: en la APK el motor web es PERMANENTEMENTE
+// inaudible (el servicio nativo es el único owner de audio). Se aplica al
+// init y en cada muteWebForNative(); el motor consulta _platformMuted en
+// TODAS sus operaciones de ganancia (start, setCondition, setVolume, fadeTo,
+// recoverFade) — frontera estructural, no un parche por función.
+function applyPlatformMutePolicy() {
+  if (simulation && simulation.audio && typeof simulation.audio.setPlatformMuted === 'function') {
+    simulation.audio.setPlatformMuted(!!nativeAudio());
+  }
+}
+
+// En la APK la web solo dibuja (P5.3): su motor queda mudo y su <audio>
+// pausado, para que el SO vea UNA sola MediaSession (la nativa) y no suenen
+// dos motores a la vez. Se cancelan las rampas programadas (un gain.value=0
+// sin cancelar deja un ramp pendiente que re-eleva el volumen).
+function muteWebForNative() {
+  // P5.6 — frontera estructural: marca el motor como inaudible por plataforma
+  // (ninguna operación de ganancia podrá volverlo audible) y mutea ya.
+  if (simulation.audio && typeof simulation.audio.setPlatformMuted === 'function') {
+    simulation.audio.setPlatformMuted(true);
+  }
   if (simulation.audio && simulation.audio.masterGain) {
     try {
       const g = simulation.audio.masterGain.gain;
@@ -169,13 +210,6 @@ function syncNativeAudioStart() {
       /* contexto cerrado */
     }
   }
-  // P2 — propietario único de Media Session (I2/I3): en la APK el audio y los
-  // controles los posee el servicio NATIVO. El elemento <audio> del transporte
-  // web, aunque mudo, hace que Chromium (WebView) reclame SU PROPIA Media
-  // Session ante el SO (dos sesiones: nativa + WebView). Se pausa el elemento
-  // en modo nativo: la WebView queda sin reproducción de medios, el OS ve una
-  // sola MediaSession (la nativa con su notificación MediaStyle) y no hay
-  // doble ownership.
   if (simulation.audio && simulation.audio.transport) {
     try {
       simulation.audio.transport.pause();
@@ -184,27 +218,51 @@ function syncNativeAudioStart() {
     }
   }
 }
+
+// P5.2 — protocolo simétrico PLAY/PAUSE/STOP: una reanudación tras pausa
+// envía 1 RESUME (nunca un START duplicado con re-solicitud de focus).
+function syncNativeAudioResume() {
+  const b = nativeAudio();
+  if (!b) return;
+  if (b.resumeBackgroundAudio) b.resumeBackgroundAudio();
+  muteWebForNative();
+}
+
+// ¿El servicio nativo está vivo? (para elegir RESUME vs START en la APK).
+function nativeServiceRunning() {
+  const b = nativeAudio();
+  if (!b || typeof b.getAudioState !== 'function') return false;
+  const d = parseBridgeResponse(b.getAudioState());
+  return !!(d && d.serviceRunning);
+}
 function syncNativeAudioRetune() {
   const b = nativeAudio();
   if (!b) return;
-  const p = currentParams();
-  // P1 stability: si el bridge soporta retuneNative, lo usamos para evitar
-  // re-solicitar audio focus en cada movimiento del slider (causa de clicks).
-  if (b.retuneBackgroundAudio && b.getState().supported.retuneNative) {
-    b.retuneBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
-  } else {
-    // Fallback APK vieja: re-start (provocará clicks pero mantiene sync).
-    b.startBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
-  }
+  // P5.6 (H3) — RETUNE NUNCA significa START: la configuración no puede crear
+  // reproducción (violaría la jerarquía de comandos). El retune se envía tal
+  // cual; si el servicio no está vivo, el lado nativo lo descarta (guard
+  // serviceAlive) y el próximo START lleva los parámetros completos.
+  // R2 — coalescido: una ráfaga de cambios de estado/portadora/frecuencia
+  // entrega SOLO el último retune al servicio (el fn lee currentParams() en
+  // el momento del envío, así que gana el último valor de la ráfaga).
+  nativeCmdCoalescer.schedule('retune', () => {
+    const nb = nativeAudio();
+    if (!nb) return;
+    const p = currentParams();
+    if (nb.retuneBackgroundAudio) nb.retuneBackgroundAudio({ base: p.base, beat: p.beat, wave: p.wave });
+  });
 }
 function syncNativeAudioStop() {
   const b = nativeAudio();
-  if (b) b.stopBackgroundAudio();
-  // Al volver a la web (no-APK) o al pausar, restaura el nivel web. P1 (M1):
-  // se cancela la automation pendiente ANTES de fijar el valor — una rampa
-  // residual (fade-in del start, recoverFade del watchdog) pisa el valor
-  // asignado y puede dejar el motor web audible sobre el nativo.
-  if (simulation.audio && simulation.audio.masterGain && !b) {
+  // P5.1 — STOP de un servicio inactivo es no-op en la APK: no se crea audio
+  // para detenerlo (el estado de la UI ya se alinea con el evento nativo).
+  if (b) {
+    if (nativeStopCommand({ serviceRunning: nativeServiceRunning() }) === 'stop') b.stopBackgroundAudio();
+  } else if (simulation.audio && simulation.audio.masterGain) {
+    // Al volver a la web (no-APK) o al pausar, restaura el nivel web. P1 (M1):
+    // se cancela la automation pendiente ANTES de fijar el valor — una rampa
+    // residual (fade-in del start, recoverFade del watchdog) pisa el valor
+    // asignado y puede dejar el motor web audible sobre el nativo.
     const ctx = simulation.audio.ctx;
     restoreMasterGain(simulation.audio.masterGain, volumeLevel, ctx ? ctx.currentTime : 0);
   }
@@ -270,6 +328,10 @@ function syncUiWithNativeSession() {
   sessionStartTime = Date.now();
   lifecycle.transition('start');
   audioState.transition('system_play', { reason: 'page-reload-sync' });
+  // R1 — tras el resync con sesión nativa activa, la máquina debe llegar a
+  // PLAYING igual que en start() y en el evento vyneural:audioplayback:
+  // sin esto la UI quedaba en INITIALIZING para siempre (forense R1).
+  audioState.transition('started', { reason: 'engine-running' });
   sessionLog.reset();
   sessionLog.start({
     state: selected.name,
@@ -356,10 +418,29 @@ function ilog(kind, detail) {
 }
 window.__interferenceLog = __interferenceLog;
 window.__interferenceLogPush = ilog;
+// P5.4 — instrumentación causal: cada acción de reproducción queda en un
+// anillo con timestamp/source/estados (espejo del anillo nativo
+// Diagnostics.trace) para responder "¿qué componente emitió el primer PLAY?"
+// si reaparece la reproducción fantasma.
+const causalLog = createCausalLog();
+window.__causalLog = causalLog;
+function traceCausal(action, source = '', extra = {}) {
+  return causalLog.push({
+    action,
+    source,
+    from: audioState ? audioState.state : null,
+    playing,
+    provider: audioProvider,
+    native: !!nativeAudio(),
+    ...extra,
+  });
+}
+window.__traceCausal = traceCausal;
 // Evento nativo (APK): cambios de audio focus del shell (llamada, otro audio…).
 window.addEventListener('vyneural:audiofocus', (e) => {
   const label = e.detail && e.detail.state ? e.detail.state : 'event';
   ilog('focus', label);
+  traceCausal('NATIVE_FOCUS_EVENT', label);
   if (label === 'GAIN') audioState.transition('focus_gain', { reason: 'audio-focus' });
   else if (label === 'DUCK') audioState.transition('focus_duck', { reason: 'audio-focus' });
   else if (label === 'LOSS_TRANSIENT' || label === 'LOSS') {
@@ -376,6 +457,7 @@ window.addEventListener('vyneural:audiofocus', (e) => {
 window.addEventListener('vyneural:audioplayback', (e) => {
   const state = e.detail && e.detail.state ? e.detail.state : 'event';
   ilog('playback', state);
+  traceCausal('NATIVE_PLAYBACK_EVENT', state);
   if (state === 'paused' && playing) pauseUiOnly();
   else if (state === 'stopped') {
     audioState.transition('system_stop', { reason: 'lock-screen' });
@@ -383,7 +465,7 @@ window.addEventListener('vyneural:audioplayback', (e) => {
   } else if (state === 'playing') {
     audioState.transition('system_play', { reason: 'lock-screen' });
     audioState.transition('started', { reason: 'engine-running' });
-    if (!playing) start();
+    if (!playing) resumeSession('lock-screen');
   }
 });
 document.addEventListener('fullscreenchange', () => {
@@ -567,6 +649,9 @@ let volumeLevel = 0.6;
 let timerMinutes = 0;
 let timerEnd = 0;
 let timerInterval = null;
+// Remanente del temporizador congelado al pausar (lock screen / API): un play
+// posterior reanuda la cuenta donde quedó, como YouTube, en vez de reiniciar.
+let pausedRemainingMs = null;
 let lastPulse = 0;
 let accentColor = STATES[0].color;
 let sessionStartTime = 0;
@@ -786,6 +871,11 @@ function selectState(state) {
   // Set the profile on the simulation engine
   simulation.setProfile(state, currentParams().base);
 
+  // P5.6 (H1) — en la APK el estado seleccionado también retunea el motor
+  // NATIVO en vivo: antes solo cambiaba la UI y el sonido seguía en el estado
+  // anterior hasta el próximo START (divergencia UI↔nativo).
+  if (playing) syncNativeAudioRetune();
+
   // Registro de eventos: el cambio de estímulo queda documentado (P19), solo
   // durante una sesión activa (seleccionar estados sin sesión es ruido).
   if (playing) {
@@ -854,44 +944,72 @@ function applyAmbient() {
   ambient.applySet(ambientTypes, currentParams().beat, simulation.audio.getBeatEpoch());
 }
 
-function start() {
+// Arranca la sesión (nueva o reanudada desde una pausa). Con resume=true la
+// sesión y su registro continúan: no se reinicia el temporizador, el reloj de
+// pared ni el log experimental (el play posterior a una pausa de lock screen
+// retoma la MISMA sesión, como YouTube — no empieza una nueva).
+function start({ resume = false, source = 'ui-play' } = {}) {
   // La condición experimental elegida se aplica a la sesión nueva (el motor
   // la lee al construir sus fuentes; en vivo setExpCondition la reconstruye).
   if (simulation && simulation.audio) simulation.audio.setCondition(expCondition);
   // `playing` se marca antes de applyAudio(): applyAmbient() depende de él
   // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
-  sessionStartTime = Date.now();
-  sessionAmbient = [...ambientTypes];
+  if (!resume) {
+    sessionStartTime = Date.now();
+    sessionAmbient = [...ambientTypes];
+  }
   const p0 = currentParams();
+  const prevState = audioState.state;
   lifecycle.transition('start');
-  audioState.transition('user_play', { reason: 'ui-play' });
-  // Sesión nueva = registro nuevo: si la sesión anterior terminó, se
-  // descarta (start() solo se llama desde el estado detenido).
-  sessionLog.reset();
-  sessionLog.start({
-    state: selected.name,
-    band: selected.band,
-    base: p0.base,
-    beat: p0.beat,
-    wave: p0.wave,
-    condition: EXP_CONDITION_TO_SESSION[expCondition] || 'BINAURAL',
-  });
+  const tr = audioState.transition(resume ? 'system_play' : 'user_play', { reason: source });
+  traceCausal(resume ? 'RESUME' : 'PLAY', source, { from: prevState, to: tr ? tr.to : audioState.state, resume });
+  if (resume) {
+    // Continuar la sesión pausada: el log conserva la duración acumulada.
+    sessionLog.resume({ source });
+  } else {
+    // Sesión nueva = registro nuevo: si la sesión anterior terminó, se
+    // descarta (start() solo se llama desde el estado detenido).
+    sessionLog.reset();
+    sessionLog.start({
+      state: selected.name,
+      band: selected.band,
+      base: p0.base,
+      beat: p0.beat,
+      wave: p0.wave,
+      condition: EXP_CONDITION_TO_SESSION[expCondition] || 'BINAURAL',
+    });
+  }
   // Reclama la Media Session ANTES de que suene el audio: el navegador
   // asocia el controlador de notificaciones a la sesión en marcha y algunos
   // Android solo lo muestran si el metadata ya estaba asignado al empezar.
   updateMediaSession();
   applyAudio();
-  // APK: arranca el servicio nativo (audio focus + notificación de control).
-  // La web y el servicio generan las mismas frecuencias; el servicio sostiene
-  // el sonido al navegar o bloquear (la WebView no puede reproducir sin su
-  // documento). En la web esto es no-op.
-  syncNativeAudioStart();
-  setAudioProvider(nativeAudio() ? 'native' : 'web');
-  // Ancla de medios: registra la pestaña como reproducción ante el SO para que
-  // el controlador del reproductor aparezca y el AudioContext no se suspenda
-  // al cambiar de app o bloquear la pantalla (mismo gesto de usuario que play).
-  startAnchor();
+  // P2 Fase 1 (web): el motor ya arrancó de forma síncrona dentro de este
+  // gesto — transicionar a PLAYING. Antes solo el evento nativo de la APK
+  // (vyneural:audioplayback) disparaba 'started', así que en la web la máquina
+  // quedaba en INITIALIZING para siempre (el HUD y /diagnostico mentían). En
+  // la APK es idempotente: PLAYING no acepta 'started' y se ignora.
+  audioState.transition('started', { reason: 'engine-running' });
+  // APK: protocolo simétrico (P5.2, contrato puro native-protocol.js) — sesión
+  // nueva = 1 START; reanudación tras pausa = 1 RESUME (nunca un START
+  // duplicado); reanudación del lock screen = 0 comandos (el nativo ya
+  // reanudó, la web solo sincroniza).
+  const nb = nativeAudio();
+  if (nb) {
+    const cmd = nativePlayCommand({ resume, source, serviceRunning: nativeServiceRunning() });
+    if (cmd === 'resume') syncNativeAudioResume();
+    else if (cmd === 'start') syncNativeAudioStart();
+    else muteWebForNative();
+  } else {
+    // Ancla de medios: registra la pestaña como reproducción ante el SO para
+    // que el controlador del reproductor aparezca y el AudioContext no se
+    // suspenda al cambiar de app o bloquear la pantalla (mismo gesto de
+    // usuario que play). En la APK NO se usa: la MediaSession la posee el
+    // servicio nativo (P5.3 — la WebView solo dibuja).
+    startAnchor();
+  }
+  setAudioProvider(nb ? 'native' : 'web');
   playBtn.classList.add('playing');
   playBtn.innerHTML = ICONS.pause;
   playBtn.setAttribute('aria-label', 'Pausar sesión');
@@ -955,6 +1073,9 @@ function stopAnchor() {
 }
 
 function stop(withSummary) {
+  traceCausal('STOP', withSummary ? 'timer-complete' : 'user-stop', {
+    from: audioState.state,
+  });
   syncNativeAudioStop();
   setAudioProvider('none');
   stopAnchor();
@@ -979,15 +1100,28 @@ function stop(withSummary) {
   if (summary) showSessionSummary(summary);
 }
 
-// Pausa iniciada desde los controles del SO (lock screen / notificación): el
-// motor nativo YA quedó en pausa (evento vyneural:audioplayback). Aquí solo
-// se sincroniza la UI y el visualizador web (mudo en APK), sin reenviar STOP
-// al servicio — así un play posterior retoma la MISMA sesión nativa.
-function pauseUiOnly() {
+// Pausa real (lock screen / notificación / botón de la app): congela el motor
+// y el temporizador (remanente guardado en pausedRemainingMs) SIN terminar la
+// sesión — no se registra historial ni se resetea el reloj. En la APK el
+// motor nativo ya quedó en pausa (evento vyneural:audioplayback): aquí solo
+// se sincroniza la UI y el visualizador web (mudo), sin reenviar STOP al
+// servicio, así un play posterior retoma la MISMA sesión nativa.
+function pauseSession(source = 'lock-screen') {
   if (!playing) return;
-  audioState.transition('system_pause', { reason: 'lock-screen' });
+  // P5.2 — protocolo simétrico: la pausa de la UI/teclado/API también pausa el
+  // servicio nativo (antes solo se sincronizaba la UI y el motor nativo seguía
+  // sonando con la UI en pausa). Si la pausa viene del lock screen el servicio
+  // YA pausó (evento vyneural:audioplayback): 0 comandos, solo sincronizar.
+  const nb = nativeAudio();
+  if (nb && nb.pauseBackgroundAudio && nativePauseCommand({ source }) === 'pause') nb.pauseBackgroundAudio();
+  // Congelar la cuenta regresiva donde está (YouTube): al reanudar se restaura.
+  pausedRemainingMs = timerEnd ? Math.max(0, timerEnd - Date.now()) : null;
+  const prevState = audioState.state;
+  const tr = audioState.transition('system_pause', { reason: source });
+  traceCausal('PAUSE', source, { from: prevState, to: tr ? tr.to : audioState.state });
   simulation.stop();
   ambient.stopAll();
+  stopAnchor();
   playing = false;
   playBtn.classList.remove('playing');
   playBtn.innerHTML = ICONS.play;
@@ -995,9 +1129,29 @@ function pauseUiOnly() {
   updateStatus();
   disarmTimer();
   lifecycle.transition('stop');
-  sessionLog.pause({ source: 'lock-screen' });
+  sessionLog.pause({ source });
   setAudioProvider('none');
   ilog('playback', 'ui-paused');
+}
+
+// Alias histórico del evento nativo de la APK (vyneural:audioplayback).
+function pauseUiOnly() {
+  pauseSession('lock-screen');
+}
+
+// Reanuda la sesión pausada donde quedó (misma sesión, mismo temporizador).
+// Si no había una pausa activa (p. ej. sesión detenida), arranca una nueva.
+function resumeSession(source = 'lock-screen') {
+  if (playing) return;
+  const rem = pausedRemainingMs;
+  pausedRemainingMs = null;
+  start({ resume: true, source });
+  // Restaurar la cuenta regresiva congelada (solo si sigue habiendo
+  // temporizador; si el usuario lo cambió a ∞ durante la pausa, queda ∞).
+  if (rem != null && timerMinutes > 0 && rem > 1000) {
+    timerEnd = Date.now() + rem;
+  }
+  ilog('playback', 'ui-resumed');
 }
 
 // ---------------------------------------------------------------- Historial
@@ -1259,8 +1413,8 @@ if (summaryModal) {
 }
 
 playBtn.addEventListener('click', () => {
-  if (playing) stop();
-  else start();
+  if (playing) pauseSession('ui');
+  else resumeSession('ui');
 });
 // Estado inicial del play sobre las gotas (solo icono).
 playBtn.innerHTML = ICONS.play;
@@ -1275,9 +1429,14 @@ function setVolume(v) {
   if (volumeLabel) volumeLabel.textContent = `${Math.round(volumeLevel * 100)}%`;
   // APK: el nivel real lo aplica el servicio nativo (la web está muda); no
   // tocar el masterGain web o se desmutea y suena doble tono.
+  // R2 — el slider emite ráfagas de eventos: solo el último nivel de la
+  // ráfaga llega al servicio (coalescido), sin perder respuesta audible.
   const b = nativeAudio();
   if (b) {
-    if (b.setAudioLevel) b.setAudioLevel({ level: volumeLevel });
+    nativeCmdCoalescer.schedule('level', () => {
+      const nb = nativeAudio();
+      if (nb && nb.setAudioLevel) nb.setAudioLevel({ level: volumeLevel });
+    });
   } else {
     simulation.setVolume(volumeLevel);
   }
@@ -1287,6 +1446,16 @@ volume.addEventListener('input', () => {
   setVolume(volume.value);
   sessionLog.note('volumeChanged', { to: volumeLevel });
 });
+
+// Sube/baja el volumen de la sesión desde los controles del sistema (Media
+// Session: volumeup/volumedown) o la API __vyneural. Nunca sale de [0, 1] y
+// la UI refleja el cambio al instante (mismo camino que el slider).
+function setVolumeBy(delta) {
+  const next = Math.max(0, Math.min(1, Math.round((volumeLevel + delta) * 100) / 100));
+  if (next === volumeLevel) return;
+  setVolume(next);
+  sessionLog.note('volumeChanged', { to: next, source: 'media-session' });
+}
 
 // ---------------------------------------------------------------- Temporizador
 function armTimer() {
@@ -1318,21 +1487,37 @@ function tickTimer() {
 // Fin del temporizador: el audio se desvanece suavemente en vez de cortar,
 // se avisa con una notificación (si la pestaña no está visible) y la sesión
 // queda registrada en el historial.
+// M1 — en la APK la notificación la publica el SISTEMA (bridge SESSION_END →
+// NotificationHelper): la WebView no muestra new Notification(). En web/PWA
+// sigue el camino web (Notification API).
 function endSession() {
   if (fading) return;
   fading = true;
   disarmTimer();
   timerDisplay.innerHTML = `${ICONS.clock} Desvaneciendo…`;
-  if (document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    try {
-      new Notification('Vyneural', {
-        body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
-        icon: 'icons/icon-192.png',
-        badge: 'icons/icon-192.png',
-        tag: 'vyneural-session-end',
-      });
-    } catch (_) {
-      /* el navegador rechazó la notificación */
+  if (document.hidden) {
+    const nb = nativeAudio();
+    if (nb && nb.sessionEnd) {
+      // APK: notificación nativa real (canal propio, sonido del sistema).
+      try {
+        nb.sessionEnd({
+          title: 'Vyneural',
+          body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
+        });
+      } catch (_) {
+        /* el bridge falló: seguir con el camino web */
+      }
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        new Notification('Vyneural', {
+          body: `Tu sesión de ${selected.name} ha terminado. Que descanses.`,
+          icon: 'icons/icon-192.png',
+          badge: 'icons/icon-192.png',
+          tag: 'vyneural-session-end',
+        });
+      } catch (_) {
+        /* el navegador rechazó la notificación */
+      }
     }
   }
   // Época de la sesión que termina: si el usuario pulsa play durante el
@@ -1359,8 +1544,16 @@ timerOptions.addEventListener('click', (e) => {
   if (!btn) return;
   timerMinutes = parseInt(btn.dataset.minutes, 10);
   timerOptions.querySelectorAll('.timer-btn').forEach((b) => b.classList.toggle('active', b === btn));
-  if (playing) armTimer();
-  else timerDisplay.classList.add('hidden');
+  if (playing) {
+    armTimer();
+    // La barra del sistema refleja YA el nuevo temporizador (o se limpia si
+    // pasó a ∞): sin forzar el refresh, el throttle de 1 s puede dejar la
+    // barra anterior visible en la pantalla de bloqueo unos segundos.
+    lastPosUpdate = 0;
+    updateMediaPosition();
+  } else {
+    timerDisplay.classList.add('hidden');
+  }
   saveSession();
 });
 
@@ -1421,7 +1614,11 @@ ambientOptions.addEventListener('click', (e) => {
   if (playing) {
     applyAmbient();
   } else if (ambientTypes.size > 0) {
-    start(); // arranca la sesión para poder oír el ambiente
+    // P5.8 (F2) — seleccionar ambiente SIN sesión NUNCA arranca el reproductor:
+    // la configuración no es una causa de PLAY (violaba la jerarquía de
+    // comandos: un toque en el mixer arrancaba la sesión completa). El ambiente
+    // queda guardado para la próxima sesión; el play lo decide el usuario.
+    showToast('Ambiente configurado — toca play para comenzar 🎧');
   }
 });
 
@@ -1504,9 +1701,12 @@ function applyWave(wave) {
   syncWaveButtons();
   // El tipo del oscilador es mutable: se cambia en vivo sin cortar el sonido.
   if (playing) simulation.audio.setWave(selectedWave);
-  // APK: mismo set de ondas en el servicio nativo.
-  const nb = nativeAudio();
-  if (nb && nb.setWave) nb.setWave(selectedWave);
+  // APK: mismo set de ondas en el servicio nativo (R2 — coalescido: una
+  // ráfaga de clicks entrega solo el último wave).
+  nativeCmdCoalescer.schedule('wave', () => {
+    const nb = nativeAudio();
+    if (nb && nb.setWave) nb.setWave(selectedWave);
+  });
   updateStatus();
   if (playing) sessionLog.note('stimulusChanged', { wave: selectedWave });
   saveSession();
@@ -1919,6 +2119,7 @@ function requestRestore(force = false) {
 
 function restoreFromBackground() {
   if (!playing) return;
+  traceCausal('RESTORE', 'background');
   const audio = simulation.audio;
   const ctx = audio.ctx;
   const wasSuspended = !!(ctx && ctx.state === 'suspended');
@@ -1962,33 +2163,36 @@ function restoreFromBackground() {
     // Contexto siguió corriendo: solo se re-afirma el nivel de la sesión.
     audio.fadeTo(volumeLevel, 0.4);
   }
-  // Re-afirma el transporte: en modo 'element', el <audio> real (si el SO lo
-  // pausó en segundo plano); en modo 'direct', el ancla legacy.
-  const transport = audio.transport;
-  if (transport && transport.mode === 'element') {
-    transport.reaffirm();
-  } else if (audioAnchor && audioAnchor.paused) {
-    const p = audioAnchor.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
+  // P5.3 — en la APK la WebView NO ejecuta el protocolo de recuperación de
+  // audio web: el transporte y la MediaSession pertenecen al servicio nativo
+  // (el motor web queda mudo y su elemento pausado; nada que reafirmar). Solo
+  // en Web/PWA se re-afirma el transporte y la sesión de medios al volver.
+  if (!nb) {
+    const transport = audio.transport;
+    if (transport && transport.mode === 'element') {
+      transport.reaffirm();
+    } else if (audioAnchor && audioAnchor.paused) {
+      const p = audioAnchor.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+    // Re-afirma la sesión de medios al volver: algunos navegadores (iOS) la
+    // pierden al suspender la pestaña y el controlador de notificaciones
+    // desaparece hasta el siguiente play. Es barato y no molesta.
+    updateMediaSession();
   }
-  // Re-afirma la sesión de medios al volver: algunos navegadores (iOS) la
-  // pierden al suspender la pestaña y el controlador de notificaciones
-  // desaparece hasta el siguiente play. Es barato y no molesta.
-  updateMediaSession();
 }
 
 document.addEventListener('visibilitychange', () => {
   ilog('visibility', document.hidden ? 'hidden' : 'visible');
   if (document.hidden) {
-    // MITIGACIÓN DE INTERRUPCIÓN DE PLATAFORMA (no es comportamiento normal
-    // de background): en iOS Safari sin PWA instalada el SO suspende el
-    // AudioContext al salir; un duck rápido a 0 enmascara el clic de esa
-    // suspensión. En Android y en la PWA instalada el audio sigue sonando y
-    // NO se toca. El modo experimental lo registra para no ocultar nada.
-    if (playing && iosNeedsInstall() && simulation.audio.ctx) {
-      sessionLog.note('duckOnBackground', { reason: 'ios-suspension-mitigation' });
-      simulation.audio.fadeTo(0, 0.35);
-    }
+    // El audio NUNCA se bloquea ni se enmudece al pasar a segundo plano: la
+    // sesión sigue sonando dentro del navegador y fuera de él (pantalla de
+    // bloqueo / controles del sistema), igual que YouTube. El sistema puede
+    // suspender el AudioContext (p. ej. iOS Safari sin PWA instalada); al
+    // volver, restoreFromBackground() lo reanuda solo y con suavidad al nivel
+    // de la sesión. No se aplica ningún duck: enmudecer la sesión al salir
+    // sería "bloquear" el audio para ahorrar problemas, y es justo lo que no
+    // se quiere (el usuario pausa solo cuando quiere pausar).
     const ctx = simulation.audio.ctx;
     const audioRunning = !!(ctx && ctx.state === 'running');
     lifecycle.transition('visibility', { visible: false, ctxState: ctx ? ctx.state : null, playing });
@@ -2025,8 +2229,8 @@ window.addEventListener('keydown', (e) => {
   if (t && typeof t.matches === 'function' && t.matches('input, select, textarea, [contenteditable="true"]')) return;
   if (e.code === 'Space') {
     e.preventDefault();
-    if (playing) stop();
-    else start();
+    if (playing) pauseSession('keyboard');
+    else resumeSession('keyboard');
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     const visible = cards.filter((c) => !c.classList.contains('filtered-out'));
     if (!visible.length) return;
@@ -2129,6 +2333,10 @@ async function requestMediaNotificationPermission() {
 function updateMediaSession() {
   if (!MEDIA_SESSION) return;
   if (typeof MediaMetadata !== 'function') return;
+  // P6 — en la APK el propietario de la MediaSession es el servicio NATIVO
+  // (pantalla de bloqueo, notificación, Bluetooth): la web no declara ni
+  // actualiza una segunda sesión — el SO vería dos. La WebView solo dibuja.
+  if (nativeAudio()) return;
 
   const p = currentParams();
 
@@ -2158,10 +2366,28 @@ function updateMediaSession() {
 }
 
 // Barra de progreso del reproductor del sistema: sigue el temporizador de la
-// sesión (si hay uno). Con ∞ no hay duración definida, así que no se muestra.
+// sesión (si hay uno) y se refresca cada segundo mientras suena, como la barra
+// de YouTube. Con ∞ no hay duración definida y el estado de posición se
+// limpia: el controlador del sistema queda solo con play/pausa (sin barra),
+// exactamente como un contenido sin duración en YouTube.
 let lastPosUpdate = 0;
 function updateMediaPosition() {
-  if (!MEDIA_SESSION || !playing || !timerMinutes || !timerEnd) return;
+  if (!MEDIA_SESSION || !playing) return;
+  if (!timerMinutes || !timerEnd) {
+    // Sin duración: limpiar el estado de posición previo (p. ej. al pasar de
+    // un temporizador a ∞ a mitad de sesión) para que la barra desaparezca.
+    // setPositionState(null) resetea el estado (web.dev + W3C MediaSession).
+    try {
+      MEDIA_SESSION.setPositionState(null);
+    } catch (_) {
+      try {
+        MEDIA_SESSION.setPositionState({});
+      } catch (_) {
+        /* el navegador no soporta posición */
+      }
+    }
+    return;
+  }
   const now = Date.now();
   if (now - lastPosUpdate < 1000) return;
   lastPosUpdate = now;
@@ -2192,10 +2418,12 @@ if (MEDIA_SESSION) {
   // bookmarks, home automation): window.__vyneural con las mismas acciones
   // que Media Session + lectura de estado. Nunca rompe el flujo de la UI.
   window.__vyneural = {
-    play: () => { if (!playing) start(); return window.__vyneural.state(); },
-    pause: () => { if (playing) stop(); return window.__vyneural.state(); },
-    toggle: () => { if (playing) stop(); else start(); return window.__vyneural.state(); },
+    play: () => { if (!playing) resumeSession('api'); return window.__vyneural.state(); },
+    pause: () => { if (playing) pauseSession('api'); return window.__vyneural.state(); },
+    toggle: () => { if (playing) pauseSession('api'); else resumeSession('api'); return window.__vyneural.state(); },
     stop: () => { if (playing) stop(); return window.__vyneural.state(); },
+    volumeUp: () => { setVolumeBy(0.1); return window.__vyneural.state(); },
+    volumeDown: () => { setVolumeBy(-0.1); return window.__vyneural.state(); },
     next: () => moveTrack(1),
     prev: () => moveTrack(-1),
     seekBy,
@@ -2219,20 +2447,34 @@ if (MEDIA_SESSION) {
   };
   window.__vyneural.state();
   try {
-    MEDIA_SESSION.setActionHandler('play', () => { if (!playing) start(); });
-    MEDIA_SESSION.setActionHandler('pause', () => { if (playing) stop(); });
-    MEDIA_SESSION.setActionHandler('stop', () => { if (playing) stop(); });
-    MEDIA_SESSION.setActionHandler('previoustrack', () => moveTrack(-1));
-    MEDIA_SESSION.setActionHandler('nexttrack', () => moveTrack(1));
-    MEDIA_SESSION.setActionHandler('seekto', (d) => {
-      if (d && d.seekTime != null && timerMinutes && timerEnd) {
-        const dur = timerMinutes * 60;
-        const pos = Math.max(0, Math.min(dur, d.seekTime));
-        timerEnd = Date.now() + (dur - pos) * 1000;
-      }
-    });
-    MEDIA_SESSION.setActionHandler('seekbackward', () => seekBy(-15));
-    MEDIA_SESSION.setActionHandler('seekforward', () => seekBy(15));
+    // P6 — en la APK los controles del SO (lock screen, notificación,
+    // Bluetooth) los maneja la MediaSession NATIVA; la web no registra
+    // handlers propios (una sola sesión por app).
+    if (nativeAudio()) {
+      ilog('mediasession', 'apk-native-owner');
+    } else {
+      // Pausa/play REALES (tipo YouTube): pausar congela el temporizador y un
+      // play posterior reanuda la MISMA sesión donde quedó; stop() solo lo
+      // dispara la acción 'stop' del sistema (termina la sesión).
+      MEDIA_SESSION.setActionHandler('play', () => { if (!playing) resumeSession('lock-screen'); });
+      MEDIA_SESSION.setActionHandler('pause', () => { if (playing) pauseSession('lock-screen'); });
+      MEDIA_SESSION.setActionHandler('stop', () => { if (playing) stop(); });
+      MEDIA_SESSION.setActionHandler('previoustrack', () => moveTrack(-1));
+      MEDIA_SESSION.setActionHandler('nexttrack', () => moveTrack(1));
+      MEDIA_SESSION.setActionHandler('seekto', (d) => {
+        if (d && d.seekTime != null && timerMinutes && timerEnd) {
+          const dur = timerMinutes * 60;
+          const pos = Math.max(0, Math.min(dur, d.seekTime));
+          timerEnd = Date.now() + (dur - pos) * 1000;
+        }
+      });
+      MEDIA_SESSION.setActionHandler('seekbackward', () => seekBy(-15));
+      MEDIA_SESSION.setActionHandler('seekforward', () => seekBy(15));
+      // Volumen del motor desde el sistema (asistentes, teclas de volumen del
+      // controlador): mismo camino que el slider, nunca silencia ni satura.
+      MEDIA_SESSION.setActionHandler('volumeup', () => setVolumeBy(0.1));
+      MEDIA_SESSION.setActionHandler('volumedown', () => setVolumeBy(-0.1));
+    }
   } catch (_) {
     /* setActionHandler no soportado (Safari < 15.4) */
   }
@@ -2336,6 +2578,19 @@ if (moreBtn && moreMenu) {
       openExperiment();
     } else if (action === 'permissions') {
       openPermissions();
+    } else if (action === 'share') {
+      // Compartir también desde el menú ⋯: disponible en pantalla completa
+      // (igual que reportar un problema), mismo camino que el botón del lienzo.
+      shareLink();
+    } else if (action === 'history') {
+      // Historial también desde el menú ⋯ (fullscreen incluido).
+      openHistory();
+    } else if (action === 'bug') {
+      // La burbuja flotante se oculta en pantalla completa (CSS); desde el
+      // menú ⋯ el reporte de bugs sigue accesible (window.__bugReport lo
+      // expone report-bug.js vía site.js).
+      if (window.__bugReport) window.__bugReport.open();
+      else console.warn('[vyneural] report-bug no inicializado');
     }
   });
   document.addEventListener('click', (e) => {
@@ -3747,15 +4002,23 @@ const notificationManager = createNotificationManager({
 
 const alarmManager = new AlarmManager({
   onFire: (alarm) => {
+    // La alarma SIEMPRE intenta una notificación real del sistema, en primer
+    // plano o en segundo plano: una alarma que solo suena sin nada visible no
+    // es una alarma (el chime es el complemento audible, no el aviso). En
+    // segundo plano la notificación es el aviso (y puede sonar/vibrar según
+    // la plataforma); en primer plano se muestra igual en la sombra del
+    // sistema y el chime refuerza. Si la notificación no se pudo mostrar
+    // (permiso denegado / sin soporte), el chime queda como respaldo.
+    // NUNCA arranca una sesión: una notificación no crea audio (Fase 21).
+    const res = notificationManager.notify(alarm);
+    const shown = !!(res && res.shown);
     if (document.hidden) {
-      // Notificación de sistema solo si el permiso está concedido; si no se
-      // pudo (denegado/sin soporte), chime best-effort. NUNCA arranca una
-      // sesión en segundo plano: una notificación no crea audio (Fase 21).
-      const res = notificationManager.notify(alarm);
-      if (!res.shown) playChime();
+      if (!shown) playChime();
       return;
     }
-    // Primer plano: chime + arranque de la sesión con la frecuencia exacta.
+    // Primer plano: notificación real (arriba) + chime audible + estado
+    // CONFIGURADO con la frecuencia exacta (P5.6 B1: la alarma avisa, nunca
+    // arranca el reproductor).
     playChime();
     showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
     const custom = STATES.find((s) => s.custom);
@@ -3774,7 +4037,11 @@ const alarmManager = new AlarmManager({
         btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === alarm.minutes),
       );
     }
-    if (!playing) start();
+    // P5.6 (B1) — la alarma AVISA pero NO arranca el reproductor: se eliminó
+    // el start() automático (violaba la regla de oro: el disparo de una
+    // alarma no es una causa de PLAY). El estado queda configurado con la
+    // frecuencia exacta; el usuario toca play.
+    if (!playing) showToast('Tu sesión está lista — toca play para comenzar 🎧');
     // P5 — rutina en Web/PWA: si la alarma tiene días de repetición, se
     // reprograma la siguiente ocurrencia (mientras la página esté viva;
     // con la pestaña cerrada no puede sonar: límite honesto del navegador).
@@ -4017,15 +4284,13 @@ if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession
   showQuickstart();
 }
 
-// Arranque automático desde la notificación de alarma (?autostart=true). El
-// clic en la notificación cuenta como gesto del usuario, así que el audio
-// puede arrancar; si el navegador lo bloquea, el estado queda configurado.
+// Deep link de alarma (?autostart=true): P5.6 (C1) — NO arranca audio en la
+// carga de página (violaba la regla de oro: page load no es una causa de
+// PLAY). Solo deja el estado configurado con la frecuencia de la alarma; el
+// play queda en manos del usuario (no se depende de que el navegador bloquee
+// el autoplay).
 if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
-  try {
-    start();
-  } catch {
-    showToast('Toca play para comenzar tu sesión');
-  }
+  showToast('Tu sesión está lista — toca play para comenzar 🎧');
 }
 
 // P4-B — re-sincronización con la sesión nativa al cargar la página: navegar
@@ -4047,6 +4312,12 @@ if (
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
 }
+
+// Backend opcional (FASE 17): no bloquea, no lanza, no cambia el
+// comportamiento offline. Solo actúa si hay backend configurado.
+window.addEventListener('load', () => {
+  initBackendIfConfigured().catch(() => {});
+});
 
 // Loader animado: se desvanece cuando la página terminó de cargar, con un
 // mínimo de 2.2 s para que se disfruten las animaciones.

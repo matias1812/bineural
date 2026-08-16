@@ -1,0 +1,112 @@
+[2026-08-16 13:13:27] === RUN iniciado 2026-08-16 13:13:27 — APK release candidate c8b8483d… ===
+[2026-08-16 13:13:27] === dispositivo: sdk_gphone64_x86_64 · android 14 ===
+[2026-08-16 13:13:28] CDP: disponible
+[2026-08-16 13:13:31] VERIFY-IDLE: PASS — svc=0 msess=0 js=STOPPED (IDLE/STOPPED + cualquier evento → NO PLAY ✓)
+[2026-08-16 13:13:31] ────────────────────────────────────────────────────────────
+[2026-08-16 13:13:31] CAPTURA: smoke B1 play (tap)
+## smoke B1 play (tap) — 2026-08-16 13:13:32
+
+### JS (CDP)
+{"state":"STOPPED","playing":false,"gain":0.00009999999747378752,"sid":2,"causal":["NATIVE_PLAYBACK_EVENT:paused","NATIVE_PLAYBACK_EVENT:playing","RESUME:lock-screen","NATIVE_PLAYBACK_EVENT:stopped","STOP:user-stop"],"coalescer":{"level":1,"wave":1,"retune":1}}
+
+### Servicio nativo
+AudioForegroundService: 0 · MediaSession Vyneural: 0 · 
+
+### AudioTracks
+  AudioPlaybackConfiguration piid:967 deviceId:2 type:AAudio u/pid:10200/29110 state:started attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN source=DEFAULT flags=0x0 tags= bundle=null sessionId:-1 mutedState:none  FormatInfo{isSpatialized=false, channelMask=0x3, sampleRate=48000}
+08-16 04:44:41:672 player piid:847 event:started
+08-16 04:44:41:865 new player piid:855 uid/pid:10200/23545 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:929
+08-16 04:44:41:921 player piid:855 event:started
+08-16 04:45:30:759 player piid:871 event:started
+08-16 04:45:31:062 new player piid:879 uid/pid:10200/23692 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:953
+08-16 04:45:31:073 player piid:879 event:started
+08-16 04:47:00:047 player piid:895 event:started
+
+### Focus
+08-15 15:17:33:973 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:35:363 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:36:722 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:38:117 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+
+### Traza nativa (BineuralLog, último)
+
+────────────────────────────────────────────────────────────
+[2026-08-16 13:13:41] ACCION: tap 894 1206
+[2026-08-16 13:13:47] VERIFY-PLAYING: FAIL — svc=0 msess=0  js=undefined
+[2026-08-16 13:13:47] ACCION: media dispatch pause
+[2026-08-16 13:13:49] ────────────────────────────────────────────────────────────
+[2026-08-16 13:13:49] CAPTURA: smoke B6 pause
+## smoke B6 pause — 2026-08-16 13:13:49
+
+### JS (CDP)
+undefined
+
+### Servicio nativo
+AudioForegroundService: 0 · MediaSession Vyneural: 0 · 
+
+### AudioTracks
+08-16 04:44:41:672 player piid:847 event:started
+08-16 04:44:41:865 new player piid:855 uid/pid:10200/23545 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:929
+08-16 04:44:41:921 player piid:855 event:started
+08-16 04:45:30:759 player piid:871 event:started
+08-16 04:45:31:062 new player piid:879 uid/pid:10200/23692 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:953
+08-16 04:45:31:073 player piid:879 event:started
+08-16 04:47:00:047 player piid:895 event:started
+08-16 04:47:00:500 new player piid:903 uid/pid:10200/23839 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:977
+
+### Focus
+08-15 15:17:33:973 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:35:363 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:36:722 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:38:117 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+
+### Traza nativa (BineuralLog, último)
+
+────────────────────────────────────────────────────────────
+[2026-08-16 13:13:57] ACCION: media dispatch stop
+[2026-08-16 13:14:01] VERIFY-IDLE: PASS — svc=0 msess=0 js=undefined (IDLE/STOPPED + cualquier evento → NO PLAY ✓)
+[2026-08-16 13:14:01] === FIN DE RUN 2026-08-16 13:14:01 — archivo: docs/evidence/run_20260816_131327.log ===
+[2026-08-16 13:14:44] ACCION: tap 894 1277
+[2026-08-16 13:14:50] VERIFY-PLAYING: PASS — svc=6 msess=2 lastStartId=3 js={"state":"PLAYING","gain":0,"sid":1} (web gain debe ser 0 en APK)
+[2026-08-16 13:14:50] ACCION: media dispatch pause
+[2026-08-16 13:14:52] ────────────────────────────────────────────────────────────
+[2026-08-16 13:14:52] CAPTURA: smoke B6 pause
+## smoke B6 pause — 2026-08-16 13:14:53
+
+### JS (CDP)
+{"state":"PAUSED","playing":false,"gain":0.00009999999747378752,"sid":1,"causal":["RESUME:ui","NATIVE_PLAYBACK_EVENT:playing","NATIVE_PLAYBACK_EVENT:paused","PAUSE:lock-screen"],"coalescer":{"level":0,"wave":0,"retune":0}}
+
+### Servicio nativo
+AudioForegroundService: 3 · MediaSession Vyneural: 3 · lastStartId=3
+
+### AudioTracks
+  AudioPlaybackConfiguration piid:975 deviceId:2 type:AAudio u/pid:10200/29110 state:started attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN source=DEFAULT flags=0x0 tags= bundle=null sessionId:-1 mutedState:none  FormatInfo{isSpatialized=false, channelMask=0x3, sampleRate=48000}
+  AudioPlaybackConfiguration piid:983 deviceId:2 type:android.media.AudioTrack u/pid:10200/29110 state:started attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null sessionId:1057 mutedState:none  FormatInfo{isSpatialized=false, channelMask=0x3, sampleRate=44100}
+08-16 04:45:30:759 player piid:871 event:started
+08-16 04:45:31:062 new player piid:879 uid/pid:10200/23692 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:953
+08-16 04:45:31:073 player piid:879 event:started
+08-16 04:47:00:047 player piid:895 event:started
+08-16 04:47:00:500 new player piid:903 uid/pid:10200/23839 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:977
+08-16 04:47:00:536 player piid:903 event:started
+
+### Focus
+  source:android.os.BinderProxy@3f76bc7 -- pack: com.vyneural.bineural -- client: android.media.AudioManager@803b4e6com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@a964a27 -- gain: GAIN -- flags:  -- loss: none -- notified: true -- limbofalse -- uid: 10200 -- attr: AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0x800 tags= bundle=null -- sdk:34
+08-15 15:17:35:363 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:36:722 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:38:117 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+
+### Traza nativa (BineuralLog, último)
+
+────────────────────────────────────────────────────────────
+[2026-08-16 13:15:01] ACCION: media dispatch stop
+[2026-08-16 13:15:07] VERIFY-IDLE: PASS — svc=0 msess=0 js=STOPPED (IDLE/STOPPED + cualquier evento → NO PLAY ✓)
+[2026-08-16 13:15:07] === FIN DE RUN 2026-08-16 13:15:07 — archivo: docs/evidence/run_20260816_131327.log ===
+[2026-08-16 13:15:24] ACCION: tap 894 1277
+[2026-08-16 13:15:33] VERIFY-PLAYING: FAIL — svc=0 msess=0  js={"state":"STOPPED","gain":0.00009999999747378752,"sid":1}
+[2026-08-16 13:15:33] ACCION: media dispatch stop
+[2026-08-16 13:15:40] VERIFY-IDLE: PASS — svc=0 msess=0 js=STOPPED (IDLE/STOPPED + cualquier evento → NO PLAY ✓)
+[2026-08-16 13:15:53] ACCION: tap 895 1206
+[2026-08-16 13:16:02] VERIFY-PLAYING: FAIL — svc=0 msess=0  js={"state":"STOPPED","gain":0.00009999999747378752,"sid":1}
+[2026-08-16 13:16:03] ACCION: media dispatch stop
+[2026-08-16 13:16:08] VERIFY-IDLE: PASS — svc=0 msess=0 js=STOPPED (IDLE/STOPPED + cualquier evento → NO PLAY ✓)
+[2026-08-16 13:16:09] === FIN DE RUN 2026-08-16 13:16:08 — archivo: docs/evidence/run_20260816_131327.log ===

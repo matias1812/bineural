@@ -1,0 +1,31 @@
+[2026-08-16 13:12:58] === RUN iniciado 2026-08-16 13:12:58 — APK release candidate c8b8483d… ===
+[2026-08-16 13:12:59] === dispositivo: sdk_gphone64_x86_64 · android 14 ===
+[2026-08-16 13:12:59] ────────────────────────────────────────────────────────────
+[2026-08-16 13:12:59] CAPTURA: smoke A1 idle
+## smoke A1 idle — 2026-08-16 13:12:59
+
+### JS (CDP)
+{"state":"STOPPED","playing":false,"gain":0.00009999999747378752,"sid":2,"causal":["NATIVE_PLAYBACK_EVENT:paused","NATIVE_PLAYBACK_EVENT:playing","RESUME:lock-screen","NATIVE_PLAYBACK_EVENT:stopped","STOP:user-stop"],"coalescer":{"level":1,"wave":1,"retune":1}}
+
+### Servicio nativo
+AudioForegroundService: 0 · MediaSession Vyneural: 0 · 
+
+### AudioTracks
+  AudioPlaybackConfiguration piid:967 deviceId:2 type:AAudio u/pid:10200/29110 state:started attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN source=DEFAULT flags=0x0 tags= bundle=null sessionId:-1 mutedState:none  FormatInfo{isSpatialized=false, channelMask=0x3, sampleRate=48000}
+08-16 04:44:41:672 player piid:847 event:started
+08-16 04:44:41:865 new player piid:855 uid/pid:10200/23545 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:929
+08-16 04:44:41:921 player piid:855 event:started
+08-16 04:45:30:759 player piid:871 event:started
+08-16 04:45:31:062 new player piid:879 uid/pid:10200/23692 type:android.media.AudioTrack attr:AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_MUSIC flags=0xA00 tags= bundle=null session:953
+08-16 04:45:31:073 player piid:879 event:started
+08-16 04:47:00:047 player piid:895 event:started
+
+### Focus
+08-15 15:17:33:973 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:35:363 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:36:722 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+08-15 15:17:38:117 requestAudioFocus() from uid/pid 10197/12754 AA=USAGE_MEDIA/CONTENT_TYPE_MUSIC clientId=android.media.AudioManager@395ef66com.vyneural.bineural.audio.AudioFocusHelper$$ExternalSyntheticLambda0@4ac32a7 callingPack=com.vyneural.bineural req=1 flags=0x0 sdk=34
+
+### Traza nativa (BineuralLog, último)
+
+────────────────────────────────────────────────────────────

@@ -53,6 +53,11 @@ class AudioForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // P5.4 — cada recreación del servicio tiene un id propio: si algo
+        // "se activa solo", la traza causal dice QUÉ servicio (generación)
+        // emitió el primer PLAY.
+        Diagnostics.serviceStartId += 1
+        Diagnostics.trace("service", "created generation=${Diagnostics.serviceStartId}")
         focus = AudioFocusHelper(this, engine) { label ->
             onFocusStateChange?.invoke(label)
             handleFocusChange(label)
@@ -77,6 +82,11 @@ class AudioForegroundService : Service() {
     // el forense). Si la sesión debería seguir sonando, el watchdog re-solicita
     // foco con backoff. GAIN: reanuda el MISMO motor (nunca una segunda sesión).
     private fun handleFocusChange(label: String) {
+        Diagnostics.trace(
+            "focus",
+            "$label {running=$running shouldPlay=$shouldPlay media=${Diagnostics.mediaSessionPlaybackState} " +
+                "focusHeld=${focus?.held}",
+        )
         when (label) {
             "LOSS", "LOSS_TRANSIENT" -> {
                 if (shouldPlay && running) setSessionPlaying(playing = false, pushToJs = false)
@@ -145,18 +155,27 @@ class AudioForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         // startForeground incondicional: todo arranque pasa por startForegroundService
-        // (que exige llamar a startForeground en <5s) y un restart START_STICKY llega
-        // con intent nulo — sin reafirmar el foreground, Android 12+ mata la app con
+        // (que exige llamar a startForeground en <5s) y un restart llega con intent
+        // nulo — sin reafirmar el foreground, Android 12+ mata la app con
         // ForegroundServiceDidNotStartInTimeException.
         startForegroundCompat()
 
-        // P3 — crash recovery: restart START_STICKY tras kill del proceso por el
-        // SO (intent null). Si había una sesión sonando, se restaura con las
-        // frecuencias/onda/volumen guardadas; si no, el servicio se detiene solo.
+        // P5.1 — kill-switch de reproducción espontánea: un restart del servicio
+        // tras la muerte del proceso (intent null) NUNCA reanuda audio por sí solo.
+        // La sesión persistida (frecuencias, onda, volumen, título) se conserva
+        // para el próximo comando explícito, pero un shouldPlay persistido JAMÁS
+        // se convierte en engine.start(). El único camino a PLAYING es un comando
+        // explícito (USER_PLAY / MEDIA_PLAY / USER_RESUME).
         if (intent == null) {
-            restorePersistedSession()
-            return START_STICKY
+            handleNullIntentRestart()
+            return START_NOT_STICKY
         }
+
+        Diagnostics.trace(
+            "cmd",
+            "$action startId=$startId before{running=$running shouldPlay=$shouldPlay " +
+                "media=${Diagnostics.mediaSessionPlaybackState} focus=${Diagnostics.focusState}",
+        )
 
         when (action) {
             ACTION_START -> {
@@ -203,6 +222,14 @@ class AudioForegroundService : Service() {
             ACTION_RESUME, ACTION_PLAY -> {
                 shouldPlay = true
                 focus?.request()
+                // P5.2 — RESUME sobre un motor DETENIDO no puede dejar un motor
+                // mudo con la notificación "playing": si el motor no está
+                // sonando, se arranca con los parámetros de la última sesión
+                // (retune + start), igual que el play de la MediaSession.
+                if (!engine.isPlaying()) {
+                    engine.retune(lastBase, lastBeat)
+                    engine.start()
+                }
                 engine.resume()
                 running = true
                 Diagnostics.audioActive = true
@@ -253,7 +280,14 @@ class AudioForegroundService : Service() {
                 clearSession()
             }
         }
-        return START_STICKY
+        Diagnostics.trace(
+            "cmd",
+            "$action done{startId=$startId running=$running shouldPlay=$shouldPlay " +
+                "media=${Diagnostics.mediaSessionPlaybackState} focus=${Diagnostics.focusState}",
+        )
+        // P5.1 — START_NOT_STICKY: si el SO mata el proceso, NO se recrea el
+        // servicio (y por tanto nunca puede reanudar audio solo).
+        return START_NOT_STICKY
     }
 
     // ── Controles del sistema (MediaSession callback) ─────────────────────────
@@ -261,8 +295,9 @@ class AudioForegroundService : Service() {
     // handlers; siempre actúan sobre el MISMO motor (nunca crean otro) y
     // actualizan la notificación para reflejar el estado real.
     private fun handleSystemPlay() {
+        Diagnostics.trace("media", "MEDIA_PLAY before{running=$running}")
         shouldPlay = true
-        if (!running) {
+        if (!running || !engine.isPlaying()) {
             engine.retune(lastBase, lastBeat)
             engine.start()
             focus?.request()
@@ -274,9 +309,11 @@ class AudioForegroundService : Service() {
         Diagnostics.audioActive = true
         setSessionPlaying(playing = true)
         refreshPlayerNotification()
+        persistSession()
     }
 
     private fun handleSystemPause() {
+        Diagnostics.trace("media", "MEDIA_PAUSE before{running=$running}")
         shouldPlay = false
         cancelFocusReacquire()
         engine.pause()
@@ -284,9 +321,11 @@ class AudioForegroundService : Service() {
         Diagnostics.audioActive = false
         setSessionPlaying(playing = false)
         refreshPlayerNotification()
+        persistSession()
     }
 
     private fun handleSystemStop() {
+        Diagnostics.trace("media", "MEDIA_STOP before{running=$running}")
         shouldPlay = false
         cancelFocusReacquire()
         focus?.abandon()
@@ -359,12 +398,13 @@ class AudioForegroundService : Service() {
         }
     }
 
-    // ── P3 — crash recovery: persistencia de la sesión de audio ──────────────
-    // El proceso puede ser eliminado por el SO mientras la sesión suena (el
-    // foreground service se mata por presión de memoria o el usuario lo limpia
-    // de recientes). START_STICKY lo recrea con intent null: aquí se restaura
-    // la MISMA sesión (frecuencias, onda, volumen, título) en vez de arrancar
-    // con defaults y mentir en la notificación.
+    // ── P5.1 — persistencia de la sesión (parámetros SÍ, auto-reproducción NO) ─
+    // La sesión se persiste para que la UI pueda re-sincronizarse (GET_AUDIO_STATE)
+    // y para que un comando explícito posterior use los mismos parámetros. PERO
+    // un shouldPlay persistido JAMÁS se convierte en engine.start(): tras la
+    // muerte del proceso, el servicio no se recrea (START_NOT_STICKY) y, si se
+    // recrea con intent null, se detiene solo. Ningún audio nace sin causa
+    // auditable.
     private fun persistSession() {
         try {
             // putFloat: SharedPreferences no tiene putDouble; la precisión
@@ -382,40 +422,34 @@ class AudioForegroundService : Service() {
         }
     }
 
-    private fun restorePersistedSession() {
+    // P5.1 — restart del servicio con intent null (recreación tras kill del
+    // proceso): NUNCA reanuda audio. Se conservan los parámetros persistidos en
+    // memoria (por si llega un comando explícito en esta generación) y el
+    // servicio se detiene solo — sin sesión sonando no hay notificación ni
+    // foreground colgado.
+    private fun handleNullIntentRestart() {
         try {
             val p = prefs()
-            if (!p.getBoolean("shouldPlay", false)) {
-                // Sin sesión activa al morir: no quedarse colgado en foreground.
-                stopForegroundCompat()
-                stopSelf()
-                return
-            }
             lastBase = p.getFloat("base", 220f).toDouble()
             lastBeat = p.getFloat("beat", 6f).toDouble()
             lastWave = p.getString("wave", "") ?: ""
             lastVolume = p.getFloat("volume", 0.6f).toDouble()
             sessionTitle = p.getString("title", "Sesión Vyneural") ?: "Sesión Vyneural"
-            shouldPlay = true
-            engine.retune(lastBase, lastBeat)
-            if (lastWave.isNotEmpty()) engine.setWave(lastWave)
-            engine.setVolume(lastVolume)
-            focus?.request()
-            engine.start()
-            engine.resume()
-            running = true
-            Diagnostics.audioActive = true
-            BineuralLog.d(
-                "audio-service",
-                "restart START_STICKY: sesión restaurada ${lastBase}/${lastBase + lastBeat} Hz wave=$lastWave vol=$lastVolume",
-            )
-            setSessionPlaying(playing = true)
-            refreshPlayerNotification()
-        } catch (e: Exception) {
-            BineuralLog.e("audio-service", "restorePersistedSession falló", e)
-            stopForegroundCompat()
-            stopSelf()
+        } catch (_: Exception) {
+            /* sin sesión persistida: quedan los defaults */
         }
+        shouldPlay = false
+        Diagnostics.trace(
+            "restart",
+            "intent=null: NO_AUTO_PLAY (parámetros conservados, motor NO arrancado) " +
+                "persisted=${prefs().getBoolean("shouldPlay", false)}",
+        )
+        BineuralLog.d(
+            "audio-service",
+            "restart con intent null: NO_AUTO_PLAY — se espera un comando explícito (P5.1)",
+        )
+        stopForegroundCompat()
+        stopSelf()
     }
 
     private fun clearSession() {
@@ -530,37 +564,61 @@ class AudioForegroundService : Service() {
             ContextCompat.startForegroundService(context, i)
         }
 
+        // P5.1 — PAUSE de un servicio inactivo es NO-OP: un pause NUNCA puede
+        // crear/revivir el servicio de audio (si no, una pausa tras un kill del
+        // proceso crearía un foreground colgado con la notificación "En pausa").
         fun pause(context: Context) {
+            if (!serviceAlive(context)) {
+                Diagnostics.trace("cmd", "PAUSE dropped: servicio no activo (un pause no crea audio)")
+                return
+            }
             val i = Intent(context, AudioForegroundService::class.java).setAction(ACTION_PAUSE)
-            ContextCompat.startForegroundService(context, i)
+            context.startService(i)
         }
 
+        // USER_RESUME / MEDIA_PLAY: SÍ pueden crear/revivir el servicio (es una
+        // acción de reproducción explícita).
         fun resume(context: Context) {
             val i = Intent(context, AudioForegroundService::class.java).setAction(ACTION_RESUME)
             ContextCompat.startForegroundService(context, i)
         }
 
+        // P5.1 — CONFIGURACIÓN nunca crea reproducción: retune/wave/volumen solo
+        // se entregan si el servicio ya está activo. Si está muerto, se descartan
+        // (el próximo START lleva los parámetros completos de todos modos).
         fun retune(context: Context, base: Double, beat: Double, wave: String? = null) {
+            if (!serviceAlive(context)) {
+                Diagnostics.trace("config", "RETUNE dropped: servicio no activo (config nunca revive audio)")
+                return
+            }
             val i = Intent(context, AudioForegroundService::class.java)
                 .setAction(ACTION_FREQ)
                 .putExtra(EXTRA_BASE, base)
                 .putExtra(EXTRA_BEAT, beat)
                 .putExtra(EXTRA_WAVE, wave ?: "")
-            ContextCompat.startForegroundService(context, i)
+            context.startService(i)
         }
 
         fun setWave(context: Context, wave: String) {
+            if (!serviceAlive(context)) {
+                Diagnostics.trace("config", "SET_WAVE dropped: servicio no activo (config nunca revive audio)")
+                return
+            }
             val i = Intent(context, AudioForegroundService::class.java)
                 .setAction(ACTION_WAVE)
                 .putExtra(EXTRA_WAVE, wave)
-            ContextCompat.startForegroundService(context, i)
+            context.startService(i)
         }
 
         fun setVolume(context: Context, level: Double) {
+            if (!serviceAlive(context)) {
+                Diagnostics.trace("config", "SET_AUDIO_LEVEL dropped: servicio no activo (config nunca revive audio)")
+                return
+            }
             val i = Intent(context, AudioForegroundService::class.java)
                 .setAction(ACTION_VOLUME)
                 .putExtra(EXTRA_LEVEL, level)
-            ContextCompat.startForegroundService(context, i)
+            context.startService(i)
         }
 
         fun stop(context: Context) {
@@ -579,6 +637,13 @@ class AudioForegroundService : Service() {
         }
 
         fun isRunning(context: Context): Boolean {
+            if (running) return true
+            return isServiceRunning(context)
+        }
+
+        /** ¿El servicio de audio está vivo AHORA? (guarda de P5.1: los comandos
+         *  que no son de reproducción nunca lo crean). */
+        private fun serviceAlive(context: Context): Boolean {
             if (running) return true
             return isServiceRunning(context)
         }
