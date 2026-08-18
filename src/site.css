@@ -2560,6 +2560,36 @@ html:not(.in-app) .in-app-only {
   }
 }
 
+.it-step-freq-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.it-step-freq-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.it-step-custom-btn {
+  padding: 8px 12px;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.it-step-notify-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9em;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+
+.it-step-notify-wrap.hidden {
+  display: none;
+}
+
 .it-step-days-wrap {
   display: flex;
   flex-direction: column;

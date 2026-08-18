@@ -49,13 +49,13 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://vyneural-six.vercel.app/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-DhK14ogF.js"></script>
-    <link rel="modulepreload" href="./assets/site-BEReyNnk.js">
+    <script type="module" src="./assets/cuenta-CKVqI8iD.js"></script>
+    <link rel="modulepreload" href="./assets/site-CDQm-AOx.js">
     <link rel="modulepreload" href="./assets/freq-cover-DHdNxLHU.js">
-    <link rel="modulepreload" href="./assets/freq-modal-DnK2HU2x.js">
-    <link rel="modulepreload" href="./assets/itineraries-BsYuVGlQ.js">
+    <link rel="modulepreload" href="./assets/freq-modal-Z9bs3xhp.js">
+    <link rel="modulepreload" href="./assets/itineraries-5MUdCsiH.js">
     <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
-    <link rel="stylesheet" href="./assets/site-qCYCbru3.css">
+    <link rel="stylesheet" href="./assets/site-CHleZ_PQ.css">
   </head>
   <body>
     <header class="site-nav">
@@ -72,7 +72,7 @@
         <a href="/privacidad">Privacidad</a>
         <a href="/hoja-de-ruta">Hoja de ruta</a>
         <a href="/codigo-abierto">Código abierto</a>
-        <a class="in-app-only" href="/rutina">Tu rutina</a>
+        <a href="/rutina">Tu rutina</a>
       </nav>
     </header>
 
@@ -181,7 +181,10 @@
                     <legend>Pasos — frecuencias en secuencia <em>(opcional)</em></legend>
                     <div class="cuenta-form-row">
                       <label>Frecuencia
-                        <select id="it-step-freq"></select>
+                        <span class="it-step-freq-row">
+                          <select id="it-step-freq"></select>
+                          <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom">🎨 Personalizar</button>
+                        </span>
                       </label>
                       <label>Duración (min)
                         <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
@@ -204,8 +207,13 @@
                         </div>
                       </div>
                     </div>
+                    <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
+                      <input type="checkbox" id="it-step-notify" checked />
+                      🔔 Avisarme con notificación a esa hora
+                    </label>
                     <p class="cuenta-empty" id="it-step-time-hint">
-                      Con horario, este paso te manda un recordatorio (notificación push) a esa hora.
+                      Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
+                      arriba si preferís que quede solo agendado, sin notificación).
                       Sin días marcados, es de una sola vez.
                     </p>
                     <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
@@ -297,7 +305,7 @@
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
           <a href="/descargar">Descargar APK (Android)</a>
-          <a class="in-app-only" href="/rutina">Tu rutina</a>
+          <a href="/rutina">Tu rutina</a>
           <a href="/hoja-de-ruta">Hoja de ruta</a>
           <a href="/codigo-abierto">Código abierto</a>
         </div>

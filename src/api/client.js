@@ -73,6 +73,7 @@ export function storeSession(session) {
   }
   bridgeNotify('STORE_AUTH', {
     access_token: session.access_token || null,
+    refresh_token: session.refresh_token || null,
     user_id: session.user_id || null,
     email: session.email || null,
   });

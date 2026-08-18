@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.vyneural.bineural.BuildConfig
+import com.vyneural.bineural.lifecycle.LifecycleManager
 import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.util.AuthStore
 import com.vyneural.bineural.util.BineuralLog
@@ -25,7 +26,7 @@ import org.json.JSONObject
 
 /**
  * Sincronización NATIVA con el backend (el "push" que la APK puede ofrecer
- * sin Firebase): un ciclo periódico (AlarmManager, auto-reprogramable, ~30
+ * sin Firebase): un ciclo periódico (AlarmManager, auto-reprogramable, ~5
  * min) consulta las alarmas del usuario y las (re)programa en el reloj del
  * sistema. Así una alarma creada en la WEB llega a la APK y dispara con la
  * app cerrada, aunque el usuario no abra la app. También reporta el estado
@@ -34,6 +35,16 @@ import org.json.JSONObject
  * Honestidad: no es push en tiempo real (eso requiere FCM/Firebase); es
  * sincronización periódica del servidor al dispositivo, suficiente para que
  * los recordatorios estén programados ANTES de la hora.
+ *
+ * Access token corto (15 min, ver app/config.py del backend): este ciclo
+ * puede refrescarlo con su propio refresh_token cuando la app está cerrada
+ * (LifecycleManager.state != FOREGROUND) — es el único actor con el token en
+ * ese momento. En foreground, un 401 se descarta en silencio: la WebView ya
+ * tiene su propio refresh reactivo (client.js::tryRefresh) y empuja el token
+ * nuevo acá vía STORE_AUTH en cuanto lo obtiene. Si dos refrescos (nativo +
+ * WebView) corrieran a la vez con el mismo refresh_token de un solo uso, el
+ * segundo en llegar invalidaría la sesión del primero — este gate evita esa
+ * carrera.
  */
 object AlarmSync {
     const val ACTION_SYNC = "com.vyneural.bineural.ALARM_SYNC"
@@ -46,6 +57,7 @@ object AlarmSync {
 
     private const val PREFS_SYNCED = "bineural_synced_alarms"
     private const val KEY_IDS = "ids"
+    private const val KEY_LAST_REPORTED = "last_reported"
 
     /** Programa el próximo ciclo. Se auto-reprograma al ejecutarse. */
     fun schedulePeriodic(context: Context) {
@@ -59,10 +71,12 @@ object AlarmSync {
         )
     }
 
-    /** Ejecuta un ciclo completo (alarmas + reporte de dispositivo). */
+    /** Ejecuta un ciclo completo (alarmas + reporte de dispositivo). Cada
+     *  paso relee el token de AuthStore (no lo captura una sola vez al
+     *  entrar): si syncAlarms lo refresca —o lo limpia por sesión muerta—
+     *  reportDevice ve el estado actualizado, no uno viejo. */
     fun run(context: Context) {
-        val token = AuthStore.token(context)
-        if (token == null) {
+        if (AuthStore.token(context) == null) {
             // Sin sesión no hay nada que sincronizar; el ciclo periódico igual
             // queda programado (para cuando haya sesión).
             schedulePeriodic(context)
@@ -70,8 +84,8 @@ object AlarmSync {
         }
         Thread {
             try {
-                syncAlarms(context, token)
-                reportDevice(context, token)
+                syncAlarms(context)
+                reportDevice(context)
             } catch (e: Exception) {
                 BineuralLog.e("alarmsync", "ciclo de sincronización falló", e)
             } finally {
@@ -80,18 +94,19 @@ object AlarmSync {
         }.start()
     }
 
-    /** Cancela y olvida las alarmas que llegaron por sync (al cerrar sesión). */
+    /** Cancela y olvida las alarmas que llegaron por sync (al cerrar sesión,
+     *  o cuando el refresh nativo descubre que la sesión ya no es válida). */
     fun clearSynced(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
         val synced = prefs.getStringSet(KEY_IDS, emptySet()) ?: emptySet()
         val scheduler = AlarmScheduler(context)
         for (id in synced) scheduler.cancel(id)
-        prefs.edit().remove(KEY_IDS).apply()
+        prefs.edit().remove(KEY_IDS).remove(KEY_LAST_REPORTED).apply()
     }
 
     // ── Sincronización de alarmas ───────────────────────────────────────────
-    private fun syncAlarms(context: Context, token: String) {
-        val json = httpGet("${BuildConfig.API_BASE}/api/v1/alarms", token) ?: return
+    private fun syncAlarms(context: Context) {
+        val json = authorizedGet(context, "${BuildConfig.API_BASE}/api/v1/alarms") ?: return
         val server = JSONArray(json)
         val scheduler = AlarmScheduler(context)
         val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
@@ -135,21 +150,89 @@ object AlarmSync {
     }
 
     // ── Reporte del dispositivo (estado de push) ────────────────────────────
-    private fun reportDevice(context: Context, token: String) {
+    private fun reportDevice(context: Context) {
         // En segundo plano no hay Activity (el detalle DENIED_PERMANENTLY lo
         // reporta la web vía bridge cuando la app está abierta). Acá basta el
         // estado real del permiso del sistema.
         val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
+        val permission = if (granted) "granted" else "denied"
+
+        // Nada de esto cambia seguido: si es idéntico al último reporte que
+        // tuvo éxito, saltear el PUT. El GET de alarmas de arriba (lo que
+        // importa para la velocidad de un recordatorio) no se ve afectado.
+        val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
+        val fingerprint = "$permission|${BuildConfig.VERSION_NAME}"
+        if (syncedPrefs.getString(KEY_LAST_REPORTED, null) == fingerprint) return
+
         val body = JSONObject()
             .put("device_id", DeviceId.get(context))
             .put("platform", "apk")
             .put("app_version", BuildConfig.VERSION_NAME)
-            .put("notification_permission", if (granted) "granted" else "denied")
+            .put("notification_permission", permission)
             .put("push_enabled", granted)
             .put("user_agent", "Vyneural-APK/${BuildConfig.VERSION_NAME}")
-        httpPut("${BuildConfig.API_BASE}/api/v1/devices/me", token, body)
+        val ok = authorizedPut(context, "${BuildConfig.API_BASE}/api/v1/devices/me", body)
+        if (ok) syncedPrefs.edit().putString(KEY_LAST_REPORTED, fingerprint).apply()
+    }
+
+    // ── Autenticación con refresh nativo ────────────────────────────────────
+
+    /** GET autenticado con reintento tras refresh (ver doc de la clase para
+     *  el porqué del gate por LifecycleManager). Devuelve null si no hay
+     *  sesión, si el refresh falla, o si la respuesta final no es 2xx. */
+    private fun authorizedGet(context: Context, url: String): String? {
+        val token = AuthStore.token(context) ?: return null
+        val first = httpGet(url, token)
+        if (first.code != 401) return if (first.code in 200..299) first.body else null
+        if (!shouldRetryWithRefresh(context)) return null
+        val fresh = AuthStore.token(context) ?: return null
+        val retry = httpGet(url, fresh)
+        return if (retry.code in 200..299) retry.body else null
+    }
+
+    /** PUT autenticado con el mismo reintento. Devuelve si terminó en 2xx. */
+    private fun authorizedPut(context: Context, url: String, body: JSONObject): Boolean {
+        val token = AuthStore.token(context) ?: return false
+        val first = httpPut(url, token, body)
+        if (first.code != 401) return first.code in 200..299
+        if (!shouldRetryWithRefresh(context)) return false
+        val fresh = AuthStore.token(context) ?: return false
+        return httpPut(url, fresh, body).code in 200..299
+    }
+
+    /** Ante un 401: si la app está en foreground, la WebView ya tiene su
+     *  propio refresh reactivo — no competir por el refresh_token de un solo
+     *  uso, solo abortar este paso. Si no, intentar refrescar acá; si el
+     *  refresh mismo falla (refresh_token vencido o revocado), la sesión
+     *  está realmente muerta: limpiarla para que los próximos ciclos corten
+     *  de inmediato en vez de seguir pegándole al backend cada 5 min. */
+    private fun shouldRetryWithRefresh(context: Context): Boolean {
+        if (LifecycleManager.state == "FOREGROUND") return false
+        if (refreshAccessToken(context)) return true
+        BineuralLog.e("alarmsync", "refresh falló: sesión muerta, limpiando estado nativo")
+        AuthStore.clear(context)
+        clearSynced(context)
+        return false
+    }
+
+    private fun refreshAccessToken(context: Context): Boolean {
+        val refreshToken = AuthStore.refreshToken(context) ?: return false
+        val body = JSONObject().put("refresh_token", refreshToken)
+        val result = httpPost("${BuildConfig.API_BASE}/api/v1/auth/refresh", body)
+        if (result.code !in 200..299 || result.body == null) return false
+        return try {
+            val json = JSONObject(result.body)
+            val newAccess = json.optString("access_token", null) ?: return false
+            val newRefresh = json.optString("refresh_token", null) ?: return false
+            AuthStore.saveTokens(context, newAccess, newRefresh)
+            BineuralLog.d("alarmsync", "access token refrescado en background")
+            true
+        } catch (e: Exception) {
+            BineuralLog.e("alarmsync", "refresh: respuesta inválida", e)
+            false
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -205,7 +288,10 @@ object AlarmSync {
         return null
     }
 
-    private fun httpGet(url: String, token: String): String? {
+    // ── HTTP crudo (sin retry: eso lo maneja authorizedGet/Put arriba) ──────
+    private class HttpResult(val code: Int, val body: String?)
+
+    private fun httpGet(url: String, token: String): HttpResult {
         var conn: HttpURLConnection? = null
         return try {
             conn = URL(url).openConnection() as HttpURLConnection
@@ -214,22 +300,23 @@ object AlarmSync {
             conn.setRequestProperty("Accept", "application/json")
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000
-            if (conn.responseCode !in 200..299) {
-                BineuralLog.e("alarmsync", "GET $url → ${conn.responseCode}")
-                return null
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                BineuralLog.e("alarmsync", "GET $url → $code")
+                return HttpResult(code, null)
             }
-            BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+            HttpResult(code, BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() })
         } catch (e: Exception) {
             BineuralLog.e("alarmsync", "GET falló: ${e.message}")
-            null
+            HttpResult(-1, null)
         } finally {
             conn?.disconnect()
         }
     }
 
-    private fun httpPut(url: String, token: String, body: JSONObject) {
+    private fun httpPut(url: String, token: String, body: JSONObject): HttpResult {
         var conn: HttpURLConnection? = null
-        try {
+        return try {
             conn = URL(url).openConnection() as HttpURLConnection
             conn.requestMethod = "PUT"
             conn.setRequestProperty("Authorization", "Bearer $token")
@@ -239,11 +326,38 @@ object AlarmSync {
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode !in 200..299) {
-                BineuralLog.e("alarmsync", "PUT $url → ${conn.responseCode}")
-            }
+            val code = conn.responseCode
+            if (code !in 200..299) BineuralLog.e("alarmsync", "PUT $url → $code")
+            HttpResult(code, null)
         } catch (e: Exception) {
             BineuralLog.e("alarmsync", "PUT falló: ${e.message}")
+            HttpResult(-1, null)
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    /** POST sin Authorization (el refresh se autentica con el refresh_token
+     *  en el body, no con un Bearer). */
+    private fun httpPost(url: String, body: JSONObject): HttpResult {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = URL(url).openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.doOutput = true
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 15_000
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.let { BufferedReader(InputStreamReader(it)).use { r -> r.readText() } }
+            if (code !in 200..299) BineuralLog.e("alarmsync", "POST $url → $code")
+            HttpResult(code, text)
+        } catch (e: Exception) {
+            BineuralLog.e("alarmsync", "POST falló: ${e.message}")
+            HttpResult(-1, null)
         } finally {
             conn?.disconnect()
         }

@@ -9,8 +9,10 @@ import { getAccessToken } from './api/client.js';
 import { listFavorites, removeFavorite } from './api/favorites.js';
 import {
   listFrequencies,
+  createFrequency,
   deleteFrequency,
 } from './api/frequencies.js';
+import { PROFILES } from './models/profiles.js';
 import { listAlarms, deleteAlarm } from './api/alarms.js';
 import {
   listItineraries,
@@ -641,8 +643,15 @@ function wireForms() {
       if (ok) freqBtn.blur();
     });
   }
-  // Tras guardar desde el modal, la lista se refresca sola.
-  document.addEventListener('vyneural:freq-saved', () => loadAll());
+  // Tras guardar desde el modal, la lista se refresca sola. Si el modal se
+  // abrió desde "Personalizar" en un paso de itinerario, la nueva frecuencia
+  // queda preseleccionada ahí para agregarla como paso enseguida.
+  document.addEventListener('vyneural:freq-saved', async (ev) => {
+    await loadAll();
+    const sel = $('it-step-freq');
+    const freq = ev.detail && ev.detail.frequency;
+    if (sel && freq) sel.value = `f:${freq.id}`;
+  });
 
   const itForm = $('itinerary-form');
   if (itForm) {
@@ -660,7 +669,7 @@ function wireForms() {
           frequency_id: s.frequency_id,
           position: i,
           duration: s.duration * 60,
-          configuration: {},
+          configuration: s.time_of_day ? { notification_enabled: s.notification_enabled !== false } : {},
           time_of_day: s.time_of_day || undefined,
           repeat_rule: s.time_of_day ? rruleFor(s.days) || undefined : undefined,
         }));
@@ -727,18 +736,32 @@ function wirePushButtons() {
 
 // ── Pasos del itinerario ───────────────────────────────────────────────────
 
+// El select combina las predefinidas del generador (siempre disponibles, sin
+// sesión ni frecuencias guardadas) con las que el usuario ya guardó en su
+// cuenta. "p:<id>" = predefinida, "f:<uuid>" = guardada (ver wireItinerarySteps).
 function populateStepFreqs() {
   const sel = $('it-step-freq');
   if (!sel) return;
-  sel.innerHTML = savedFreqs
-    .map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name || 'Frecuencia')} · ${formatHz(f.carrier_frequency ?? f.left_frequency)}</option>`)
+  const predefined = PROFILES
+    .map((p) => `<option value="p:${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${formatHz(p.stimulus.carrierBase)}</option>`)
     .join('');
-  if (!savedFreqs.length) {
-    sel.innerHTML = '<option value="">Guardá una frecuencia primero</option>';
-    sel.disabled = true;
-  } else {
-    sel.disabled = false;
-  }
+  const saved = savedFreqs
+    .map((f) => `<option value="f:${escapeHtml(f.id)}">${escapeHtml(f.name || 'Frecuencia')} · ${formatHz(f.carrier_frequency ?? f.left_frequency)}</option>`)
+    .join('');
+  sel.innerHTML = `<optgroup label="Predefinidas">${predefined}</optgroup>`
+    + (saved ? `<optgroup label="Mis frecuencias">${saved}</optgroup>` : '');
+  sel.disabled = false;
+}
+
+// Busca en las frecuencias guardadas una que coincida con una predefinida
+// (misma portadora/ritmo/onda) para no crear duplicados cada vez que se usa.
+function findMatchingSavedFreq(profile) {
+  return savedFreqs.find(
+    (f) =>
+      Math.abs((f.carrier_frequency ?? 0) - profile.stimulus.carrierBase) < 0.05 &&
+      Math.abs((f.beat_frequency ?? 0) - profile.stimulus.beat) < 0.05 &&
+      (f.waveform || 'sine') === (profile.stimulus.modulation || 'sine'),
+  );
 }
 
 function renderItSteps() {
@@ -752,9 +775,10 @@ function renderItSteps() {
   itSteps.forEach((step, i) => {
     const li = document.createElement('li');
     li.className = 'cuenta-item';
+    const bell = step.notification_enabled === false ? '🔕' : '🔔';
     const days = step.days && step.days.length
-      ? ` · 🔔 ${[...step.days].sort((a, b) => a - b).map((d) => DAY_LETTERS[d]).join(' ')}`
-      : step.time_of_day ? ' · 🔔 una vez' : '';
+      ? ` · ${bell} ${[...step.days].sort((a, b) => a - b).map((d) => DAY_LETTERS[d]).join(' ')}`
+      : step.time_of_day ? ` · ${bell} una vez` : '';
     const schedule = step.time_of_day ? `${step.time_of_day}${days}` : '';
     li.innerHTML = `<div class="cuenta-item-body">
         <b>${i + 1}. ${escapeHtml(step.name)}</b>
@@ -778,32 +802,81 @@ function wireItineraryDays() {
   });
 }
 
+// Resuelve el value del select ("p:<id>" | "f:<uuid>") a una frecuencia
+// guardada con id real: las predefinidas se guardan en la cuenta la primera
+// vez que se usan (reutilizando la existente si ya coincide una).
+async function resolveStepFrequency(value) {
+  if (value.startsWith('f:')) {
+    return savedFreqs.find((f) => f.id === value.slice(2)) || null;
+  }
+  if (value.startsWith('p:')) {
+    const profile = PROFILES.find((p) => p.id === value.slice(2));
+    if (!profile) return null;
+    const existing = findMatchingSavedFreq(profile);
+    if (existing) return existing;
+    const created = await createFrequency({
+      name: profile.name,
+      carrier_frequency: profile.stimulus.carrierBase,
+      beat_frequency: profile.stimulus.beat,
+      waveform: profile.stimulus.modulation || 'sine',
+      condition: 'binaural',
+      config: { source: 'itinerary-preset', profile_id: profile.id },
+    });
+    savedFreqs.push(created);
+    return created;
+  }
+  return null;
+}
+
+function toggleStepNotifyWrap() {
+  const wrap = $('it-step-notify-wrap');
+  const timeEl = $('it-step-time');
+  if (wrap) wrap.classList.toggle('hidden', !(timeEl && timeEl.value));
+}
+
 function wireItinerarySteps() {
   const add = $('it-step-add');
+  const custom = $('it-step-custom');
+  const timeEl = $('it-step-time');
+  if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
+  if (custom) {
+    custom.addEventListener('click', () => openFreqModal({ source: 'itinerary' }));
+  }
   if (!add) return;
-  add.addEventListener('click', () => {
+  add.addEventListener('click', async () => {
     const sel = $('it-step-freq');
     const dur = $('it-step-duration');
-    const timeEl = $('it-step-time');
-    const freq = savedFreqs.find((f) => f.id === sel.value);
-    if (!freq) return;
-    const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
-    const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
-    const days = time_of_day ? [...itStepDays] : [];
-    itSteps.push({
-      frequency_id: freq.id,
-      name: freq.name || 'Frecuencia',
-      duration,
-      time_of_day,
-      days,
-    });
-    renderItSteps();
-    // Limpiar el sub-formulario de horario para el próximo paso (la
-    // frecuencia/duración se dejan como estaban: es común encadenar pasos
-    // parecidos, pero el horario es específico de cada uno).
-    if (timeEl) timeEl.value = '';
-    itStepDays.clear();
-    document.querySelectorAll('#it-step-days .day-chip.active').forEach((b) => b.classList.remove('active'));
+    const notifyEl = $('it-step-notify');
+    if (!sel.value) return;
+    add.disabled = true;
+    try {
+      const freq = await resolveStepFrequency(sel.value);
+      if (!freq) return;
+      const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
+      const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
+      const days = time_of_day ? [...itStepDays] : [];
+      itSteps.push({
+        frequency_id: freq.id,
+        name: freq.name || 'Frecuencia',
+        duration,
+        time_of_day,
+        days,
+        notification_enabled: notifyEl ? notifyEl.checked : true,
+      });
+      renderItSteps();
+      // Limpiar el sub-formulario de horario para el próximo paso (la
+      // frecuencia/duración se dejan como estaban: es común encadenar pasos
+      // parecidos, pero el horario es específico de cada uno).
+      if (timeEl) timeEl.value = '';
+      itStepDays.clear();
+      document.querySelectorAll('#it-step-days .day-chip.active').forEach((b) => b.classList.remove('active'));
+      if (notifyEl) notifyEl.checked = true;
+      toggleStepNotifyWrap();
+    } catch (err) {
+      alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
+    } finally {
+      add.disabled = false;
+    }
   });
 }
 

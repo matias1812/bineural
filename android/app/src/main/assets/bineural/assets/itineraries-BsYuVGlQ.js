@@ -1,1 +1,0 @@
-import{w as a,d as t,B as r,x as s}from"./site-BEReyNnk.js";const o=()=>a("/api/v1/itineraries"),c=e=>s("/api/v1/itineraries",e),p=e=>t(`/api/v1/itineraries/${e}`),d=e=>r(`/api/v1/itineraries/${e}/toggle`),l=(e,i)=>r(`/api/v1/itineraries/${e}/reorder`,{order:i});export{c,p as d,o as l,l as r,d as t};

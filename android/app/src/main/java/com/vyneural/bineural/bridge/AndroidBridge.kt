@@ -290,6 +290,7 @@ class AndroidBridge(
                     AuthStore.save(
                         context,
                         payload?.optString("access_token", null),
+                        payload?.optString("refresh_token", null),
                         payload?.optString("user_id", null),
                         payload?.optString("email", null),
                     )
