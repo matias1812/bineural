@@ -4,10 +4,28 @@
 // REGLA DE ORO: una notificación Push NUNCA reproduce audio. El SW solo
 // muestra la notificación; el usuario decide con un gesto.
 
-import { get, post, del } from './client.js';
+import { cachedGet, post, del } from './client.js';
+
+// ── Estado real del backend de push (compartido) ───────────────────────────
+// La UI del generador, /diagnostico y el manager de notificaciones necesitan
+// saber si el backend tiene Web Push configurado SIN re-consultar cada vez.
+// Se cachea en memoria: `null` = aún sin consultar; tras la primera consulta
+// queda el último estado conocido ({ supported, configured, public_key,
+// subscription_count }). NUNCA se guardan claves privadas.
+let cachedStatus = null;
+
+export function setCachedPushStatus(status) {
+  cachedStatus = status || null;
+}
+
+export function getCachedPushStatus() {
+  return cachedStatus;
+}
 
 export async function pushStatus() {
-  return get('/api/v1/push/status');
+  const s = await cachedGet('/api/v1/push/status');
+  setCachedPushStatus(s);
+  return s;
 }
 
 // Registra el Service Worker y suscribe el dispositivo si el backend está
@@ -21,13 +39,30 @@ export async function subscribeToPush() {
   try {
     status = await pushStatus();
   } catch (_) {
+    setCachedPushStatus({ supported: true, configured: false });
     return { configured: false, subscribed: false, reason: 'backend-offline' };
   }
   if (!status.configured || !status.public_key) {
+    setCachedPushStatus(status);
     return { configured: false, subscribed: false, reason: 'backend-not-configured' };
   }
   try {
-    const reg = await navigator.serviceWorker.ready;
+    // getRegistration() resuelve al instante; serviceWorker.ready colgaría
+    // si no hay service worker registrado (p. ej. en dev/localhost).
+    let reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) {
+      // Entrar directo a /cuenta sin pasar por la home podía dejar la página
+      // sin SW. site.js ya lo registra en todas las páginas; acá además se
+      // registra en el acto como red de seguridad.
+      try {
+        reg = await navigator.serviceWorker.register('sw.js');
+      } catch (_) {
+        /* sin registro: motivo honesto abajo */
+      }
+    }
+    if (!reg) {
+      return { configured: true, subscribed: false, reason: 'no-service-worker' };
+    }
     const applicationServerKey = urlBase64ToUint8Array(status.public_key);
     let subscription = await reg.pushManager.getSubscription();
     if (!subscription) {
@@ -42,6 +77,7 @@ export async function subscribeToPush() {
       auth: btoa(String.fromCharCode(...new Uint8Array(subscription.getKey('auth')))),
       user_agent: navigator.userAgent.slice(0, 500),
     });
+    setCachedPushStatus({ ...status, subscription_count: 1 });
     return { configured: true, subscribed: true };
   } catch (err) {
     return { configured: true, subscribed: false, reason: String(err && err.message || err) };
@@ -51,7 +87,11 @@ export async function subscribeToPush() {
 export async function unsubscribeFromPush() {
   if (!('serviceWorker' in navigator)) return false;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    // getRegistration() en vez de ready: si nunca hubo SW, ready colgaría
+    // para siempre; con getRegistration() simplemente no hay nada que dar de
+    // baja y se devuelve false.
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return false;
     const subscription = await reg.pushManager.getSubscription();
     if (!subscription) return false;
     await del('/api/v1/push/subscribe', {
@@ -60,6 +100,7 @@ export async function unsubscribeFromPush() {
       auth: '',
     }).catch(() => {});
     await subscription.unsubscribe();
+    setCachedPushStatus(null);
     return true;
   } catch (_) {
     return false;

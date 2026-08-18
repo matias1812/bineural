@@ -8,10 +8,15 @@
 // Verifica, sin modificar nada:
 //   1. Backend /health y /health/db (servicio + PostgreSQL).
 //   2. /docs (la app FastAPI correcta, no un 404).
+//   2b. SHA-256 real de /vyneural.apk vs el publicado en /descargar (evita que
+//       vuelva a pasar desapercibido un release desincronizado — ver
+//       scripts/release-apk-meta.mjs, que es quien debe mantenerlos iguales).
 //   3. Rewrite del frontend: /api/... debe responder el backend (no el 404 de Vercel).
 //   4. CORS: la API debe admitir el origen del frontend.
 //   5. (Opcional, --email) dispara forgot-password → el correo DEBE llegar a esa
 //      bandeja (revisar spam). La respuesta es genérica a propósito.
+
+import { createHash } from 'node:crypto';
 
 const FRONTEND = process.env.FRONTEND_URL || 'https://vyneural-six.vercel.app';
 const BACKEND = process.env.BACKEND_URL || 'https://vyneural-backend.onrender.com';
@@ -69,18 +74,49 @@ async function main() {
     bad(`/docs inalcanzable: ${e.message}`);
   }
 
-  // 3) Rewrite del frontend: /api debe pasar al backend
+  // 2b) Integridad de la APK: el SHA-256 real del binario servido tiene que
+  // coincidir con el que /descargar le dice al usuario que verifique. Un
+  // desajuste acá deja la instrucción de verificación de integridad del
+  // propio sitio mintiendo (hallazgo crítico de la auditoría 2026-08-18).
+  console.log('2b) SHA-256 de /vyneural.apk vs /descargar');
+  try {
+    const apkRes = await fetch(`${FRONTEND}/vyneural.apk`);
+    if (apkRes.status !== 200) {
+      bad(`/vyneural.apk → HTTP ${apkRes.status}`);
+    } else {
+      const buf = Buffer.from(await apkRes.arrayBuffer());
+      const realHash = createHash('sha256').update(buf).digest('hex');
+      const pageRes = await fetch(`${FRONTEND}/descargar`);
+      const pageHtml = await pageRes.text();
+      const m = pageHtml.match(/<code>([0-9a-f]{64})<\/code>/);
+      if (!m) {
+        bad('no se encontró el SHA-256 publicado en /descargar (¿cambió el markup?)');
+      } else if (m[1] !== realHash) {
+        bad(
+          `SHA-256 desincronizado — publicado=${m[1]} real=${realHash}. ` +
+          'Correr `node scripts/release-apk-meta.mjs` tras copiar el .apk nuevo a public/ y redesplegar.',
+        );
+      } else {
+        ok(`SHA-256 coincide (${realHash.slice(0, 16)}…, ${buf.length} bytes)`);
+      }
+    }
+  } catch (e) {
+    bad(`chequeo de integridad de la APK falló: ${e.message}`);
+  }
+
+  // 3) Rewrite del frontend: /api debe pasar al backend (401 "no autorizado"
+  //    del FastAPI = rewrite activo; el 404 con página de Vercel = NO publicado)
   console.log('3) Rewrite /api del frontend');
   try {
-    const { res, json } = await getJson(`${FRONTEND}/api/v1/push/status`);
-    if (res.status === 200 && json && typeof json === 'object') {
-      ok(`/api/v1/push/status → HTTP 200 (rewrite activo; configured=${json.configured ?? 'n/a'})`);
-    } else if (res.status === 200) {
-      ok('/api responde 200 (rewrite activo)');
+    const { res, json } = await getJson(`${FRONTEND}/api/v1/auth/me`);
+    if (res.status === 401 && json?.detail === 'no autorizado') {
+      ok(`/api/v1/auth/me → 401 del backend (rewrite activo; auth funcionando)`);
+    } else if (res.status === 401) {
+      ok(`/api responde 401 del backend (rewrite activo)`);
     } else if (res.status === 404) {
-      bad('HTTP 404 con cuerpo de Vercel ("The page could not be found") → el rewrite de /api NO está publicado. Commitear y desplegar vercel.json (o setear VITE_API_URL).');
+      bad('HTTP 404 con página de Vercel → el rewrite de /api NO está publicado. Commitear y desplegar vercel.json (o setear VITE_API_URL).');
     } else {
-      bad(`/api → HTTP ${res.status}`);
+      bad(`/api → HTTP ${res.status} (¿backend caído o en cold start?)`);
     }
   } catch (e) {
     bad(`/api del frontend inalcanzable: ${e.message}`);
@@ -104,9 +140,31 @@ async function main() {
     bad(`CORS inalcanzable: ${e.message}`);
   }
 
-  // 5) Correo (opcional)
+  // 5) Proveedor de correo (health/email): config + autenticación real del relay
+  console.log('5) Proveedor de correo');
+  try {
+    const { res, json } = await getJson(`${BACKEND}/health/email`);
+    if (res.status === 200 && json) {
+      const test = await getJson(`${BACKEND}/health/email?test=1`).catch(() => ({ json: null }));
+      const t = (test && test.json) || {};
+      const auth = t.auth_ok === true
+        ? 'autenticación SMTP/API OK ✓'
+        : t.error_kind === 'throttled'
+          ? 'prueba limitada (reintentar en 30 s)'
+          : t.error_kind
+            ? `falla (${t.error_kind}: ${t.error_detail || 'sin detalle'}) — si es smtp+free tier, Render bloquea 25/465/587; usar EMAIL_PROVIDER=resend|brevo`
+            : 'sin probar';
+      ok(`provider=${json.provider} · configured=${json.configured} · api_key_set=${json.api_key_set} · ${auth}`);
+    } else {
+      bad(`/health/email → HTTP ${res.status}`);
+    }
+  } catch (e) {
+    bad(`/health/email inalcanzable: ${e.message}`);
+  }
+
+  // 6) Correo (opcional)
   if (emailArg) {
-    console.log('5) Correo (forgot-password)');
+    console.log('6) Correo (forgot-password)');
     try {
       const { res, json } = await getJson(`${BACKEND}/api/v1/auth/forgot-password`, {
         method: 'POST',
@@ -121,7 +179,7 @@ async function main() {
       bad(`forgot-password inalcanzable: ${e.message}`);
     }
   } else {
-    console.log('5) Correo: omitido (pasá --email vos@ejemplo.com para probar el envío real)');
+    console.log('6) Correo: omitido (pasá --email vos@ejemplo.com para probar el envío real)');
   }
 
   console.log(failed === 0

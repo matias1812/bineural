@@ -67,6 +67,19 @@ class AudioForegroundService : Service() {
                 override fun onPlay() = handleSystemPlay()
                 override fun onPause() = handleSystemPause()
                 override fun onStop() = handleSystemStop()
+                // Adelantar/retroceder la FRECUENCIA desde los controles del SO
+                // (auriculares, pantalla de bloqueo, centro multimedia): cada
+                // salto mueve la portadora ±10 Hz (clamp 60–400, como el slider
+                // de la web) manteniendo el latido, con retune real del motor.
+                override fun onSkipToNext() = stepFrequency(+FREQ_STEP_HZ)
+                override fun onSkipToPrevious() = stepFrequency(-FREQ_STEP_HZ)
+                // El seek de la barra se traduce al mismo control: adelante =
+                // subir frecuencia, atrás = bajar (el tono es continuo, no hay
+                // posición temporal que buscar).
+                override fun onSeekTo(pos: Long) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    stepFrequency(if (pos >= now) +FREQ_STEP_HZ else -FREQ_STEP_HZ)
+                }
             })
             setActive(false)
         }
@@ -338,6 +351,33 @@ class AudioForegroundService : Service() {
         clearSession()
     }
 
+    // ── Frecuencia desde los controles del sistema (skip/seek) ────────────────
+    // Mueve la portadora en pasos de 10 Hz (60–400, mismos límites que el
+    // slider personalizado de la web) manteniendo el latido y la onda. Retunea
+    // el MISMO motor, actualiza metadata/notificación y avisa al JS para que la
+    // UI de la WebView quede sincronizada (evento 'vyneural:audiofreq').
+    private fun stepFrequency(deltaHz: Double) {
+        if (deltaHz == 0.0) return
+        Diagnostics.trace("media", "FREQ_STEP $deltaHz before{base=$lastBase beat=$lastBeat}")
+        val nextBase = (lastBase + deltaHz).coerceIn(60.0, 400.0)
+        if (nextBase == lastBase) return
+        lastBase = nextBase
+        engine.retune(lastBase, lastBeat)
+        refreshPlayerNotification()
+        persistSession()
+        // Metadata con las frecuencias nuevas (album = portadora/latido real).
+        val s = mediaSession ?: return
+        s.setMetadata(
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, sessionTitle)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, "Vyneural · Ondas binaurales")
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, "${lastBase} / ${(lastBase + lastBeat).toFixed(1)} Hz")
+                .build(),
+        )
+        onFrequencyChange?.invoke(lastBase, lastBeat)
+        Diagnostics.trace("media", "FREQ_STEP done{base=$lastBase beat=$lastBeat}")
+    }
+
     private fun setSessionPlaying(playing: Boolean, pushToJs: Boolean = true) {
         val s = mediaSession ?: return
         val now = android.os.SystemClock.elapsedRealtime()
@@ -353,7 +393,10 @@ class AudioForegroundService : Service() {
                 .setActions(
                     PlaybackState.ACTION_PLAY or
                         PlaybackState.ACTION_PAUSE or
-                        PlaybackState.ACTION_STOP,
+                        PlaybackState.ACTION_STOP or
+                        PlaybackState.ACTION_SKIP_TO_NEXT or
+                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackState.ACTION_SEEK_TO,
                 )
                 .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, now, 1f)
                 .build(),
@@ -543,6 +586,14 @@ class AudioForegroundService : Service() {
         // para que la UI de la WebView quede sincronizada con el motor nativo.
         @Volatile
         var onPlaybackStateChange: ((String) -> Unit)? = null
+
+        // Callback hacia MainActivity cuando los controles del SO (skip/seek)
+        // cambian la FRECUENCIA: la UI web se entera del nuevo base/beat.
+        @Volatile
+        var onFrequencyChange: ((Double, Double) -> Unit)? = null
+
+        // Paso de frecuencia por salto de MediaSession (adelantar/retroceder).
+        const val FREQ_STEP_HZ = 10.0
 
         @Volatile
         var running = false

@@ -24,17 +24,46 @@ import org.json.JSONObject
  */
 class AlarmScheduler(private val context: Context) {
 
+    companion object {
+        /**
+         * Límite de sonido de la alarma sin respuesta: a los
+         * ALARM_RING_LIMIT_MS de dispararse, si la notificación de alarma
+         * sigue activa (nadie la tocó ni descartó), se cancela sola — se
+         * corta el sonido/vibración (un ringtone de alarma puede ser largo y
+         * algunos OEM lo repiten hasta descartar) y se limpia el sombreado.
+         * La alarma avisa un tiempo acotado, nunca suena indefinidamente.
+         */
+        const val ALARM_RING_LIMIT_MS = 2 * 60 * 1000L // 2 minutos por defecto
+    }
+
     private val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private val prefs = context.getSharedPreferences("bineural_alarms", Context.MODE_PRIVATE)
+    private val ACTION_SILENCE_PREFIX = "com.vyneural.bineural.SILENCE_ALARM_"
 
     fun canScheduleExact(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.canScheduleExactAlarms() else true
 
-    fun schedule(alarmId: String, title: String, body: String, atMs: Long, days: List<Int>? = null) {
+    fun schedule(
+        alarmId: String,
+        title: String,
+        body: String,
+        atMs: Long,
+        days: List<Int>? = null,
+        freq: Double? = null,
+        beat: Double? = null,
+        wave: String? = null,
+    ) {
         val record = JSONObject()
             .put("title", title)
             .put("body", body)
             .put("at", atMs)
+        // Deep link: al tocar la notificación, MainActivity abre la web en esta
+        // frecuencia exacta en vez de la pantalla por defecto (ver AlarmReceiver
+        // + NotificationHelper). Opcional: alarmas sin config (legado) siguen
+        // funcionando, solo sin deep link.
+        if (freq != null) record.put("freq", freq)
+        if (beat != null) record.put("beat", beat)
+        if (wave != null) record.put("wave", wave)
         if (days != null && days.isNotEmpty()) {
             record.put("days", JSONArray(days))
             // Se guarda la hora del día (local) para recalcular la próxima
@@ -63,6 +92,35 @@ class AlarmScheduler(private val context: Context) {
     fun cancel(alarmId: String) {
         prefs.edit().remove(alarmId).apply()
         am.cancel(pendingIntent(alarmId))
+        cancelSilence(alarmId)
+    }
+
+    /**
+     * Programa el SILENCIO automático de la alarma en ALARM_RING_LIMIT_MS:
+     * lo llama AlarmReceiver al disparar. El PendingIntent es por alarma
+     * (acción SILENCE_ALARM_<id>) y se reemplaza en cada disparo (un nuevo
+     * disparo resetea el plazo). Se usa RTC sin wake: el sonido ya ocurrió;
+     * si el equipo duerme, la notificación se limpia al despertar.
+     */
+    fun scheduleSilence(alarmId: String) {
+        val at = System.currentTimeMillis() + ALARM_RING_LIMIT_MS
+        am.set(AlarmManager.RTC, at, silencePendingIntent(alarmId))
+    }
+
+    /** Cancela un silencio pendiente (p. ej. al cancelar la alarma). */
+    fun cancelSilence(alarmId: String) {
+        am.cancel(silencePendingIntent(alarmId))
+    }
+
+    private fun silencePendingIntent(alarmId: String): PendingIntent {
+        val i = Intent(context, AlarmSilenceReceiver::class.java)
+            .setAction("$ACTION_SILENCE_PREFIX$alarmId")
+        return PendingIntent.getBroadcast(
+            context,
+            alarmId.hashCode(),
+            i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     fun list(): List<String> = prefs.all.keys.toList()
@@ -93,6 +151,9 @@ class AlarmScheduler(private val context: Context) {
                     j.optString("body", ""),
                     next,
                     dayList,
+                    if (j.has("freq")) j.optDouble("freq") else null,
+                    if (j.has("beat")) j.optDouble("beat") else null,
+                    if (j.has("wave")) j.optString("wave") else null,
                 )
             } else {
                 prefs.edit().remove(alarmId).apply()
@@ -132,13 +193,16 @@ class AlarmScheduler(private val context: Context) {
                     else emptyList()
                 val hh = j.optInt("hh", -1)
                 val mm = j.optInt("mm", -1)
+                val freq = if (j.has("freq")) j.optDouble("freq") else null
+                val beat = if (j.has("beat")) j.optDouble("beat") else null
+                val wave = if (j.has("wave")) j.optString("wave") else null
                 if (days.isNotEmpty() && hh >= 0 && mm >= 0) {
                     val next = nextOccurrence(hh, mm, days, System.currentTimeMillis() + 60_000)
                     if (next != null) {
-                        schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days)
+                        schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days, freq, beat, wave)
                     }
                 } else {
-                    schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"))
+                    schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"), null, freq, beat, wave)
                 }
             }
         }

@@ -72,6 +72,13 @@ export class AudioTransport {
         this.element = this.createElement();
         this.element.srcObject = this.streamDest.stream;
         this.element.setAttribute('playsinline', '');
+        // Adjuntar el elemento al DOM (oculto). Chrome Android solo registra
+        // la MediaSession como controlable ante el SO (shade, lock screen,
+        // botones de medios) cuando el elemento de reproducción real está en
+        // el documento: sin esto el widget del reproductor aparece pero sus
+        // controles no llegan a la app ("Media button session is null").
+        // Es el mismo motivo por el que el anchor legacy se adjunta al body.
+        this._attachToDocument();
         // El elemento representa la sesión real: nunca muted ni volume 0.
         this.element.onerror = () => this._fallbackToDirect();
         this.mode = 'element';
@@ -109,6 +116,21 @@ export class AudioTransport {
       return true;
     }
     return false;
+  }
+
+  // Adjunta el elemento de reproducción al documento (oculto). En entornos de
+  // test no hay document/body: se omite sin error.
+  _attachToDocument() {
+    if (typeof document === 'undefined' || !document.body || !this.element) return;
+    try {
+      this.element.style.display = 'none';
+      this.element.setAttribute('aria-hidden', 'true');
+      this.element.setAttribute('tabindex', '-1');
+      document.body.appendChild(this.element);
+    } catch (_) {
+      /* el elemento no se pudo adjuntar: la sesión sigue pero el SO puede no
+         exponer los controles (comportamiento previo, no rompe el audio) */
+    }
   }
 
   /** Estado observable para diagnóstico (P0.5.5). */

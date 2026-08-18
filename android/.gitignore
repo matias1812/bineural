@@ -1,6 +1,7 @@
 .gradle/
 build/
 local.properties
+.jdk17/
 *.apk
 *.aab
 captures/

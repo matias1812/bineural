@@ -1,0 +1,948 @@
+// src/cuenta.js
+// Página /cuenta — vista de usuario consumiendo los endpoints del backend:
+// perfil (auth/me), favoritos, frecuencias, alarmas, itinerarios y push.
+// Aditiva: si no hay sesión muestra la puerta de entrada; sin backend la
+// app sigue funcionando igual.
+
+import { me, changePassword, resendVerification } from './api/auth.js';
+import { getAccessToken } from './api/client.js';
+import { listFavorites, removeFavorite } from './api/favorites.js';
+import {
+  listFrequencies,
+  deleteFrequency,
+} from './api/frequencies.js';
+import { listAlarms, deleteAlarm } from './api/alarms.js';
+import {
+  listItineraries,
+  createItinerary,
+  deleteItinerary,
+  toggleItinerary,
+} from './api/itineraries.js';
+import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
+import { getStatus, onStatusChange, STATUS } from './api/status.js';
+import { openFreqModal } from './ui/freq-modal.js';
+import { freqCoverSVG } from './ui/freq-cover.js';
+import { requestPermission, rruleFor } from './notifications.js';
+import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
+
+const $ = (id) => document.getElementById(id);
+
+let pushState = { supported: false, configured: false, public_key: null };
+let savedFreqs = []; // frecuencias guardadas, para armar pasos de itinerario
+let currentAlarms = []; // alarmas, para la vista de horario del itinerario
+let itSteps = []; // pasos del itinerario en construcción
+let itStepDays = new Set(); // días de repetición elegidos para el próximo paso a añadir
+
+// 0=domingo…6=sábado (mismo orden que DAY_LETTERS en rutina.js/notifications.js).
+const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function openAuth(mode) {
+  const auth = window.__vyneuralAuth;
+  if (auth && typeof auth.open === 'function') auth.open(mode);
+}
+
+// ── Estado de sesión / puerta ───────────────────────────────────────────────
+
+function renderGate() {
+  const gate = $('cuenta-gate');
+  const content = $('cuenta-content');
+  const loggedIn = !!getAccessToken();
+  if (gate) gate.classList.toggle('hidden', loggedIn);
+  if (content) content.classList.toggle('hidden', !loggedIn);
+  if (loggedIn) loadAll();
+}
+
+// ── Perfil ──────────────────────────────────────────────────────────────────
+
+function renderProfile(p) {
+  const name = p?.display_name || p?.username || (p?.email || '').split('@')[0] || 'Usuario';
+  $('cuenta-name').textContent = name;
+  $('cuenta-email').textContent = p?.email || '';
+  $('cuenta-avatar').textContent = (name[0] || '?').toUpperCase();
+  const since = $('cuenta-since');
+  if (p?.created_at) {
+    try {
+      const d = new Date(p.created_at);
+      since.textContent = `Miembro desde ${d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}`;
+    } catch (_) {
+      since.textContent = '';
+    }
+  } else {
+    since.textContent = '';
+  }
+  renderVerify(p);
+}
+
+// ── Verificación de correo ─────────────────────────────────────────────────
+
+function renderVerify(p) {
+  const wrap = $('cuenta-verify-wrap');
+  const badge = $('cuenta-verify-badge');
+  const resend = $('cuenta-verify-resend');
+  if (!wrap || !badge) return;
+  const verified = !!p?.email_verified;
+  badge.textContent = verified ? 'Correo verificado ✓' : 'Correo sin verificar';
+  badge.title = verified
+    ? 'Tu correo está confirmado: podés recuperar la cuenta y recibir avisos.'
+    : 'Confirmá tu correo: sin eso no podés recuperar la cuenta si olvidás la contraseña.';
+  badge.classList.toggle('rs-live', verified);
+  badge.classList.toggle('rs-warn', !verified);
+  if (resend) resend.classList.toggle('hidden', verified);
+  if (wrap) wrap.classList.toggle('hidden', verified);
+}
+
+async function wireVerify() {
+  const resend = $('cuenta-verify-resend');
+  if (!resend) return;
+  resend.addEventListener('click', async () => {
+    resend.disabled = true;
+    const original = resend.textContent;
+    resend.textContent = 'Enviando…';
+    try {
+      const result = await resendVerification();
+      // El backend responde 200 aunque el SMTP haya fallado: `email_sent`
+      // distingue "aceptado" de "entregado" para no mentir al usuario.
+      resend.textContent = result && result.email_sent === false
+        ? 'El correo no se pudo enviar (problema con el servidor de correo)'
+        : 'Correo enviado ✓ (revisá spam)';
+      setTimeout(() => {
+        resend.textContent = original;
+        resend.disabled = false;
+      }, 5000);
+    } catch (err) {
+      const status = err && err.status;
+      resend.textContent = status === 0
+        ? 'Sin conexión con el servidor. Intentá más tarde.'
+        : status === 404 || status >= 500
+          ? 'El servidor de cuentas no está disponible ahora. Intentá más tarde.'
+          : 'No se pudo reenviar. Intentá en unos minutos.';
+      setTimeout(() => {
+        resend.textContent = original;
+        resend.disabled = false;
+      }, 5000);
+    }
+  });
+}
+
+// ── Listas ──────────────────────────────────────────────────────────────────
+
+function renderList(id, emptyId, items, renderItem, emptyText) {
+  const ul = $(id);
+  const empty = $(emptyId);
+  if (!ul) return;
+  ul.innerHTML = '';
+  const has = items && items.length > 0;
+  ul.classList.toggle('hidden', !has);
+  if (empty) {
+    empty.classList.toggle('hidden', has);
+    if (!has && emptyText) empty.textContent = emptyText;
+  }
+  (items || []).forEach((item) => {
+    const li = document.createElement('li');
+    li.className = 'cuenta-item';
+    li.innerHTML = renderItem(item);
+    ul.appendChild(li);
+  });
+}
+
+function renderFavorites(favs) {
+  renderList(
+    'cuenta-favs',
+    'cuenta-favs-empty',
+    favs,
+    (fav) => {
+      const f = fav.frequency || {};
+      const left = f.left_frequency != null ? f.left_frequency : f.carrier_frequency;
+      const right = f.right_frequency != null ? f.right_frequency : (f.carrier_frequency ?? 0) + (f.beat_frequency ?? 0);
+      return `${freqCoverSVG(f, 40)}
+        <div class="cuenta-item-body">
+          <b>${escapeHtml(f.name || 'Frecuencia')}</b>
+          <small>${formatHz(left)} · ${formatHz(right)} · ritmo ${formatHz(f.beat_frequency)}</small>
+        </div>
+        <button type="button" class="cuenta-item-del" data-act="unfav" data-id="${escapeHtml(fav.id)}" aria-label="Quitar favorito">✕</button>`;
+    },
+  );
+}
+
+function renderFrequencies(freqs) {
+  savedFreqs = freqs || [];
+  populateStepFreqs();
+  renderList(
+    'cuenta-freqs',
+    'cuenta-freqs-empty',
+    freqs,
+    (f) => {
+      const left = f.left_frequency != null ? f.left_frequency : f.carrier_frequency;
+      const right = f.right_frequency != null ? f.right_frequency : (f.carrier_frequency ?? 0) + (f.beat_frequency ?? 0);
+      return `${freqCoverSVG(f, 40)}
+        <div class="cuenta-item-body">
+          <b>${escapeHtml(f.name)}</b>
+          <small>${formatHz(left)} · ${formatHz(right)} · ritmo ${formatHz(f.beat_frequency)} · ${escapeHtml(f.waveform || 'sine')}</small>
+        </div>
+        <button type="button" class="cuenta-item-del" data-act="delfreq" data-id="${escapeHtml(f.id)}" aria-label="Eliminar frecuencia">✕</button>`;
+    },
+  );
+}
+
+function renderAlarms(alarms) {
+  currentAlarms = alarms || [];
+  renderList(
+    'cuenta-alarms',
+    'cuenta-alarms-empty',
+    alarms,
+    (a) => {
+      const when = a.scheduled_at
+        ? fmtDate(a.scheduled_at)
+        : 'sin horario fijo';
+      const rep = a.repeat_rule ? ` · ${escapeHtml(a.repeat_rule)}` : '';
+      return `<div class="cuenta-item-body">
+          <b>${escapeHtml(a.name || 'Recordatorio')} ${a.enabled ? '' : '<em>(desactivada)</em>'}</b>
+          <small>${escapeHtml(when)} · ${escapeHtml(a.timezone || 'UTC')}${rep}</small>
+        </div>
+        <button type="button" class="cuenta-item-del" data-act="delalarm" data-id="${escapeHtml(a.id)}" aria-label="Eliminar alarma">✕</button>`;
+    },
+  );
+}
+
+function fmtClock(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function fmtDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds || 0));
+  if (s === 0) return null;
+  const mins = Math.round(s / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h} h ${String(m).padStart(2, '0')} min` : `${h} h`;
+}
+
+// Vista de horario de un itinerario: línea de tiempo de sus pasos (con
+// duraciones acumuladas) y las alarmas como anclas de horario.
+// Mismo mapeo que ICS_DAY en notifications.js (JS Date.getDay(): 0=domingo).
+const RRULE_DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+function daysFromRepeatRule(rule) {
+  const m = rule && /BYDAY=([A-Z,]+)/.exec(rule);
+  if (!m) return [];
+  return m[1].split(',').map((c) => RRULE_DAY_CODES.indexOf(c)).filter((d) => d >= 0);
+}
+
+function scheduleHTML(it) {
+  const items = (it.items || []).slice().sort((a, b) => a.position - b.position);
+  let cursor = 0;
+  const timeline = items.map((item, i) => {
+    const freq = savedFreqs.find((f) => f.id === item.frequency_id);
+    const name = freq ? freq.name : (item.configuration && item.configuration.name) || `Paso ${i + 1}`;
+    const dur = item.duration || 0;
+    const start = cursor;
+    cursor += dur;
+    const days = daysFromRepeatRule(item.repeat_rule);
+    const schedule = item.time_of_day
+      ? ` · 🔔 ${item.time_of_day}${days.length ? ` · ${days.map((d) => DAY_LETTERS[d]).join(' ')}` : ' · una vez'}`
+      : '';
+    return `<div class="schedule-row">
+        <span class="schedule-step">${i + 1}</span>
+        <div class="schedule-body">
+          <b>${escapeHtml(name)}</b>
+          <small>${fmtDuration(dur) || 'sin duración'} · ${fmtClock(start)} → ${fmtClock(cursor)}${schedule}</small>
+        </div>
+      </div>`;
+  }).join('');
+
+  const alarms = (currentAlarms || []).map((a) => {
+    const when = a.scheduled_at ? fmtDate(a.scheduled_at) : 'sin horario fijo';
+    const rep = a.repeat_rule ? ' · se repite' : '';
+    return `<div class="schedule-row schedule-alarm">
+        <span class="schedule-step" aria-hidden="true">🔔</span>
+        <div class="schedule-body">
+          <b>${escapeHtml(a.name || 'Recordatorio')}</b>
+          <small>${escapeHtml(when)}${rep} · ${a.enabled ? 'activa' : 'apagada'} · ${escapeHtml(a.timezone || 'UTC')}</small>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `<div class="schedule-timeline">
+      <h4>🧭 Horario de pasos</h4>
+      ${timeline || '<p class="cuenta-empty">Este itinerario no tiene pasos: funciona como aviso de horario.</p>'}
+    </div>
+    <div class="schedule-alarms">
+      <h4>⏰ Alarmas</h4>
+      ${alarms || '<p class="cuenta-empty">Todavía no tenés alarmas guardadas.</p>'}
+    </div>`;
+}
+
+function renderDevices(items) {
+  const permLabel = {
+    granted: 'Notificaciones activadas',
+    denied: 'Notificaciones bloqueadas',
+    denied_permanently: 'Notificaciones bloqueadas (permanente)',
+    not_requested: 'Sin pedir todavía',
+    unavailable: 'Estado no disponible',
+  };
+  renderList(
+    'cuenta-devices',
+    'cuenta-devices-empty',
+    items,
+    (d) => {
+      const ok = d.notification_permission === 'granted';
+      const plat = { apk: 'APK Android', web: 'Web', pwa: 'PWA instalada' }[d.platform] || d.platform;
+      const seen = d.last_seen_at ? fmtDate(d.last_seen_at) : '—';
+      return `<div class="cuenta-item-body">
+          <b>${escapeHtml(plat)}${d.app_version ? ` <small>· v${escapeHtml(d.app_version)}</small>` : ''}</b>
+          <small class="${ok ? 'rs-live' : 'rs-warn'}">${escapeHtml(permLabel[d.notification_permission] || d.notification_permission)}${d.push_enabled ? ' · push activo' : ' · sin push'} · visto ${escapeHtml(seen)}</small>
+        </div>
+        <button type="button" class="cuenta-item-del" data-act="forgetdev" data-id="${escapeHtml(d.device_id)}" aria-label="Olvidar dispositivo">✕</button>`;
+    },
+    'Todavía no hay dispositivos registrados: entrá a la app desde otro dispositivo para verlo acá.',
+  );
+}
+
+function renderItineraries(items) {
+  renderList(
+    'cuenta-itineraries',
+    'cuenta-itineraries-empty',
+    items,
+    (it) => {
+      const n = (it.items || []).length;
+      return `<div class="cuenta-item-body">
+          <b>${escapeHtml(it.name)}</b>
+          <small>${n} paso${n === 1 ? '' : 's'} · ${it.is_active ? 'activo' : 'en pausa'} · ${escapeHtml(it.timezone || 'UTC')}</small>
+        </div>
+        <div class="cuenta-item-actions">
+          <button type="button" class="cuenta-item-btn" data-act="toggleit" data-id="${escapeHtml(it.id)}">${it.is_active ? 'Pausar' : 'Activar'}</button>
+          <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" data-act="scheduleit" data-id="${escapeHtml(it.id)}" aria-expanded="false">Ver horario</button>
+          <button type="button" class="cuenta-item-del" data-act="delit" data-id="${escapeHtml(it.id)}" aria-label="Eliminar itinerario">✕</button>
+        </div>
+        <div class="schedule hidden" data-schedule="${escapeHtml(it.id)}">${scheduleHTML(it)}</div>`;
+    },
+  );
+}
+
+function fmtDate(iso) {
+  try {
+    return new Date(iso).toLocaleString('es-ES', {
+      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+    });
+  } catch (_) {
+    return iso;
+  }
+}
+
+function formatHz(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return `${Math.round(n * 10) / 10} Hz`;
+}
+
+// ── Push ────────────────────────────────────────────────────────────────────
+
+let deviceSubscribed = null; // null = sin dato todavía, true/false = estado real
+
+// Dentro de la APK no existe Web Push (file:// no es secure context y no hay
+// service worker): los recordatorios los entrega el SISTEMA (AlarmManager +
+// NotificationManager nativos). La tarjeta sigue siendo útil: "Activar" pide
+// el permiso real de notificaciones de Android (POST_NOTIFICATIONS, Android
+// 13+), que es lo que deja que las alarmas avisen con la app cerrada.
+let nativeNotifState = 'NOT_REQUESTED'; // GRANTED|DENIED|DENIED_PERMANENTLY|NOT_REQUESTED|UNAVAILABLE
+
+// Detección de APK en el arranque: `AndroidBridgeNative` (addJavascriptInterface)
+// existe ANTES de cargar la página; el wrapper `window.AndroidBridge` recién lo
+// crea Kotlin en onPageFinished. El badge de site.js usa el mismo criterio.
+function isApk() {
+  return (
+    typeof window !== 'undefined' &&
+    (typeof window.AndroidBridgeNative !== 'undefined' ||
+      (window.AndroidBridge && typeof window.AndroidBridge.postMessage === 'function'))
+  );
+}
+
+// Bridge nativo preferido: el wrapper (si ya existe) o el raw de arranque.
+function nativeBridge() {
+  const b =
+    window.AndroidBridge && typeof window.AndroidBridge.postMessage === 'function'
+      ? window.AndroidBridge
+      : window.AndroidBridgeNative;
+  return b || null;
+}
+
+async function readNativeNotificationState() {
+  if (!isApk()) return;
+  try {
+    const b = nativeBridge();
+    let info = b && b.getPlatformInfo ? b.getPlatformInfo() : null;
+    if (typeof info === 'string') {
+      try { info = JSON.parse(info); } catch (_) { info = null; }
+    }
+    nativeNotifState = (info && info.notificationPermission) || 'UNAVAILABLE';
+  } catch (_) {
+    nativeNotifState = 'UNAVAILABLE';
+  }
+}
+
+async function readDeviceSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    deviceSubscribed = false;
+    return;
+  }
+  try {
+    // getRegistration() resuelve al instante (undefined si no hay service
+    // worker); serviceWorker.ready colgaría para siempre en dev.
+    const reg = await navigator.serviceWorker.getRegistration();
+    deviceSubscribed = reg ? !!(await reg.pushManager.getSubscription()) : false;
+  } catch (_) {
+    deviceSubscribed = false;
+  }
+}
+
+function secureContext() {
+  return typeof window !== 'undefined' && window.isSecureContext;
+}
+
+function renderPush() {
+  const text = $('cuenta-push-text');
+  const sub = $('cuenta-push-subscribe');
+  const unsub = $('cuenta-push-unsubscribe');
+  if (!text) return;
+
+  // APK nativa: el permiso que importa es el del sistema (POST_NOTIFICATIONS),
+  // no la suscripción Web Push. El estado se lee del bridge, siempre honesto.
+  if (isApk()) {
+    switch (nativeNotifState) {
+      case 'GRANTED':
+        text.textContent =
+          '✅ Notificaciones activadas: tus recordatorios avisan en el teléfono incluso con la app cerrada.';
+        if (sub) sub.disabled = true;
+        if (unsub) unsub.disabled = false;
+        return;
+      case 'DENIED_PERMANENTLY':
+        text.textContent =
+          'Las notificaciones están apagadas en los Ajustes del sistema. Tocá "Desactivar" para abrirlas y habilitarlas.';
+        if (sub) sub.disabled = true;
+        if (unsub) unsub.disabled = false;
+        return;
+      case 'DENIED':
+        text.textContent =
+          'Notificaciones rechazadas. Tocá "Activar" para volver a pedir el permiso del sistema.';
+        if (sub) sub.disabled = false;
+        if (unsub) unsub.disabled = false;
+        return;
+      default: // NOT_REQUESTED / UNAVAILABLE
+        text.textContent =
+          'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
+        if (sub) sub.disabled = false;
+        if (unsub) unsub.disabled = true;
+        return;
+    }
+  }
+
+  if (!secureContext()) {
+    text.textContent =
+      'Este navegador no permite push sin HTTPS (solo localhost). En producción es automático.';
+    if (sub) sub.disabled = true;
+    if (unsub) unsub.disabled = true;
+    return;
+  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    text.textContent = 'Este navegador no soporta notificaciones push.';
+    if (sub) sub.disabled = true;
+    if (unsub) unsub.disabled = true;
+    return;
+  }
+  if (!pushState.configured) {
+    text.textContent = pushState.supported
+      ? 'El servidor de notificaciones no está configurado todavía.'
+      : 'El backend no está disponible: no se pueden activar las notificaciones ahora.';
+    if (sub) sub.disabled = true;
+    if (unsub) unsub.disabled = true;
+    return;
+  }
+  if (deviceSubscribed === true) {
+    text.textContent =
+      '✅ Este dispositivo ya está suscrito: las notificaciones llegan incluso con la pestaña cerrada (web/PWA).';
+    if (sub) sub.disabled = true;
+    if (unsub) unsub.disabled = false;
+    return;
+  }
+  text.textContent =
+    'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
+  if (sub) sub.disabled = false;
+  if (unsub) unsub.disabled = true;
+}
+
+async function refreshPush() {
+  try {
+    pushState = await pushStatus();
+  } catch (_) {
+    pushState = { supported: false, configured: false };
+  }
+  if (isApk()) {
+    await readNativeNotificationState();
+  } else {
+    await readDeviceSubscription();
+  }
+  renderPush();
+}
+
+// ── Carga principal ─────────────────────────────────────────────────────────
+
+let loadSeq = 0;
+
+async function loadAll() {
+  const seq = ++loadSeq;
+  const syncEl = $('cuenta-sync-status');
+  if (syncEl) {
+    syncEl.textContent = 'Sincronizando…';
+    syncEl.title = 'Consultando el backend';
+  }
+
+  const results = await Promise.allSettled([
+    me(),
+    listFavorites(),
+    listFrequencies(),
+    listAlarms(),
+    listItineraries(),
+    pushStatus(),
+    listDevices(),
+  ]);
+  if (seq !== loadSeq) return;
+
+  const [profile, favs, freqs, alarms, its, push, devices] = results.map((r) =>
+    r.status === 'fulfilled' ? r.value : null,
+  );
+
+  // Este dispositivo reporta su estado real (APK nativo / web / PWA).
+  reportDevice();
+
+  if (profile) {
+    hideSessionRecovery();
+    renderProfile(profile);
+  } else {
+    // Distinguir el motivo: si es un problema de red la sesión sigue válida
+    // (mensaje honesto + reintentar); si el servidor devolvió 401 la sesión
+    // venció (botón para iniciar sesión acá mismo y chip de la nav al día).
+    const meErr = results[0] && results[0].reason;
+    const isNetwork = meErr && meErr.status === 0;
+    const isExpired = meErr && meErr.status === 401;
+    $('cuenta-name').textContent = isNetwork
+      ? 'Sin conexión con el servidor'
+      : isExpired
+        ? 'Sesión expirada'
+        : 'Sesión no disponible';
+    $('cuenta-email').textContent = isNetwork
+      ? 'Tu sesión sigue guardada; reintentá cuando vuelva la conexión.'
+      : isExpired
+        ? 'Tu sesión venció: iniciá sesión para volver a sincronizar.'
+        : 'Reiniciá sesión para seguir sincronizando.';
+    renderVerify(null);
+    showSessionRecovery(isNetwork);
+    // Sesión realmente inválida: sincronizar el chip de la nav (evita el
+    // estado "logueado" fantasma) sin tocar las demás pestañas.
+    if (isExpired && window.__vyneuralAuth && typeof window.__vyneuralAuth.expireSession === 'function') {
+      window.__vyneuralAuth.expireSession();
+    }
+  }
+
+  renderFavorites(favs || []);
+  renderFrequencies(freqs || []);
+  renderAlarms(alarms || []);
+  renderItineraries(its || []);
+  renderDevices(devices || []);
+  if (push) pushState = push;
+  if (isApk()) {
+    await readNativeNotificationState();
+  } else {
+    await readDeviceSubscription();
+  }
+  renderPush();
+
+  const failed = results.filter((r) => r.status === 'rejected').length;
+  if (syncEl) {
+    if (failed === 0) {
+      syncEl.textContent = 'Sincronizado ✓';
+      syncEl.title = 'Todo lo que ves está respaldado en la nube';
+    } else {
+      syncEl.textContent = 'Parcial';
+      syncEl.title = `${failed} recurso(s) sin conexión. Lo local sigue funcionando.`;
+    }
+  }
+  const hint = $('cuenta-sync-hint');
+  if (hint) hint.textContent = failed === 0
+    ? 'Todo sincronizado: perfil, favoritos, frecuencias, alarmas, itinerarios y push viven en la nube y en este dispositivo.'
+    : 'La sincronización es aditiva: si el servidor no está disponible, todo sigue guardado en este dispositivo.';
+}
+
+// Recuperación de sesión: botones en la tarjeta de perfil cuando /me falla.
+function showSessionRecovery(networkOnly) {
+  const wrap = $('cuenta-session-recovery');
+  if (!wrap) return;
+  wrap.classList.remove('hidden');
+  const login = $('cuenta-recover-login');
+  const retry = $('cuenta-recover-retry');
+  if (login) login.classList.toggle('hidden', networkOnly);
+  if (retry) retry.classList.toggle('hidden', !networkOnly);
+}
+
+function hideSessionRecovery() {
+  const wrap = $('cuenta-session-recovery');
+  if (wrap) wrap.classList.add('hidden');
+}
+
+// ── Acciones ────────────────────────────────────────────────────────────────
+
+async function handleAction(e) {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const id = btn.dataset.id;
+
+  if (act === 'unfav') {
+    await removeFavorite(id).catch(() => {});
+  } else if (act === 'delfreq') {
+    await deleteFrequency(id).catch(() => {});
+  } else if (act === 'delalarm') {
+    await deleteAlarm(id).catch(() => {});
+  } else if (act === 'delit') {
+    await deleteItinerary(id).catch(() => {});
+  } else if (act === 'toggleit') {
+    await toggleItinerary(id).catch(() => {});
+  } else if (act === 'forgetdev') {
+    await forgetDevice(id).catch(() => {});
+  } else if (act === 'scheduleit') {
+    // Despliega/contrae la vista de horario del itinerario (sin recargar).
+    const block = document.querySelector(`[data-schedule="${CSS.escape(id)}"]`);
+    if (block) {
+      const isOpen = !block.classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(isOpen));
+    }
+    return;
+  }
+  loadAll();
+}
+
+function wireForms() {
+  // Guardar frecuencias: modal compartido con el generador (misma UX).
+  const freqBtn = $('cuenta-create-freq-btn');
+  if (freqBtn) {
+    freqBtn.addEventListener('click', () => {
+      const ok = openFreqModal({ source: 'cuenta' });
+      if (ok) freqBtn.blur();
+    });
+  }
+  // Tras guardar desde el modal, la lista se refresca sola.
+  document.addEventListener('vyneural:freq-saved', () => loadAll());
+
+  const itForm = $('itinerary-form');
+  if (itForm) {
+    itForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const name = $('itinerary-name').value.trim();
+      const desc = $('itinerary-desc').value.trim() || undefined;
+      if (!name) return;
+      let tz = 'UTC';
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch (_) { /* default */ }
+      try {
+        const items = itSteps.map((s, i) => ({
+          frequency_id: s.frequency_id,
+          position: i,
+          duration: s.duration * 60,
+          configuration: {},
+          time_of_day: s.time_of_day || undefined,
+          repeat_rule: s.time_of_day ? rruleFor(s.days) || undefined : undefined,
+        }));
+        await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, items });
+        itSteps = [];
+        itStepDays.clear();
+        renderItSteps();
+        itForm.reset();
+        const details = itForm.closest('details');
+        if (details) details.open = false;
+        loadAll();
+      } catch (err) {
+        alert(`No se pudo crear el itinerario: ${(err && err.detail) || 'error'}`);
+      }
+    });
+  }
+}
+
+function wirePushButtons() {
+  const sub = $('cuenta-push-subscribe');
+  const unsub = $('cuenta-push-unsubscribe');
+  if (sub) {
+    sub.addEventListener('click', async () => {
+      sub.disabled = true;
+      if (isApk()) {
+        // Pide el permiso REAL de Android (POST_NOTIFICATIONS) vía bridge; el
+        // resultado se re-lee al volver (visibilitychange).
+        await requestPermission();
+        await readNativeNotificationState();
+        renderPush();
+        return;
+      }
+      const r = await subscribeToPush();
+      const text = $('cuenta-push-text');
+      if (r.subscribed) {
+        deviceSubscribed = true;
+      } else if (text) {
+        text.textContent = `No se pudieron activar: ${r.reason || 'desconocido'}.`;
+      }
+      renderPush();
+    });
+  }
+  if (unsub) {
+    unsub.addEventListener('click', async () => {
+      unsub.disabled = true;
+      if (isApk()) {
+        // "Desactivar" en la APK = abrir los Ajustes de notificaciones del
+        // sistema (donde el usuario puede apagar/habilitar la app).
+        try {
+          const b = nativeBridge();
+          if (b && b.postMessage) b.postMessage(JSON.stringify({ command: 'OPEN_NOTIFICATION_SETTINGS' }));
+        } catch (_) { /* bridge ocupado: la UI sigue siendo honesta */ }
+        renderPush();
+        return;
+      }
+      const ok = await unsubscribeFromPush();
+      if (ok) deviceSubscribed = false;
+      const text = $('cuenta-push-text');
+      if (text && !ok) text.textContent = 'No había suscripción activa.';
+      renderPush();
+    });
+  }
+}
+
+// ── Pasos del itinerario ───────────────────────────────────────────────────
+
+function populateStepFreqs() {
+  const sel = $('it-step-freq');
+  if (!sel) return;
+  sel.innerHTML = savedFreqs
+    .map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name || 'Frecuencia')} · ${formatHz(f.carrier_frequency ?? f.left_frequency)}</option>`)
+    .join('');
+  if (!savedFreqs.length) {
+    sel.innerHTML = '<option value="">Guardá una frecuencia primero</option>';
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+  }
+}
+
+function renderItSteps() {
+  const ul = $('it-steps');
+  const empty = $('it-steps-empty');
+  if (!ul) return;
+  ul.innerHTML = '';
+  const has = itSteps.length > 0;
+  ul.classList.toggle('hidden', !has);
+  if (empty) empty.classList.toggle('hidden', has);
+  itSteps.forEach((step, i) => {
+    const li = document.createElement('li');
+    li.className = 'cuenta-item';
+    const days = step.days && step.days.length
+      ? ` · 🔔 ${[...step.days].sort((a, b) => a - b).map((d) => DAY_LETTERS[d]).join(' ')}`
+      : step.time_of_day ? ' · 🔔 una vez' : '';
+    const schedule = step.time_of_day ? `${step.time_of_day}${days}` : '';
+    li.innerHTML = `<div class="cuenta-item-body">
+        <b>${i + 1}. ${escapeHtml(step.name)}</b>
+        <small>${step.duration} min${schedule ? ` · ${escapeHtml(schedule)}` : ''}</small>
+      </div>
+      <button type="button" class="cuenta-item-del" data-step="${i}" aria-label="Quitar paso">✕</button>`;
+    ul.appendChild(li);
+  });
+}
+
+function wireItineraryDays() {
+  const wrap = $('it-step-days');
+  if (!wrap) return;
+  wrap.addEventListener('click', (e) => {
+    const btn = e.target.closest('.day-chip');
+    if (!btn) return;
+    const day = Number(btn.dataset.day);
+    if (itStepDays.has(day)) itStepDays.delete(day);
+    else itStepDays.add(day);
+    btn.classList.toggle('active', itStepDays.has(day));
+  });
+}
+
+function wireItinerarySteps() {
+  const add = $('it-step-add');
+  if (!add) return;
+  add.addEventListener('click', () => {
+    const sel = $('it-step-freq');
+    const dur = $('it-step-duration');
+    const timeEl = $('it-step-time');
+    const freq = savedFreqs.find((f) => f.id === sel.value);
+    if (!freq) return;
+    const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
+    const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
+    const days = time_of_day ? [...itStepDays] : [];
+    itSteps.push({
+      frequency_id: freq.id,
+      name: freq.name || 'Frecuencia',
+      duration,
+      time_of_day,
+      days,
+    });
+    renderItSteps();
+    // Limpiar el sub-formulario de horario para el próximo paso (la
+    // frecuencia/duración se dejan como estaban: es común encadenar pasos
+    // parecidos, pero el horario es específico de cada uno).
+    if (timeEl) timeEl.value = '';
+    itStepDays.clear();
+    document.querySelectorAll('#it-step-days .day-chip.active').forEach((b) => b.classList.remove('active'));
+  });
+}
+
+// ── Cambio de contraseña ───────────────────────────────────────────────────
+
+function validatePasswordStrength(pw) {
+  if (pw.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) return 'La contraseña debe tener letras y números.';
+  return '';
+}
+
+function wirePasswordForm() {
+  const form = $('password-form');
+  if (!form) return;
+  const errEl = $('pw-error');
+  const btn = $('pw-submit');
+  const showErr = (msg) => {
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  };
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    errEl.classList.add('hidden');
+    const current = $('pw-current').value;
+    const next = $('pw-new').value;
+    const confirm = $('pw-confirm').value;
+    const err = validatePasswordStrength(next);
+    if (err) return showErr(err);
+    if (next !== confirm) return showErr('Las contraseñas nuevas no coinciden.');
+    if (next === current) return showErr('La contraseña nueva debe ser distinta de la actual.');
+    btn.disabled = true;
+    btn.textContent = 'Guardando…';
+    try {
+      await changePassword(current, next);
+      form.reset();
+      errEl.classList.remove('auth-error');
+      errEl.classList.add('auth-ok');
+      showErr('Contraseña actualizada ✓. Cerramos las demás sesiones: iniciá sesión de nuevo en tus otros dispositivos.');
+    } catch (e2) {
+      showErr((e2 && e2.detail) || 'No se pudo cambiar la contraseña. Verificá la contraseña actual.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Actualizar contraseña';
+    }
+  });
+}
+
+// ── Arranque ────────────────────────────────────────────────────────────────
+
+function init() {
+  renderGate();
+
+  const recoverLogin = $('cuenta-recover-login');
+  if (recoverLogin) {
+    recoverLogin.addEventListener('click', () => {
+      hideSessionRecovery();
+      openAuth('login');
+    });
+  }
+  const recoverRetry = $('cuenta-recover-retry');
+  if (recoverRetry) {
+    recoverRetry.addEventListener('click', () => {
+      hideSessionRecovery();
+      loadAll();
+    });
+  }
+
+  const loginBtn = $('cuenta-login-btn');
+  const regBtn = $('cuenta-register-btn');
+  if (loginBtn) loginBtn.addEventListener('click', () => openAuth('login'));
+  if (regBtn) regBtn.addEventListener('click', () => openAuth('register'));
+
+  // Quitar pasos del itinerario en construcción.
+  document.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-step]');
+    if (!del) return;
+    const i = parseInt(del.dataset.step, 10);
+    if (Number.isFinite(i) && itSteps[i]) {
+      itSteps.splice(i, 1);
+      renderItSteps();
+    }
+  });
+
+  const logoutBtn = $('cuenta-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      const auth = window.__vyneuralAuth;
+      if (auth && typeof auth.logout === 'function') {
+        await auth.logout();
+      } else {
+        // Sin auth.js (carga rara): limpiar la sesión local.
+        const { clearSession } = await import('./api/client.js');
+        clearSession();
+        renderGate();
+      }
+    });
+  }
+
+  document.addEventListener('click', handleAction);
+  wireForms();
+  wirePushButtons();
+
+  // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
+  // reaparece: re-leer el estado real del permiso y repintar la tarjeta.
+  if (isApk()) {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        readNativeNotificationState().then(renderPush);
+      }
+    });
+  }
+  wireVerify();
+  wirePasswordForm();
+  wireItinerarySteps();
+  wireItineraryDays();
+
+  // Estado de sincronización en vivo.
+  const syncEl = $('cuenta-sync-status');
+  if (syncEl) {
+    const labels = {
+      [STATUS.OFFLINE]: 'Offline',
+      [STATUS.ONLINE]: 'En línea',
+      [STATUS.SYNCING]: 'Sincronizando…',
+      [STATUS.SYNCED]: 'Sincronizado ✓',
+      [STATUS.ERROR]: 'Error de conexión',
+    };
+    const paint = (s) => {
+      if (getAccessToken()) return; // loadAll() pinta el estado real.
+      syncEl.textContent = labels[s] || s;
+    };
+    paint(getStatus());
+    onStatusChange(paint);
+  }
+
+  // Refrescar al autenticarse / cerrar sesión desde cualquier parte.
+  document.addEventListener('vyneural:auth', () => {
+    renderGate();
+    if (getAccessToken()) loadAll();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', init, { once: true });

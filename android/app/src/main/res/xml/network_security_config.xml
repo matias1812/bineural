@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Política de tráfico: HTTPS en todo (producción). Única excepción: el alias
+  10.0.2.2 (loopback del host visto desde el emulador), que solo se usa en
+  builds de prueba locales (API_BASE=http://10.0.2.2:8000). Nada en
+  producción habla por HTTP.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

@@ -89,14 +89,14 @@
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m22 4-10 10.01-3-3"/></svg></span>El MVP hoy <span class="roadmap-status rs-live">Disponible</span></h2>
         <p>
           La versión 1.0.0 (MVP) está funcionando en las tres plataformas con el mismo núcleo
-          científico. Sin cuentas, sin backend y gratis para siempre.
+          científico. Gratis para siempre: la cuenta es opcional y solo sincroniza tus datos.
         </p>
         <div class="roadmap-item">
           <span class="rm-emoji">🌐</span>
           <div class="rm-body">
             <div class="rm-title">Web y PWA <span class="roadmap-status rs-live">En vivo</span></div>
             <p class="rm-desc">
-              Generador de ondas binaurales en tiempo real con 28 estados, sonidos de ambiente
+              Generador de ondas binaurales en tiempo real con 31 estados, sonidos de ambiente
               (lluvia, océano, fuego…), temporizador, favoritos e historial. Instalable como PWA
               y sin necesidad de cuenta.
             </p>
@@ -114,21 +114,33 @@
             </p>
           </div>
         </div>
-
-        <!-- ═══ En desarrollo ═══ -->
-        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>En desarrollo <span class="roadmap-status rs-dev">Se está construyendo</span></h2>
+        <div class="roadmap-item">
+          <span class="rm-emoji">🔐</span>
+          <div class="rm-body">
+            <div class="rm-title">Cuentas y sincronización <span class="roadmap-status rs-live">En vivo</span></div>
+            <p class="rm-desc">
+              Creá una cuenta gratis (con confirmación de correo y recuperación de contraseña) y
+              tus favoritos, frecuencias personalizadas, alarmas, itinerarios y notificaciones
+              push viajan entre web, PWA y APK. Todo sigue funcionando local sin cuenta: la
+              sincronización es aditiva y opcional.
+            </p>
+          </div>
+        </div>
         <div class="roadmap-item">
           <span class="rm-emoji">🔔</span>
           <div class="rm-body">
-            <div class="rm-title">Notificaciones push <span class="roadmap-status rs-dev">En desarrollo</span></div>
+            <div class="rm-title">Notificaciones push <span class="roadmap-status rs-live">En vivo</span></div>
             <p class="rm-desc">
-              Avisos de sesión y recordatorios que lleguen aunque cierres la pestaña. Esto sí
-              requiere un servidor de notificaciones (hoy lo hacemos con avisos locales y
-              respaldo al calendario).
+              Con sesión iniciada, activás el push desde tu <a href="/cuenta">página de cuenta</a>:
+              el servidor guarda la suscripción del dispositivo y los avisos llegan aunque
+              cierres la pestaña (web/PWA). Como siempre, un aviso nunca reproduce audio solo:
+              el gesto lo ponés vos.
             </p>
-            <p class="rm-note">Documentado: requiere backend — no prometemos lo que la web no puede.</p>
           </div>
         </div>
+
+        <!-- ═══ En desarrollo ═══ -->
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>En desarrollo <span class="roadmap-status rs-dev">Se está construyendo</span></h2>
         <div class="roadmap-item">
           <span class="rm-emoji">🎵</span>
           <div class="rm-body">
@@ -263,12 +275,12 @@
           </div>
         </div>
         <div class="roadmap-item">
-          <span class="rm-emoji">☁️</span>
+          <span class="rm-emoji">🧭</span>
           <div class="rm-body">
-            <div class="rm-title">Sincronización opcional <span class="roadmap-status rs-next">Próximamente</span></div>
+            <div class="rm-title">Horarios más inteligentes <span class="roadmap-status rs-next">Próximamente</span></div>
             <p class="rm-desc">
-              Favoritos e historial entre dispositivos, solo si lo pedís: tu privacidad sigue
-              siendo por defecto local.
+              Editar los pasos de un itinerario después de crearlo, duplicar itinerarios y
+              asignarles horarios de arranque con repetición, integrados con las alarmas.
             </p>
           </div>
         </div>
@@ -281,7 +293,7 @@
             <div class="cl-body">
               <p><strong>MVP — lanzamiento</strong> <span class="roadmap-status rs-live">Disponible</span></p>
               <ul>
-                <li>Generador completo en la web: 28 estados, ambientes en tiempo real, temporizador, favoritos e historial.</li>
+                <li>Generador completo en la web: 31 estados (incluye gamma experimental 60/100 Hz y armónicas de Schumann), ambientes en tiempo real, temporizador, favoritos e historial.</li>
                 <li>APK para Android con audio nativo, controles en pantalla bloqueada, alarmas con la app cerrada y recuperación ante cierres forzados.</li>
                 <li>PWA instalable desde el navegador.</li>
                 <li>Todo sin backend, sin cuentas y sin rastreo.</li>
@@ -292,7 +304,7 @@
           <div class="changelog-entry">
             <span class="changelog-version">1.1</span>
             <div class="cl-body">
-              <p><strong>Actualización en curso</strong> <span class="roadmap-status rs-dev">En desarrollo</span></p>
+              <p><strong>Alarmas y rutinas recurrentes</strong> <span class="roadmap-status rs-live">Disponible</span></p>
               <ul>
                 <li>Alarmas: estado real exacta/inexacta en el modal, aviso honesto sobre la app Reloj y los fabricantes (Xiaomi/Huawei/Samsung).</li>
                 <li>Rutinas recurrentes: elegí los días de la semana (lunes y jueves, toda la semana…) y la alarma se reprograma sola, con vibración y con la app cerrada.</li>
@@ -305,6 +317,36 @@
                 <li>Notificaciones push (requiere backend) y primeros pasos hacia Google Play.</li>
               </ul>
               <p class="cl-date">Agosto 2026</p>
+            </div>
+          </div>
+          <div class="changelog-entry">
+            <span class="changelog-version">1.2</span>
+            <div class="cl-body">
+              <p><strong>Cuentas, sincronización y push</strong> <span class="roadmap-status rs-live">Disponible</span></p>
+              <ul>
+                <li>Cuentas opcionales con confirmación de correo (token de verificación, reenvío y estado en la página de cuenta) y recuperación de contraseña con enlace temporal.</li>
+                <li>Página <a href="/cuenta">Mi cuenta</a>: perfil, favoritos, frecuencias personalizadas, alarmas, itinerarios con vista de horario (pasos + alarmas) y estado real de notificaciones push por dispositivo.</li>
+                <li>Guardar frecuencias personalizadas desde el generador (botón en “Ajusta tu frecuencia”) y desde la cuenta, con el mismo modal.</li>
+                <li>Sincronización de favoritos del generador con la nube al marcar/desmarcar la estrella.</li>
+                <li>Notificaciones push web con VAPID: suscripción por dispositivo desde la página de cuenta, con estado real del navegador.</li>
+                <li>Página nueva de <a href="/preguntas-frecuentes">preguntas frecuentes</a> con acordeón accesible.</li>
+              </ul>
+              <p class="cl-date">Agosto 2026</p>
+            </div>
+          </div>
+          <div class="changelog-entry">
+            <span class="changelog-version">1.3.0</span>
+            <div class="cl-body">
+              <p><strong>Itinerarios con horario y alarma automática</strong> <span class="roadmap-status rs-live">Disponible</span></p>
+              <ul>
+                <li>Cada paso de un itinerario puede tener su propio horario (y días de repetición): al guardarlo se crea sola una alarma de recordatorio vinculada, sin pasos extra.</li>
+                <li>El recordatorio llega por notificación push a cualquier dispositivo con sesión — ya no es exclusivo de la APK.</li>
+                <li>Página <a class="in-app-only" href="/rutina">Tu rutina</a> ahora también se ve y se gestiona desde la web (antes era solo APK).</li>
+                <li>Frecuencias guardadas con una portada visual autogenerada según su forma de onda.</li>
+                <li>APK: al tocar la notificación de una alarma (manual o de itinerario), la app abre directo en la frecuencia configurada en vez de la pantalla por defecto.</li>
+                <li>Mejoras de sesión: aviso honesto cuando el inicio de sesión tarda (el servidor puede estar "despertando").</li>
+              </ul>
+              <p class="cl-date">18 de agosto de 2026</p>
             </div>
           </div>
         </div>

@@ -16,7 +16,13 @@ function backendEnabled() {
   const viaEnv = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL;
   if (viaEnv) return true;
   try {
-    return localStorage.getItem('vyneural_backend') === '1';
+    if (localStorage.getItem('vyneural_backend') === '1') return true;
+    // Sesión activa → el backend está en uso (mismo origen /api o VITE_API_URL
+    // ya resolvió en el login): la integración (push + sync) debe activarse.
+    // Sin esto, en el despliegue con sesión el push nunca arranca y la UI
+    // declara "no configurado" aunque el backend tenga VAPID.
+    if (getAccessToken()) return true;
+    return false;
   } catch (_) {
     return false;
   }

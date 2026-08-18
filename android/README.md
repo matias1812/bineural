@@ -9,8 +9,8 @@ plataforma se adapta al core.
 > La **release actual** (web empaquetada: fixes P5.6/P5.7/P5.8, botones de
 > descarga solo en el footer, alarma en primer plano con notificación real,
 > fin de sesión nativo M1 y módulos API del backend — SW v3, `src/api/*`,
-> proxy de dev) es `app-release.apk` (~2,95 MB, SHA-256
-> `c55c88680b260665ea71ab3e2a38f740b0c38b57c35e3f818e98d835a96a747c`), la que
+> proxy de dev) es `app-release.apk` (~2,86 MB, SHA-256
+> `8b9b2fa53e0ac5eda3b3af2180d408bcf81876dfa9bd69d99d84d44013daee60`), la que
 > se sirve en la web en `/vyneural.apk`.
 > **Pendiente: la prueba física en dispositivo real** (matriz P5.7/hardware)
 > — la matriz destructiva pasó en emulador (docs/RUNTIME_MATRIX.md) pero
@@ -49,7 +49,7 @@ La firma release lee las credenciales de `local.properties` (gitignored) o de
 las variables `BINEURAL_STORE_FILE/BINEURAL_STORE_PASS/BINEURAL_KEY_ALIAS/
 BINEURAL_KEY_PASS`. El keystore vive FUERA del repositorio
 (`~/.local/bineural-release.keystore`); nunca se sube. La APK release actual:
-SHA-256 `6b2146e33ad2e6b469e582b45ff2f7ce7859d8f858dcc43972d46fdb80df5c03`
+SHA-256 `8b9b2fa53e0ac5eda3b3af2180d408bcf81876dfa9bd69d99d84d44013daee60`
 (se sirve en la web en `/vyneural.apk`).
 
 > **Nota de build (Windows, 2026-08):** con el JDK del sistema (Java 8) el

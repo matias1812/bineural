@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mi cuenta · Vyneural</title>
+    <meta
+      name="description"
+      content="Tu cuenta de Vyneural: perfil, favoritos y frecuencias sincronizados, alarmas, itinerarios y notificaciones push. Lo mismo en la web, la PWA y la APK."
+    />
+    <meta name="author" content="Vyneural" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="canonical" href="https://vyneural-six.vercel.app/cuenta" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vyneural" />
+    <meta property="og:title" content="Mi cuenta · Vyneural" />
+    <meta
+      property="og:description"
+      content="Perfil, favoritos sincronizados, alarmas e itinerarios de tu cuenta Vyneural."
+    />
+    <meta property="og:url" content="https://vyneural-six.vercel.app/cuenta" />
+    <meta property="og:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Mi cuenta · Vyneural" />
+    <meta
+      name="twitter:description"
+      content="Tus datos, favoritos y rutinas sincronizados en Vyneural."
+    />
+    <meta name="twitter:image" content="https://vyneural-six.vercel.app/og.png" />
+
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "Mi cuenta de Vyneural",
+        "description": "Perfil, favoritos sincronizados, alarmas e itinerarios de la cuenta de Vyneural.",
+        "inLanguage": "es",
+        "url": "https://vyneural-six.vercel.app/cuenta",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://vyneural-six.vercel.app/" }
+      }
+    </script>
+    <script type="module" src="./assets/cuenta-BePyj3p2.js"></script>
+    <link rel="modulepreload" href="./assets/site-CvVQixPh.js">
+    <link rel="modulepreload" href="./assets/freq-modal-Ywr5q3Z2.js">
+    <link rel="modulepreload" href="./assets/itineraries-CrVCU2Ah.js">
+    <link rel="stylesheet" href="./assets/site-Bla0wBZQ.css">
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="site-brand" href="/">
+        <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+        Vyneural
+        <span id="platform-badge" class="platform-badge hidden">APK</span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+      <nav class="site-links" id="site-links" aria-label="Navegación principal">
+        <a href="/">Generador</a>
+        <a href="/beneficios">Beneficios</a>
+        <a href="/sobre-nosotros">Sobre nosotros</a>
+        <a href="/privacidad">Privacidad</a>
+        <a href="/hoja-de-ruta">Hoja de ruta</a>
+        <a href="/codigo-abierto">Código abierto</a>
+        <a class="in-app-only" href="/rutina">Tu rutina</a>
+      </nav>
+    </header>
+
+    <main>
+      <nav class="breadcrumbs" aria-label="Migajas de pan">
+        <a href="/">Inicio</a><span class="sep">›</span><span aria-current="page">Mi cuenta</span>
+      </nav>
+
+      <header class="page-hero">
+        <span class="page-kicker">Mi cuenta</span>
+        <h1>Tu práctica, en todos tus dispositivos.</h1>
+        <p class="page-lead">
+          Con una cuenta, tus favoritos y frecuencias viajan con vos: web, PWA y APK
+          comparten la misma práctica. Acá ves tu perfil, lo que guardaste y el estado
+          de la sincronización con el backend.
+        </p>
+      </header>
+
+      <div class="page-body">
+        <!-- Sin sesión: invitación a entrar o crear cuenta. -->
+        <div class="page-card hidden" id="cuenta-gate">
+          <p class="rm-emoji" aria-hidden="true">🔐</p>
+          <h2>Iniciá sesión para ver tu cuenta</h2>
+          <p>
+            Crear una cuenta es gratis y opcional. Sincroniza tus favoritos y frecuencias
+            entre dispositivos y te habilita las notificaciones push de tus recordatorios.
+            Sin cuenta, la app sigue funcionando igual, todo local.
+          </p>
+          <div class="cuenta-gate-actions">
+            <button type="button" class="hero-cta" id="cuenta-login-btn">Iniciar sesión</button>
+            <button type="button" class="hero-cta hero-cta-ghost" id="cuenta-register-btn">Crear cuenta</button>
+          </div>
+        </div>
+
+        <!-- Con sesión: el contenido real. -->
+        <div class="hidden" id="cuenta-content">
+          <div class="page-card">
+            <div class="cuenta-head">
+              <span class="cuenta-avatar" id="cuenta-avatar">?</span>
+              <div>
+                <h2 id="cuenta-name">Cargando…</h2>
+                <p id="cuenta-email" class="cuenta-meta">—</p>
+                <p id="cuenta-since" class="cuenta-meta">—</p>
+              </div>
+              <div class="cuenta-head-actions">
+                <span class="roadmap-status rs-live" id="cuenta-sync-status" title="Estado de sincronización">—</span>
+                <button type="button" class="cuenta-logout" id="cuenta-logout">Cerrar sesión</button>
+              </div>
+            </div>
+            <p class="rutina-hint" id="cuenta-sync-hint">
+              La sincronización es aditiva: si el servidor no está disponible, todo sigue
+              guardado en este dispositivo.
+            </p>
+            <div class="cuenta-verify" id="cuenta-verify-wrap">
+              <span class="roadmap-status rs-live" id="cuenta-verify-badge">—</span>
+              <button type="button" class="cuenta-item-btn" id="cuenta-verify-resend">Reenviar correo de confirmación</button>
+            </div>
+          </div>
+
+          <div class="card-grid">
+            <div class="page-card">
+              <h3>⭐ Favoritos en la nube</h3>
+              <ul class="cuenta-list" id="cuenta-favs"></ul>
+              <p class="cuenta-empty" id="cuenta-favs-empty">
+                Todavía no sincronizaste favoritos. Tocá la estrella de un estado en el
+                generador con la sesión iniciada y aparecerá acá.
+              </p>
+            </div>
+
+            <div class="page-card">
+              <h3>🎚️ Mis frecuencias</h3>
+              <ul class="cuenta-list" id="cuenta-freqs"></ul>
+              <p class="cuenta-empty" id="cuenta-freqs-empty">Sin frecuencias guardadas.</p>
+              <button type="button" class="cuenta-btn" id="cuenta-create-freq-btn">＋ Guardar una frecuencia personalizada</button>
+            </div>
+          </div>
+
+          <div class="card-grid">
+            <div class="page-card">
+              <h3>⏰ Mis alarmas</h3>
+              <ul class="cuenta-list" id="cuenta-alarms"></ul>
+              <p class="cuenta-empty" id="cuenta-alarms-empty">
+                Sin alarmas sincronizadas. Las alarmas de la web/PWA son datos: la
+                ejecución siempre depende del cliente.
+              </p>
+            </div>
+
+            <div class="page-card">
+              <h3>🗺️ Mis itinerarios</h3>
+              <ul class="cuenta-list" id="cuenta-itineraries"></ul>
+              <p class="cuenta-empty" id="cuenta-itineraries-empty">Sin itinerarios creados.</p>
+              <details class="cuenta-create">
+                <summary>＋ Crear itinerario</summary>
+                <form id="itinerary-form" class="cuenta-form">
+                  <label>Nombre
+                    <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
+                  </label>
+                  <label>Descripción <em>(opcional)</em>
+                    <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
+                  </label>
+                  <fieldset class="cuenta-steps">
+                    <legend>Pasos — frecuencias en secuencia <em>(opcional)</em></legend>
+                    <div class="cuenta-form-row">
+                      <label>Frecuencia
+                        <select id="it-step-freq"></select>
+                      </label>
+                      <label>Duración (min)
+                        <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
+                      </label>
+                    </div>
+                    <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
+                    <ul class="cuenta-list" id="it-steps"></ul>
+                    <p class="cuenta-empty" id="it-steps-empty">
+                      Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
+                      al activarse te avisa de arrancar la sesión.
+                    </p>
+                  </fieldset>
+                  <button type="submit" class="cuenta-btn">Crear itinerario</button>
+                </form>
+              </details>
+            </div>
+          </div>
+
+          <div class="page-card">
+            <h3>🔔 Notificaciones push</h3>
+            <p id="cuenta-push-text" class="rutina-hint">Consultando el estado del servidor…</p>
+            <div class="cuenta-push-actions">
+              <button type="button" class="cuenta-btn" id="cuenta-push-subscribe">Activar notificaciones</button>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-push-unsubscribe">Desactivar</button>
+            </div>
+          </div>
+
+          <div class="page-card">
+            <h3>🔒 Cambiar contraseña</h3>
+            <p class="rutina-hint">
+              Exige tu contraseña actual (re-autenticación). Al cambiarla, cerramos la
+              sesión en todos tus dispositivos.
+            </p>
+            <form id="password-form" class="cuenta-form">
+              <label>Contraseña actual
+                <input id="pw-current" type="password" autocomplete="current-password" required minlength="8" />
+              </label>
+              <div class="cuenta-form-row">
+                <label>Contraseña nueva
+                  <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" maxlength="128" />
+                </label>
+                <label>Repetir contraseña nueva
+                  <input id="pw-confirm" type="password" autocomplete="new-password" required />
+                </label>
+              </div>
+              <small class="auth-hint">Mínimo 8 caracteres, con letras y números.</small>
+              <div class="auth-error hidden" id="pw-error" role="alert"></div>
+              <button type="submit" class="cuenta-btn" id="pw-submit">Actualizar contraseña</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="page-note">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div>
+            <strong>Web/PWA vs APK:</strong> la cuenta y la sincronización son idénticas en
+            todas las plataformas. Lo exclusivo de la APK es el sistema: alarmas exactas con
+            la app cerrada, audio en segundo plano y tu
+            <a href="/rutina">rutina</a> con repetición semanal. En la web esos avisos
+            dependen de la pestaña abierta o del respaldo de calendario.
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="site-brand" href="/">
+            <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+            Vyneural
+          </a>
+          <p>
+            Frecuencias binaurales generadas en tiempo real en tu navegador con la
+            Web Audio API. Sin cuentas, sin grabaciones, sin servidores.
+          </p>
+        </div>
+        <div class="footer-col">
+          <h3>Explora</h3>
+          <a href="/">Generador</a>
+          <a href="/que-son-las-ondas-binaurales">Qué son las ondas binaurales</a>
+          <a href="/beneficios">Beneficios</a>
+          <a href="/como-usar">Cómo usar</a>
+          <a href="/descargar">Descargar APK (Android)</a>
+          <a class="in-app-only" href="/rutina">Tu rutina</a>
+          <a href="/hoja-de-ruta">Hoja de ruta</a>
+          <a href="/codigo-abierto">Código abierto</a>
+        </div>
+        <div class="footer-col">
+          <h3>Estados</h3>
+          <a href="/#states-grid">Meditación</a>
+          <a href="/#states-grid">Sueño profundo</a>
+          <a href="/#states-grid">Concentración</a>
+          <a href="/#states-grid">Resonancia Schumann</a>
+        </div>
+        <div class="footer-col">
+          <h3>Sitio</h3>
+          <a href="/sobre-nosotros">Sobre nosotros</a>
+          <a href="/privacidad">Privacidad</a>
+          <a href="/diagnostico">Diagnóstico</a>
+          <a href="/sobre-nosotros#contacto">Contacto</a>
+          <a class="social-link" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> Instagram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span data-year>2026</span> Vyneural · Hecho con <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> · Web Audio API · Vite</span>
+        <span>Desplegado con Vercel</span>
+        <a class="footer-social" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> @vyneural.cl</a>
+      </div>
+      <p class="footer-disclaimer">
+        Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+        médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
+        conduces o manejas maquinaria.
+      </p>
+    </footer>
+  </body>
+</html>

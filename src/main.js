@@ -26,9 +26,12 @@ import {
   showLocalNotification,
   isIos,
   isStandalone,
+  rruleFor,
+  saveAlarms,
 } from './notifications.js';
 import { AlarmManager, createDurableStore, alarmOwnerForPlatform } from './core/alarm-manager.js';
 import { createNotificationManager } from './core/notification-manager.js';
+import { getCachedPushStatus } from './api/push.js';
 // P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
 // la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
 import { createNativeBridgeAdapter, parseBridgeResponse } from './platform/native-bridge.js';
@@ -70,6 +73,16 @@ import {
 import { sanitizeSession, sanitizeFavorites, sanitizeHistory } from './core/session-store.js';
 // Backend (aditivo, FASE 17): sin VITE_API_URL ni flag local no hace nada.
 import { initBackendIfConfigured } from './api/integration.js';
+import { getAccessToken } from './api/client.js';
+// Favoritos en la nube (aditivo): solo actúa con sesión iniciada.
+import { syncFavoriteToCloud, syncUnfavoriteFromCloud } from './api/fav-sync.js';
+// Guardar frecuencias personalizadas (modal compartido con /cuenta).
+import { openFreqModal } from './ui/freq-modal.js';
+// Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
+// backend cuando hay sesión, para que el scheduler server-side pueda enviar
+// el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
+// rompe la alarma local.
+import { createAlarm, deleteAlarm } from './api/alarms.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -138,13 +151,15 @@ function updatePlatformUI() {
   const caps = mergedCapabilities();
   if (caps.native) {
     badge.textContent = 'APK';
-    badge.classList.remove('hidden', 'pwa');
+    badge.classList.remove('hidden', 'pwa', 'web');
   } else if (isStandalone()) {
     badge.textContent = 'PWA';
-    badge.classList.remove('hidden');
+    badge.classList.remove('hidden', 'web');
     badge.classList.add('pwa');
   } else {
-    badge.classList.add('hidden');
+    badge.textContent = 'WEB';
+    badge.classList.remove('hidden', 'pwa');
+    badge.classList.add('web');
   }
 }
 
@@ -366,7 +381,10 @@ function mergedCapabilities() {
       wakeLockSupported: 'wakeLock' in navigator,
       wakeLockActive: !!(_wakeLock && !_wakeLock.released),
       pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
-      pushConfigured: false,
+      // Estado REAL del backend (consultado en initBackendIfConfigured): sin
+      // sesión o sin consulta todavía, configured=false — la API exista no
+      // basta (notification-capabilities.js).
+      pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
       iosNeedsInstall: iosNeedsInstall(),
     }),
     native: nativeBridge.getState(),
@@ -467,6 +485,33 @@ window.addEventListener('vyneural:audioplayback', (e) => {
     audioState.transition('started', { reason: 'engine-running' });
     if (!playing) resumeSession('lock-screen');
   }
+});
+// Evento nativo (APK): adelantar/retroceder la frecuencia desde los controles
+// del SO (skip/seek de la MediaSession). El motor NATIVO ya retuneó; la UI de
+// la WebView se re-sincroniza (nunca inventa estado, nunca re-arranca audio).
+window.addEventListener('vyneural:audiofreq', (e) => {
+  const d = (e.detail || {});
+  const base = typeof d.base === 'number' && d.base >= 60 && d.base <= 400 ? d.base : null;
+  const beat = typeof d.beat === 'number' && d.beat >= 0 && d.beat <= 499 ? d.beat : null;
+  if (base == null) return;
+  ilog('audiofreq', `native→${base}Hz/${beat}`);
+  traceCausal('NATIVE_FREQ_EVENT', `${base}/${beat}`);
+  const customState = STATES.find((s) => s.custom);
+  if (!customState) return;
+  selectState(customState);
+  carrier = 'personalizado';
+  syncCarrierChips();
+  updateCustomPanel();
+  customBase.value = String(Math.round(base * 10) / 10);
+  if (beat != null) customBeat.value = String(Math.round(beat * 10) / 10);
+  updateCustomLabels();
+  updateStatus();
+  updateCarrierWarning();
+  // Solo el proveedor WEB retunea (el nativo ya lo hizo): si el motor web
+  // está sonando, se re-afina en vivo sin cortar la sesión.
+  if (playing && providerLabel() === 'WEB') simulation.audio.retune(currentParams());
+  saveSession();
+  updateUrl();
 });
 document.addEventListener('fullscreenchange', () => {
   ilog('fullscreen', document.fullscreenElement ? 'enter' : 'exit');
@@ -583,11 +628,14 @@ const ICONS = {
   silencio: icon('<path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>'),
   vitalidad: icon('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
   vision: icon('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'),
+  'gamma-60': icon('<path d="M2 12h4l3-8 4 16 3-8h6"/>'),
+  'gamma-100': icon('<path d="M2 12h3l2-6 4 12 3-10 2 4h6"/>'),
   estudio: icon('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
   paz: icon('<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>'),
   equilibrio: icon('<path d="M12 4v17"/><path d="M8 21h8"/><path d="M4 7h16"/><path d="M4 7a3 3 0 0 0 6 0"/><path d="M14 7a3 3 0 0 0 6 0"/>'),
   gateway: icon('<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/>'),
   hemisync: icon('<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/>'),
+  'solfeggio963': icon('<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
   personalizado: icon('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>'),
   // Iconos de la interfaz
   headphones: icon('<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>'),
@@ -697,7 +745,7 @@ function lsSet(key, val) {
 // y la portadora define la frecuencia base. Así cualquier combinación es
 // posible (p. ej. Beta + 136,1 Hz) sin multiplicar los presets fijos.
 const LS_CARRIER = 'ob-carrier-v1';
-const CARRIER_BASE = { estandar: null, estandar220: 220, solfeggio: 528, ancestral: 136.1, schumann: 194.7, personalizado: 'custom' };
+const CARRIER_BASE = { estandar: null, estandar220: 220, solfeggio: 528, solfeggio963: 963, ancestral: 136.1, schumann: 194.7, personalizado: 'custom' };
 // Referencia estándar sobre la que se escala: la afinación de referencia es
 // A=432 Hz (Verdi) en lugar de la base canónica de 220 Hz.
 const STANDARD_BASE = 432;
@@ -725,8 +773,8 @@ const GOALS = [
   { id: 'meditar', label: 'Meditar', emoji: '🧘', stateIds: ['meditacion', 'intuicion', 'silencio', 'paz', 'equilibrio', 'gateway', 'hemisync'], tagline: 'Calma y conexión' },
   { id: 'relajarse', label: 'Relajarse', emoji: '🌿', stateIds: ['relajacion', 'calma', 'armonia', 'despertar'], tagline: 'Suelta el estrés' },
   { id: 'concentrarse', label: 'Concentrarse', emoji: '🧠', stateIds: ['concentracion', 'energia', 'creatividad', 'lucidez', 'alerta', 'foco', 'vitalidad', 'estudio'], tagline: 'Foco y productividad' },
-  { id: 'aprender', label: 'Aprender', emoji: '📚', stateIds: ['aprendizaje', 'memoria', 'vision'], tagline: 'Memoria y retención' },
-  { id: 'especiales', label: 'Especiales', emoji: '✨', stateIds: ['schumann', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
+  { id: 'aprender', label: 'Aprender', emoji: '📚', stateIds: ['aprendizaje', 'memoria', 'vision', 'gamma-60', 'gamma-100'], tagline: 'Memoria y retención' },
+  { id: 'especiales', label: 'Especiales', emoji: '✨', stateIds: ['schumann', 'schumann-armonico', 'solfeggio963', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
 ];
 const goalOf = (s) => GOALS.find((g) => g.stateIds.includes(s.id)) || GOALS[1];
 
@@ -781,6 +829,21 @@ function toggleFav(state, starEl) {
   if (favorites.has(state.id)) favorites.delete(state.id);
   else favorites.add(state.id);
   lsSet(LS_FAVS, [...favorites]);
+  // Espejo en la nube (aditivo, nunca bloquea): si hay sesión, el favorito
+  // viaja al backend y aparece en /cuenta y en otros dispositivos.
+  const nowFav = favorites.has(state.id);
+  if (nowFav) {
+    syncFavoriteToCloud({
+      stateId: state.id,
+      name: state.name,
+      base: state.base,
+      beat: state.beat,
+      band: state.band,
+      wave: typeof selectedWave === 'string' ? selectedWave : 'sine',
+    }).catch(() => {});
+  } else {
+    syncUnfavoriteFromCloud(state.id).catch(() => {});
+  }
   if (starEl) {
     starEl.classList.toggle('fav', favorites.has(state.id));
     starEl.setAttribute('aria-pressed', String(favorites.has(state.id)));
@@ -899,9 +962,10 @@ function currentParams() {
   let base;
   if (selected.custom) {
     base = parseFloat(customBase.value);
-  } else if (carrier === 'solfeggio' || carrier === 'ancestral') {
+  } else if (carrier === 'solfeggio' || carrier === 'solfeggio963' || carrier === 'ancestral') {
     // Escalado proporcional: el estado conserva su identidad relativa dentro
-    // de la familia elegida (p. ej. en 528: Paz → 528 Hz, Gateway → 480 Hz).
+    // de la familia elegida (p. ej. en 528: Paz → 528 Hz, Gateway → 480 Hz;
+    // en 963: Meditación → 468 Hz, Paz → 423 Hz).
     base = scaleCarrier(selected.base, CARRIER_BASE[carrier]);
   } else if (carrier === 'schumann') {
     // La portadora Schumann usa 194,7 Hz literal como f1 (la base tonal);
@@ -1015,6 +1079,9 @@ function start({ resume = false, source = 'ui-play' } = {}) {
   playBtn.setAttribute('aria-label', 'Pausar sesión');
   updateStatus();
   armTimer();
+  // Rutina secuencial: el countdown del paso actual corre solo con play
+  // (reanuda donde quedó tras una pausa; nunca arranca sin gesto).
+  if (seq) armSeqTimer();
   saveSession();
   // Permisos: notificaciones + WakeLock en el mismo gesto del usuario (play).
   // WakeLock impide que el SO interrumpa el audio al bloquear la pantalla.
@@ -1088,6 +1155,7 @@ function stop(withSummary) {
   playBtn.setAttribute('aria-label', 'Comenzar sesión');
   updateStatus();
   disarmTimer();
+  disarmSeqTimer();
   const summary = withSummary ? captureSessionSummary() : null;
   recordHistory();
   saveSession();
@@ -1128,6 +1196,13 @@ function pauseSession(source = 'lock-screen') {
   playBtn.setAttribute('aria-label', 'Comenzar sesión');
   updateStatus();
   disarmTimer();
+  // Congelar el countdown del paso actual de la rutina (igual que el
+  // temporizador global): un play posterior reanuda el mismo paso.
+  if (seq) {
+    seq.remainingMs = seq.stepEnd ? Math.max(0, seq.stepEnd - Date.now()) : seq.remainingMs;
+    seq.stepEnd = 0;
+  }
+  disarmSeqTimer();
   lifecycle.transition('stop');
   sessionLog.pause({ source });
   setAudioProvider('none');
@@ -1419,6 +1494,163 @@ playBtn.addEventListener('click', () => {
 // Estado inicial del play sobre las gotas (solo icono).
 playBtn.innerHTML = ICONS.play;
 playBtn.setAttribute('aria-label', 'Comenzar sesión');
+
+// ---------------------------------------------------------------- Rutina secuencial
+// Reproducción de un itinerario (la rutina unificada) paso a paso: cada paso
+// retunea el audio a su frecuencia y un countdown avanza al siguiente. REGLA
+// DE ORO: nunca autoplay — el enlace llega configurado en pausa y el countdown
+// corre SOLO con un play explícito del usuario. El estado vive en `seq`:
+// { name, steps:[{name,base,beat,wave,dur}], index, stepEnd, remainingMs }.
+let seq = null;
+let seqTimer = null;
+
+function disarmSeqTimer() {
+  if (seqTimer) {
+    clearInterval(seqTimer);
+    seqTimer = null;
+  }
+}
+
+function seqRemainMs() {
+  if (!seq) return 0;
+  if (seq.stepEnd) return Math.max(0, seq.stepEnd - Date.now());
+  const step = seq.steps[seq.index];
+  return seq.remainingMs != null ? seq.remainingMs : step ? step.dur * 1000 : 0;
+}
+
+function updateSeqBar() {
+  const bar = document.getElementById('seq-bar');
+  if (!bar) return;
+  if (!seq) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  const step = seq.steps[seq.index];
+  const nameEl = document.getElementById('seq-name');
+  const stepEl = document.getElementById('seq-step');
+  const remainEl = document.getElementById('seq-remain');
+  const fill = document.getElementById('seq-fill');
+  if (nameEl) nameEl.textContent = seq.name;
+  if (stepEl) stepEl.textContent = `Paso ${seq.index + 1}/${seq.steps.length}`;
+  if (!step) {
+    if (remainEl) remainEl.textContent = '';
+    return;
+  }
+  const totalMs = step.dur * 1000;
+  const remain = seqRemainMs();
+  const secs = Math.max(0, Math.round(remain / 1000));
+  if (remainEl) {
+    remainEl.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · ${Math.round(step.base)} Hz`;
+  }
+  if (fill && totalMs > 0) {
+    fill.style.width = `${Math.max(0, Math.min(100, (100 * remain) / totalMs))}%`;
+  }
+}
+
+// Configura el paso `index` del itinerario (frecuencia, ritmo y onda) SIN
+// arrancar audio: es la meta de la rutina; el play la activa (nunca autoplay).
+function applySeqStep(index) {
+  if (!seq) return;
+  const step = seq.steps[index];
+  if (!step) return;
+  seq.index = index;
+  seq.remainingMs = null;
+  seq.stepEnd = 0;
+  const customState = STATES.find((s) => s.custom);
+  if (!customState) return;
+  selectState(customState);
+  carrier = 'personalizado';
+  syncCarrierChips();
+  updateCustomPanel();
+  customBase.value = String(Math.round(step.base * 10) / 10);
+  customBeat.value = String(Math.round(step.beat * 10) / 10);
+  selectedWave = step.wave;
+  syncWaveButtons();
+  updateCustomLabels();
+  updateCarrierWarning();
+  updateStatus();
+  // En vivo: retunea el motor (web) o el servicio nativo (APK) al nuevo paso.
+  if (playing) {
+    const nb = nativeAudio();
+    if (nb && nb.retuneBackgroundAudio) {
+      // El retune de paso se entrega directo (no por el coalescer): es un
+      // cambio puntual por paso, no una ráfaga de slider.
+      nb.retuneBackgroundAudio({ base: step.base, beat: step.beat, wave: step.wave });
+    } else {
+      simulation.audio.retune(currentParams());
+      applyAmbient();
+    }
+    sessionLog.note('seqStep', { index });
+  }
+  saveSession();
+  updateUrl();
+  updateSeqBar();
+}
+
+// Countdown del paso actual: solo corre cuando la sesión está reproduciendo.
+function armSeqTimer() {
+  disarmSeqTimer();
+  if (!seq) return;
+  const step = seq.steps[seq.index];
+  if (!step) {
+    clearSeq();
+    return;
+  }
+  if (!(step.dur > 0)) {
+    // Paso sin duración: no se queda colgado, avanza al siguiente (o termina).
+    if (seq.steps.some((s) => s.dur > 0)) setTimeout(advanceSeq, 0);
+    else clearSeq();
+    return;
+  }
+  const totalMs = step.dur * 1000;
+  // Reanuda donde quedó tras una pausa (like the global timer) o arranca
+  // el paso completo en el primer play.
+  const remain = seq.remainingMs != null && seq.remainingMs <= totalMs ? seq.remainingMs : totalMs;
+  seq.remainingMs = remain;
+  seq.stepEnd = Date.now() + remain;
+  seqTimer = setInterval(tickSeq, 250);
+  tickSeq();
+}
+
+function tickSeq() {
+  if (!seq) return;
+  const remain = Math.max(0, seq.stepEnd - Date.now());
+  seq.remainingMs = remain;
+  updateSeqBar();
+  if (remain <= 0) advanceSeq();
+}
+
+function advanceSeq() {
+  if (!seq) return;
+  disarmSeqTimer();
+  if (seq.index >= seq.steps.length - 1) {
+    // Último paso: termina la sesión con el resumen (como el temporizador).
+    const doneName = seq.name;
+    clearSeq();
+    if (playing) endSession();
+    else showToast(`✅ ${doneName}: completada`);
+    return;
+  }
+  applySeqStep(seq.index + 1);
+  armSeqTimer();
+}
+
+function clearSeq() {
+  disarmSeqTimer();
+  seq = null;
+  updateSeqBar();
+}
+
+const seqCancelBtn = document.getElementById('seq-cancel');
+if (seqCancelBtn) {
+  seqCancelBtn.addEventListener('click', () => {
+    // Cancelar la rutina: se detiene la sesión y se limpia la secuencia.
+    const wasPlaying = playing;
+    clearSeq();
+    if (wasPlaying) stop(false);
+  });
+}
 
 // ---------------------------------------------------------------- Volumen
 // Aplica un nivel de volumen compartido por el slider de las gotas y el del
@@ -1757,6 +1989,22 @@ function updateCarrierWarning() {
   if (!carrierWarning) return;
   const base = currentParams().base;
   carrierWarning.classList.toggle('hidden', !(typeof base === 'number' && base < 80));
+}
+
+// Guardar la frecuencia actual en la cuenta (modal compartido con /cuenta).
+// El prefill usa los valores en vivo del panel personalizado / estado actual.
+const customSaveFreqBtn = document.getElementById('custom-save-freq');
+if (customSaveFreqBtn) {
+  customSaveFreqBtn.addEventListener('click', () => {
+    const p = currentParams();
+    openFreqModal({
+      name: selected.custom ? '' : `Mi ${selected.name}`,
+      carrier: Math.round((p.base || 220) * 10) / 10,
+      beat: Math.round((p.beat || 10) * 10) / 10,
+      wave: p.wave || 'sine',
+      source: 'generator',
+    });
+  });
 }
 
 // La URL refleja estado + portadora para compartir y enlazar directo. Lleva la
@@ -2926,14 +3174,16 @@ function renderPermissionState() {
   if (pdbNotif) {
     pdbNotif.innerHTML = isNative
       ? 'APK: Locales nativas ✓<br>Sin necesidad de servidor'
-      : 'Web: Web Push<br>Requiere backend (inactivo)';
+      : caps.push.configured
+        ? 'Web: Web Push ✓<br>Con sesión, avisa con la app cerrada'
+        : 'Web: Web Push<br>Requiere backend (inactivo)';
   }
 
-  // Fila Push: sin backend no puede funcionar; se muestra honestamente.
+  // Fila Push: refleja el estado REAL del backend (consultado en el arranque).
   const permPush = document.getElementById('perm-push');
   if (permPush) {
     permPush.textContent = caps.push.label;
-    permPush.className = 'perm-state warn';
+    permPush.className = 'perm-state ' + (caps.push.configured ? 'ok' : 'warn');
   }
   const permTest = document.getElementById('perm-test');
   if (permTest) {
@@ -3686,11 +3936,55 @@ function refreshAlarmPerm() {
   if (iosNeedsInstall()) {
     alarmPerm.textContent += ' En iPhone, instala Vyneural (Compartir → Añadir a pantalla de inicio) para recibir notificaciones.';
   }
+  refreshAlarmHonestNote();
+}
+
+// Texto honesto del modal, DINÁMICO según el estado REAL del backend de push:
+// si hay sesión y el backend tiene VAPID configurado, el aviso con la app
+// cerrada SÍ es posible (web push) — no debe decirse "aún no está configurado".
+function refreshAlarmHonestNote() {
+  const note = document.querySelector('.alarm-honest-note');
+  if (!note) return;
+  const push = getCachedPushStatus();
+  if (push && push.configured && getAccessToken()) {
+    note.innerHTML =
+      '✅ <strong>Web Push configurado:</strong> con la app cerrada, la notificación llega ' +
+      'por el servidor (el respaldo de calendario sigue disponible como refuerzo). ' +
+      'Con la pestaña abierta, la notificación local es inmediata.';
+    return;
+  }
+  note.innerHTML =
+    '⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse ' +
+    '(límite del navegador). El respaldo del calendario sí avisa a la hora exacta. ' +
+    'Las notificaciones con la app cerrada (Web Push) requieren sesión y servidor ' +
+    'configurado: activalas desde tu cuenta.';
+}
+
+// ── Gating por sesión: campana + notificaciones ────────────────────────────
+// Sin sesión no hay backend al que sincronizar el recordatorio (y el Web Push
+// con la app cerrada requiere sesión): la campana queda bloqueada y las
+// notificaciones no se activan hasta iniciar sesión. Igual en web y APK (el
+// bundle es el mismo). Se re-evalúa al iniciar/cerrar sesión y antes de abrir.
+function updateAlarmGating() {
+  const logged = !!getAccessToken();
+  alarmBtn.classList.toggle('locked', !logged);
+  alarmBtn.setAttribute('aria-disabled', String(!logged));
+  alarmBtn.setAttribute('title', logged ? 'Recordatorio de sesión' : 'Iniciá sesión para programar recordatorios y notificaciones');
+  alarmBtn.setAttribute('aria-label', logged ? 'Recordatorio de sesión' : 'Iniciá sesión para programar recordatorios');
+  // La vista en la página y el badge solo tienen sentido con sesión.
+  if (alarmView) alarmView.classList.toggle('hidden', !logged || getAlarms().length === 0);
+  if (alarmBadge) alarmBadge.classList.toggle('hidden', !logged || getAlarms().length === 0);
 }
 
 function openAlarmModal() {
+  if (!getAccessToken()) {
+    showToast('🔒 Iniciá sesión para activar notificaciones y recordatorios');
+    return;
+  }
+  updateAlarmGating();
   if (!alarmTime.value) alarmTime.value = defaultAlarmTime();
   refreshAlarmPerm();
+  refreshAlarmHonestNote();
   renderAlarms();
   alarmModal.classList.remove('hidden');
 }
@@ -3700,6 +3994,8 @@ function closeAlarmModal() {
 }
 
 alarmBtn.addEventListener('click', openAlarmModal);
+// Re-evaluar el bloqueo cuando cambia la sesión (login/logout/register).
+document.addEventListener('vyneural:auth', updateAlarmGating);
 document.getElementById('alarm-close').addEventListener('click', closeAlarmModal);
 alarmModal.addEventListener('click', (e) => {
   if (e.target === alarmModal) closeAlarmModal();
@@ -3812,6 +4108,12 @@ function scheduleNativeAlarm(alarm) {
     body: `${alarm.name} · ${Math.round(alarm.freq)} Hz · ${alarm.beat} Hz`,
     atMs: alarm.nextAt,
     days: alarm.days && alarm.days.length ? alarm.days : undefined,
+    // Deep link: al tocar la notificación, la app abre esta frecuencia exacta
+    // en vez de la pantalla por defecto (paridad con las alarmas sincronizadas
+    // desde la cuenta — ver AndroidBridge.kt SCHEDULE_ALARM).
+    freq: alarm.freq,
+    beat: alarm.beat,
+    wave: alarm.wave || 'sine',
   });
   return !!(r && r.ok);
 }
@@ -3820,6 +4122,11 @@ function cancelNativeAlarm(alarmId) {
   if (b && b.cancelAlarm) b.cancelAlarm(alarmId);
 }
 function cancelAlarmBoth(alarmId) {
+  // P6-FEAT-001 — borrar también la copia en la nube (best-effort).
+  const stored = getAlarms().find((a) => a.id === alarmId);
+  if (stored && stored.cloudId && getAccessToken()) {
+    deleteAlarm(stored.cloudId).catch(() => {});
+  }
   cancelNativeAlarm(alarmId);
   alarmManager.cancel(alarmId);
 }
@@ -3844,6 +4151,45 @@ alarmSave.addEventListener('click', async () => {
   const nativeOwned = scheduleNativeAlarm(alarm);
   if (nativeOwned) alarm.external = true;
   await alarmManager.create(alarm);
+  // P6-FEAT-001 — sincronizar al backend con sesión: el recordatorio vive en
+  // la nube y el scheduler server-side envía el Web Push a la hora exacta
+  // aunque la app esté cerrada. Best-effort (nunca rompe la alarma local).
+  if (getAccessToken()) {
+    let timezone = 'UTC';
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (_) {
+      /* sin zona del navegador */
+    }
+    createAlarm({
+      name: alarm.name || 'Recordatorio',
+      enabled: true,
+      scheduled_at: new Date(alarm.nextAt).toISOString(),
+      timezone,
+      config: {
+        freq: alarm.freq,
+        beat: alarm.beat,
+        wave: alarm.wave || 'sine',
+        minutes: alarm.minutes || 0,
+        // El id LOCAL identifica la notificación: el push del backend usa el
+        // mismo tag que la notificación local → el navegador la REEMPLAZA y
+        // no se muestran dos avisos cuando la app está abierta.
+        localId: alarm.id,
+      },
+      repeat_rule: days.length ? rruleFor(days) : null,
+      notification_enabled: true,
+    })
+      .then((created) => {
+        // Recordar el id del backend en la copia local para poder borrarla.
+        if (created && created.id) {
+          alarm.cloudId = created.id;
+          saveAlarms(getAlarms().map((a) => (a.id === alarm.id ? alarm : a)));
+        }
+      })
+      .catch(() => {
+        /* sin sesión válida / sin red: la alarma sigue local */
+      });
+  }
   renderAlarms();
   showToast(
     days.length
@@ -3887,8 +4233,9 @@ function renderAlarms() {
     alarmList.appendChild(li);
   });
   // Vista en la página: lista visible + botón para agregar + badge de la campana.
+  // Sin sesión la campana está bloqueada: la vista no se muestra (gating).
   if (alarmView && alarmViewList) {
-    alarmView.classList.toggle('hidden', alarms.length === 0);
+    alarmView.classList.toggle('hidden', alarms.length === 0 || !getAccessToken());
     alarmViewList.innerHTML = '';
     alarms.forEach((a) => {
       const li = document.createElement('li');
@@ -3915,9 +4262,10 @@ function renderAlarms() {
   }
   if (alarmBadge) {
     alarmBadge.textContent = String(alarms.length);
-    alarmBadge.classList.toggle('hidden', alarms.length === 0);
+    alarmBadge.classList.toggle('hidden', alarms.length === 0 || !getAccessToken());
   }
   syncAppBadge(alarms.length);
+  updateAlarmGating();
 }
 
 // Insignia en el icono de la app instalada (como una app nativa): muestra la
@@ -3934,6 +4282,10 @@ function syncAppBadge(count) {
 
 // La vista en la página abre el modal para agregar o editar recordatorios.
 if (alarmViewAdd) alarmViewAdd.addEventListener('click', openAlarmModal);
+
+// Estado inicial del bloqueo por sesión (la campana arranca bloqueada si no
+// hay sesión guardada; renderAlarms() la re-evalúa en cada render).
+updateAlarmGating();
 
 // P4 — permiso denegado en Android: abre los ajustes de notificaciones de la
 // app (OPEN_NOTIFICATION_SETTINGS, whitelisted). En web no aplica (el botón
@@ -3998,6 +4350,8 @@ const notificationManager = createNotificationManager({
     typeof Notification !== 'undefined' ? Notification.permission : 'denied',
   showSwNotification,
   showLocalNotification,
+  // Estado real del backend de push (consultado en initBackendIfConfigured).
+  pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
 });
 
 const alarmManager = new AlarmManager({
@@ -4073,7 +4427,9 @@ createDurableStore()
 // Diagnóstico honesto de notificaciones (Fase 24): expone el estado REAL de
 // cada capacidad, no etiquetas. Depurable en window.__notificationDiagnostics().
 window.__notificationDiagnostics = async () => {
-  const caps = detectNotificationCapabilities({ pushConfigured: false });
+  const caps = detectNotificationCapabilities({
+    pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
+  });
   const am = window.__alarmManager;
   const reg = typeof navigator !== 'undefined' && navigator.serviceWorker
     ? await navigator.serviceWorker.getRegistration().catch(() => null)
@@ -4120,7 +4476,9 @@ window.__platformProbe = async () => {
   } catch {
     /* sin matchMedia */
   }
-  const caps = detectNotificationCapabilities({ pushConfigured: false });
+  const caps = detectNotificationCapabilities({
+    pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
+  });
   const probe = typeof window.__audioProbe === 'function' ? window.__audioProbe() : null;
   const stats = probe && probe.stats;
   const transport = probe && probe.transport;
@@ -4218,6 +4576,7 @@ if (deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar') {
     customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
   }
 } else if (deepF1 === 528) carrier = 'solfeggio';
+else if (deepF1 === 963) carrier = 'solfeggio963';
 else if (deepF1 === 136.1) carrier = 'ancestral';
 else if (deepF1 === 194.7) carrier = 'schumann';
 else if (isFinite(deepF1) && deepF1 > 0) {
@@ -4235,6 +4594,34 @@ const deepFreq = parseFloat(deepParams.get('freq'));
 const deepBeat = parseFloat(deepParams.get('beat'));
 const deepWave = deepParams.get('wave');
 const deepAutostart = deepParams.get('autostart') === 'true';
+// Deep link de itinerario (rutina unificada): ?seq={json} — {name, steps}.
+// Cada paso trae base/beat/wave/dur. Se sanitiza TODO (viene de la URL);
+// nunca autoplay: la secuencia queda en pausa esperando el play del usuario.
+const deepSeqRaw = deepParams.get('seq');
+let deepSeq = null;
+if (deepSeqRaw) {
+  try {
+    const d = JSON.parse(deepSeqRaw);
+    const steps = (Array.isArray(d.steps) ? d.steps : [])
+      .slice(0, 60)
+      .map((s) => ({
+        name: typeof s.n === 'string' ? s.n.slice(0, 60) : '',
+        base: isFinite(s.base) && s.base > 0 && s.base <= 1000 ? +s.base : 220,
+        beat: isFinite(s.beat) && s.beat >= 0 && s.beat <= 499 ? +s.beat : 10,
+        wave: ['sine', 'triangle', 'square', 'sawtooth'].includes(s.wave) ? s.wave : 'sine',
+        dur: isFinite(s.dur) && s.dur > 0 ? +s.dur : 0,
+      }))
+      .filter((s) => s.dur > 0);
+    if (steps.length) {
+      deepSeq = {
+        name: typeof d.name === 'string' && d.name ? d.name.slice(0, 80) : 'Rutina',
+        steps,
+      };
+    }
+  } catch (_) {
+    deepSeq = null;
+  }
+}
 const customState = STATES.find((s) => s.custom);
 let wantId = deepState || (savedSession && savedSession.state);
 if (isFinite(deepFreq) && deepFreq > 0) {
@@ -4273,6 +4660,12 @@ updateCustomLabels();
 syncWaveButtons();
 // Marca la portadora activa (fila principal y modo girado) y muestra el panel.
 syncCarrierChips();
+// Rutina secuencial desde la vista Tu rutina: configura el primer paso y
+// muestra la barra EN PAUSA — el audio nace solo con un play del usuario.
+if (deepSeq) {
+  seq = deepSeq;
+  applySeqStep(0);
+}
 updateCustomPanel();
 updateCarrierWarning();
 updateAmbientButtons();
@@ -4316,7 +4709,13 @@ if (
 // Backend opcional (FASE 17): no bloquea, no lanza, no cambia el
 // comportamiento offline. Solo actúa si hay backend configurado.
 window.addEventListener('load', () => {
-  initBackendIfConfigured().catch(() => {});
+  initBackendIfConfigured()
+    .then(() => {
+      // La consulta real de push puede terminar después de abrir el modal:
+      // actualizar el texto honesto y las capacidades cuando llegue.
+      refreshAlarmPerm();
+    })
+    .catch(() => {});
 });
 
 // Loader animado: se desvanece cuando la página terminó de cargar, con un

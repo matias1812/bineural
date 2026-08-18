@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import com.vyneural.bineural.audio.AudioForegroundService
 import com.vyneural.bineural.bridge.AndroidBridge
+import com.vyneural.bineural.sync.AlarmSync
 import com.vyneural.bineural.diag.Diagnostics
 import com.vyneural.bineural.lifecycle.LifecycleManager
 import com.vyneural.bineural.notifications.AlarmScheduler
@@ -44,6 +45,17 @@ class MainActivity : ComponentActivity() {
     // que el diagnóstico lo lea sin tocar el WebView desde otro hilo.
     @Volatile
     private var currentPage = "index"
+
+    companion object {
+        // Extras del Intent que abre MainActivity al tocar la notificación de
+        // una alarma (ver NotificationHelper.alarmNotification): deep link a la
+        // frecuencia exacta configurada, paridad con el Web Push
+        // (backend/app/services/reminders.py:_deep_link + public/sw.js).
+        const val EXTRA_FREQ = "vyneural_extra_freq"
+        const val EXTRA_BEAT = "vyneural_extra_beat"
+        const val EXTRA_WAVE = "vyneural_extra_wave"
+        const val EXTRA_AUTOSTART = "vyneural_extra_autostart"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,6 +105,12 @@ class MainActivity : ComponentActivity() {
         AudioForegroundService.onPlaybackStateChange = { state ->
             pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:audioplayback',{detail:{state:'$state'}}))")
         }
+        // Adelantar/retroceder la frecuencia desde los controles del SO
+        // (skip/seek): la UI web se re-sincroniza con el nuevo base/beat del
+        // motor nativo ('vyneural:audiofreq').
+        AudioForegroundService.onFrequencyChange = { base, beat ->
+            pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:audiofreq',{detail:{base:$base,beat:$beat}}))")
+        }
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -129,7 +147,16 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        loadLocalPage("index")
+        // Deep link: si la app se abrió tocando la notificación de una alarma
+        // (ver NotificationHelper), arrancar directo en esa frecuencia en vez
+        // de la pantalla por defecto.
+        loadLocalPageInternal("index", push = true, query = deepLinkQuery(intent))
+
+        // Sincronización en segundo plano: programa el ciclo periódico (30
+        // min, auto-reprogramable, sobrevive reboot) y, si hay sesión,
+        // sincroniza las alarmas del servidor de inmediato. Las alarmas
+        // creadas en la WEB llegan a la APK y disparan con la app cerrada.
+        AlarmSync.run(this)
     }
 
     /** Envía JavaScript al WebView (eventos nativos → JS). */
@@ -173,7 +200,7 @@ class MainActivity : ComponentActivity() {
     /** Carga una página local (MPA de Vite): /privacidad → privacidad.html. */
     private fun loadLocalPage(page: String) = loadLocalPageInternal(page, push = true)
 
-    private fun loadLocalPageInternal(page: String, push: Boolean) {
+    private fun loadLocalPageInternal(page: String, push: Boolean, query: String? = null) {
         val clean = page.replace(Regex("[^A-Za-z0-9_-]"), "").ifEmpty { "index" }
         if (push) {
             val current = currentPage
@@ -184,7 +211,38 @@ class MainActivity : ComponentActivity() {
             }
         }
         currentPage = clean
-        webView.loadUrl("file:///android_asset/bineural/$clean.html")
+        val suffix = if (query.isNullOrEmpty()) "" else "?$query"
+        webView.loadUrl("file:///android_asset/bineural/$clean.html$suffix")
+    }
+
+    /** Query string ?freq=&beat=&wave=&autostart=true a partir de los extras
+     *  del Intent (ver companion object), o null si el intent no es un deep
+     *  link de alarma. `autostart` acá solo prepara la UI para el gesto del
+     *  usuario — el propio src/main.js (deepAutostart) nunca reproduce audio
+     *  sin ese gesto (REGLA DE ORO), igual que el deep link del Web Push. */
+    private fun deepLinkQuery(intent: Intent?): String? {
+        if (intent == null || !intent.hasExtra(EXTRA_FREQ)) return null
+        val freq = intent.getDoubleExtra(EXTRA_FREQ, 0.0)
+        if (freq <= 0) return null
+        val beat = intent.getDoubleExtra(EXTRA_BEAT, 10.0)
+        val wave = intent.getStringExtra(EXTRA_WAVE)?.takeIf { it.isNotBlank() } ?: "sine"
+        val autostart = intent.getBooleanExtra(EXTRA_AUTOSTART, false)
+        val q = StringBuilder("freq=").append(freq).append("&beat=").append(beat).append("&wave=").append(wave)
+        if (autostart) q.append("&autostart=true")
+        return q.toString()
+    }
+
+    /** launchMode="singleTask" (manifest): un segundo tap en la notificación
+     *  de alarma con la app ya abierta llega acá, no a un onCreate nuevo. Sin
+     *  este override, ese segundo tap no navegaba a nada (gap detectado en la
+     *  auditoría). Solo navega si el intent trae un deep link real: un tap en
+     *  la notificación del reproductor (sin extras) no debe interrumpir la
+     *  pantalla donde el usuario esté. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val query = deepLinkQuery(intent) ?: return
+        loadLocalPageInternal("index", push = true, query = query)
     }
 
     /** Nombre de la página actual (cacheado; nunca toca el WebView desde
@@ -229,6 +287,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         webView.onResume()
         LifecycleManager.onResume()
+        // Sincronización al volver a primer plano: si hay sesión, las alarmas
+        // creadas en la web mientras la app estuvo cerrada llegan al instante
+        // (no hay que esperar el ciclo periódico). No-op si no hay token.
+        AlarmSync.run(this)
     }
 
     override fun onPause() {

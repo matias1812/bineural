@@ -31,6 +31,10 @@ object BridgeCommands {
         "GET_NAV_STATE",
         "OPEN_NOTIFICATION_SETTINGS",
         "SESSION_END", // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
+        "STORE_AUTH", // sesión del WebView → prefs nativas (worker de sync en 2.º plano)
+        "CLEAR_AUTH", // cierre de sesión → limpiar prefs nativas + alarmas sincronizadas
+        "API_REQUEST", // HTTP nativo (sin CORS): el WebView de la APK (file://) no puede
+        //               hacer fetch al backend porque su origen es opaco (null).
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

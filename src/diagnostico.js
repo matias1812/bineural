@@ -7,6 +7,8 @@ import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { probeCapabilities } from './core/capabilities.js';
 import { setFullscreen, setOrientation, screenState } from './platform/fullscreen.js';
 import { notificationSupported, getAlarms, requestPermission } from './notifications.js';
+import { getCachedPushStatus, setCachedPushStatus, pushStatus } from './api/push.js';
+import { getAccessToken } from './api/client.js';
 
 const $ = (id) => document.getElementById(id);
 function setText(id, v) {
@@ -179,7 +181,8 @@ function refreshCaps() {
     wakeLockSupported: 'wakeLock' in navigator,
     wakeLockActive: false,
     pushSupported: 'PushManager' in window && 'serviceWorker' in navigator,
-    pushConfigured: false,
+    // Estado REAL del backend (consultado abajo con sesión), no un supuesto.
+    pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
     iosNeedsInstall: false,
   });
   const bridge = currentBridge();
@@ -358,6 +361,31 @@ function refreshPlatform() {
           }
           return 'browser';
         })(),
+        device: (() => {
+          // Estado REAL de este dispositivo (para /diagnostico y la sección
+          // Dispositivos de /cuenta): la APK lo da el bridge; la web usa un
+          // id local persistente. Nunca se adivina.
+          let bridgeInfo = null;
+          try {
+            if (native) bridgeInfo = native.info || null;
+          } catch (_) { bridgeInfo = null; }
+          let id = (bridgeInfo && bridgeInfo.deviceId) || null;
+          if (!id) {
+            try {
+              id = localStorage.getItem('vyneural_device_id');
+            } catch (_) { id = null; }
+          }
+          return {
+            device_id: id || null,
+            platform: bridgeInfo ? 'apk' : (window.matchMedia('(display-mode: standalone)').matches ? 'pwa' : 'web'),
+            app_version: (bridgeInfo && bridgeInfo.appVersion) || null,
+            notification_permission: (bridgeInfo && bridgeInfo.notificationPermission) ||
+              (notificationSupported() ? Notification.permission : 'unavailable'),
+            push_enabled: bridgeInfo
+              ? (bridgeInfo.notificationPermission === 'GRANTED')
+              : (notificationSupported() && Notification.permission === 'granted'),
+          };
+        })(),
       },
       null,
       2,
@@ -370,6 +398,16 @@ refreshState();
 refreshPlatform();
 refreshFocus();
 refreshNav();
+// Push: consultar el estado REAL del backend si hay sesión (el diagnóstico
+// no debe afirmar "no configurado" cuando el servidor tiene VAPID activo).
+if (getAccessToken()) {
+  pushStatus()
+    .catch(() => setCachedPushStatus({ supported: true, configured: false }))
+    .finally(() => {
+      refreshCaps();
+      refreshPlatform();
+    });
+}
 setInterval(refreshState, 1000);
 setInterval(refreshPlatform, 2000);
 setInterval(refreshFocus, 2000);
@@ -382,13 +420,15 @@ function updatePlatformUI() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   if (bridge) {
     badge.textContent = 'APK';
-    badge.classList.remove('hidden', 'pwa');
+    badge.classList.remove('hidden', 'pwa', 'web');
   } else if (isStandalone) {
     badge.textContent = 'PWA';
-    badge.classList.remove('hidden');
+    badge.classList.remove('hidden', 'web');
     badge.classList.add('pwa');
   } else {
-    badge.classList.add('hidden');
+    badge.textContent = 'WEB';
+    badge.classList.remove('hidden', 'pwa');
+    badge.classList.add('web');
   }
 }
 updatePlatformUI();

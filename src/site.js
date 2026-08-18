@@ -1,5 +1,6 @@
 import './site.css';
 import './report-bug.js';
+import './ui/auth.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
 
@@ -60,6 +61,67 @@ if (navToggle && navLinks) {
 // ---------------------------------------------------------------- Año del footer
 document.querySelectorAll('[data-year]').forEach((el) => {
   el.textContent = String(new Date().getFullYear());
+});
+
+// ---------------------------------------------------------------- Service worker (PWA)
+// Registro el SW en TODAS las páginas (antes solo vivía en main.js, la home):
+// entrar directo a /cuenta (o cualquier página) sin pasar por la home dejaba
+// el push sin service worker → "no se pudo activar". Solo en producción y
+// sobre http/https (dentro de la APK la página vive en file://, sin SW).
+if (
+  'serviceWorker' in navigator &&
+  /^https?:$/.test(location.protocol) &&
+  location.hostname !== 'localhost'
+) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+// ---------------------------------------------------------------- Badge de plataforma
+// Diferencia honesta WEB / PWA / APK en TODAS las páginas. Antes el badge
+// solo lo manejaban main.js (home) y diagnostico.js, y en navegador normal
+// quedaba oculto: ahora se muestra "WEB" también y corre acá, compartido.
+function updatePlatformBadge() {
+  const badge = document.getElementById('platform-badge');
+  if (!badge) return;
+  const bridge =
+    typeof window !== 'undefined' &&
+    (typeof window.AndroidBridge !== 'undefined' || typeof window.AndroidBridgeNative !== 'undefined');
+  const standalone =
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+    window.navigator.standalone === true;
+  badge.classList.remove('hidden', 'pwa', 'web');
+  if (bridge) {
+    badge.textContent = 'APK';
+  } else if (standalone) {
+    badge.textContent = 'PWA';
+    badge.classList.add('pwa');
+  } else {
+    badge.textContent = 'WEB';
+    badge.classList.add('web');
+  }
+}
+updatePlatformBadge();
+// Reintentos: el bridge nativo se inyecta en onPageFinished, después de que
+// site.js corre (igual patrón que main.js / diagnostico.js).
+setTimeout(updatePlatformBadge, 1000);
+setTimeout(updatePlatformBadge, 3000);
+
+// ---------------------------------------------------------------- Navegación compartida
+// “Preguntas frecuentes” y “Mi cuenta” se agregan a la nav y al footer de
+// todas las páginas desde acá, para no duplicarlos en cada HTML. La cuenta
+// (opcional) y la ayuda deben estar a un toque desde cualquier lado.
+const sharedFaq = '<a href="/preguntas-frecuentes">Preguntas frecuentes</a>';
+document.querySelectorAll('.site-links').forEach((nav) => {
+  nav.insertAdjacentHTML('beforeend', sharedFaq);
+});
+document.querySelectorAll('.footer-col h3').forEach((h3) => {
+  const title = (h3.textContent || '').trim().toLowerCase();
+  const col = h3.parentElement;
+  if (title === 'sitio') {
+    col.insertAdjacentHTML('afterbegin', sharedFaq + '<a href="/cuenta">Mi cuenta</a>');
+  }
 });
 
 // ---------------------------------------------------------------- Resaltar la página actual

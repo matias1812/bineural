@@ -8,7 +8,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import android.webkit.JavascriptInterface
 import com.vyneural.bineural.BuildConfig
 import com.vyneural.bineural.MainActivity
@@ -17,7 +21,10 @@ import com.vyneural.bineural.diag.Diagnostics
 import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.notifications.NotificationHelper
 import com.vyneural.bineural.permissions.PermissionManager
+import com.vyneural.bineural.sync.AlarmSync
+import com.vyneural.bineural.util.AuthStore
 import com.vyneural.bineural.util.BineuralLog
+import com.vyneural.bineural.util.DeviceId
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,9 +63,13 @@ class AndroidBridge(
         info.put("mediaSession", true)
         info.put("mediaSessionActive", AudioForegroundService.mediaSessionActive())
         info.put("mediaSessionPlaybackState", AudioForegroundService.mediaPlaybackState())
-        info.put("mediaSessionControls", JSONArray(listOf("play", "pause", "stop")))
+        // v1.2 — skip/seek también cambian la FRECUENCIA (adelantar/retroceder).
+        info.put("mediaSessionControls", JSONArray(listOf("play", "pause", "stop", "next", "previous")))
         info.put("notifications", true)
         info.put("notificationPermission", permissions.notificationState())
+        // Dispositivo estable (mismo ID que usa el worker de sync en 2.º
+        // plano): la web lo usa para reportar PUT /devices/me con un solo ID.
+        info.put("deviceId", DeviceId.get(context))
         info.put("alarmScheduler", true)
         // P5 — conteo REAL de alarmas pendientes (las programadas en
         // AlarmManager y aún no disparadas); 0 no significa "sin función".
@@ -141,7 +152,12 @@ class AndroidBridge(
                     val days =
                         if (daysArr != null && daysArr.length() > 0) (0 until daysArr.length()).map { daysArr.optInt(it) }
                         else null
-                    scheduler.schedule(id, title, body, at, days)
+                    // Deep link: al tocar la notificación, MainActivity abre esta
+                    // frecuencia exacta (ver main.js scheduleNativeAlarm).
+                    val freq = if (payload.has("freq")) payload.optDouble("freq") else null
+                    val beat = if (payload.has("beat")) payload.optDouble("beat") else null
+                    val wave = if (payload.has("wave")) payload.optString("wave") else null
+                    scheduler.schedule(id, title, body, at, days, freq, beat, wave)
                     respond("OK", command, null)
                 }
                 "CANCEL_ALARM" -> {
@@ -199,7 +215,8 @@ class AndroidBridge(
                         .put("supported", true)
                         .put("active", AudioForegroundService.mediaSessionActive())
                         .put("playbackState", AudioForegroundService.mediaPlaybackState())
-                        .put("controls", JSONArray(listOf("play", "pause", "stop")))
+                        // v1.2 — skip/seek = adelantar/retroceder la frecuencia.
+                        .put("controls", JSONArray(listOf("play", "pause", "stop", "next", "previous")))
                     respond("OK", command, d)
                 }
                 "GET_NAV_STATE" -> {
@@ -265,6 +282,48 @@ class AndroidBridge(
                     NotificationHelper.showSessionEnd(context, title, body)
                     respond("OK", command, null)
                 }
+                "STORE_AUTH" -> {
+                    // La sesión del WebView se guarda para el worker de
+                    // sincronización en segundo plano (alarmas del servidor +
+                    // reporte de dispositivo). Al iniciar sesión se sincroniza
+                    // de inmediato, sin esperar el ciclo periódico.
+                    AuthStore.save(
+                        context,
+                        payload?.optString("access_token", null),
+                        payload?.optString("user_id", null),
+                        payload?.optString("email", null),
+                    )
+                    AlarmSync.run(context)
+                    respond("OK", command, null)
+                }
+                "CLEAR_AUTH" -> {
+                    AuthStore.clear(context)
+                    AlarmSync.clearSynced(context)
+                    respond("OK", command, null)
+                }
+                "API_REQUEST" -> {
+                    // HTTP nativo (sin CORS): el WebView de la APK carga desde
+                    // file:// (origen opaco → Origin: null) y el backend no puede
+                    // listar "null" en CORS de forma confiable. Así el login y el
+                    // resto de las llamadas del WebView funcionan SIEMPRE, sin
+                    // depender de la configuración CORS del servidor.
+                    val id = payload?.optLong("id", -1L) ?: -1L
+                    val path = payload?.optString("path", "") ?: ""
+                    if (id < 0 || path.isEmpty()) return respond("INVALID", command, null)
+                    val method = (payload?.optString("method", "GET") ?: "GET").uppercase()
+                    val body = if (payload != null && payload.has("body") && !payload.isNull("body")) payload.getString("body") else null
+                    val headers = payload?.optJSONObject("headers")
+                    // ACK inmediato (el JS ya registró el resolver por id) y la
+                    // llamada HTTP corre en un hilo aparte: nunca se bloquea el
+                    // hilo del bridge ni la UI. El resultado vuelve al JS por
+                    // evaluateJavascript (pushToWeb postea al hilo del WebView).
+                    Thread {
+                        val result = runCatching { httpRequest(method, path, body, headers) }
+                            .getOrElse { JSONObject().put("error", it.message ?: "request failed") }
+                        activity.pushToWeb("window.__vyneuralApiResponse($id, ${JSONObject.quote(result.toString())})")
+                    }.start()
+                    respond("ACCEPTED", command, JSONObject().put("id", id))
+                }
                 "SAVE_ICS" -> {
                     // Guarda el .ics del recordatorio en Descargas. El DownloadManager
                     // no puede bajar blob: URLs (son internas del renderer), así que
@@ -305,5 +364,41 @@ class AndroidBridge(
         if (command != null) r.put("command", command)
         if (data != null) r.put("data", data)
         return r.toString()
+    }
+
+    // ── HTTP nativo para API_REQUEST ─────────────────────────────────────────
+    private fun httpRequest(method: String, path: String, body: String?, headers: JSONObject?): JSONObject {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = URL(BuildConfig.API_BASE + path).openConnection() as HttpURLConnection
+            conn.requestMethod = method
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 25_000
+            conn.setRequestProperty("Accept", "application/json")
+            if (headers != null) {
+                val it = headers.keys()
+                while (it.hasNext()) {
+                    val k = it.next()
+                    val v = headers.optString(k, "")
+                    if (v.isNotEmpty()) conn.setRequestProperty(k, v)
+                }
+            }
+            if (body != null) {
+                conn.doOutput = true
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            val code = conn.responseCode
+            val text = try {
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                if (stream == null) "" else BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+            } catch (e: Exception) {
+                ""
+            }
+            JSONObject().put("status", code).put("body", text)
+        } catch (e: Exception) {
+            JSONObject().put("error", e.message ?: "request failed")
+        } finally {
+            conn?.disconnect()
+        }
     }
 }

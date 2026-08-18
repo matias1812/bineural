@@ -1,0 +1,8 @@
+INFO         | Android emulator version 37.1.11.0 (build_id 15917651) (CL:N/A)
+INFO         | Graphics backend: gfxstream
+INFO         | AVD vyneural-test has path C:\Users\matia\.android\avd\..\avd\vyneural-test.avd
+INFO         | trying to check whether C:\Users\matia\AppData\Local\Android\Sdk is a valid sdk root
+WARNING      | C:\Users\matia\AppData\Local\Android\Sdk\system-images\android-34\google_apis\x86_64\ is not a valid directory.
+WARNING      | emulator has searched the above paths but found no valid sdk root directory.
+FATAL        | Cannot find AVD system path. Please define ANDROID_SDK_ROOT
+

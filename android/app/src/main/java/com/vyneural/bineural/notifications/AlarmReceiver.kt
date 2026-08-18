@@ -24,7 +24,13 @@ class AlarmReceiver : BroadcastReceiver() {
             context,
             record.optString("title", "Vyneural"),
             record.optString("body", "Hora de tu sesión"),
+            if (record.has("freq")) record.optDouble("freq") else null,
+            if (record.has("beat")) record.optDouble("beat") else null,
+            if (record.has("wave")) record.optString("wave") else null,
         )
+        // Límite de sonido sin respuesta: si nadie toca/descarta la alarma, se
+        // silencia sola a los AlarmScheduler.ALARM_RING_LIMIT_MS (AlarmSilenceReceiver).
+        AlarmScheduler(context).scheduleSilence(id)
         // P5 — rutina: si la alarma tiene días de repetición, se reprograma a la
         // PRÓXIMA ocurrencia (misma hora, próximo día del patrón). Si no, se
         // consume (una sola vez).

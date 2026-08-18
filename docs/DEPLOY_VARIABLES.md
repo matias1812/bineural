@@ -20,8 +20,19 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 
 ### Manuales — correo (OBLIGATORIAS para que lleguen los mails)
 
+> ⚠️ **Render free BLOQUEA los puertos SMTP (25/465/587)** desde el 26/09/2025
+> (changelog oficial). El SMTP de Gmail NO funciona en el plan free — el envío
+> falla con error de conexión (`/health/email?test=1` → `error_kind: connect`).
+> Dos caminos:
+> - **A. Plan de pago en Render** (Starter): el SMTP funciona tal cual.
+> - **B. Free: proveedor por HTTPS** (`EMAIL_PROVIDER=resend|brevo` + API key).
+>   No está bloqueado. Resend: 100 correos/día free · Brevo: 300/día free.
+
+**Opción A — SMTP (requiere plan de pago en Render):**
+
 | Variable | Valor |
 |---|---|
+| `EMAIL_PROVIDER` | `smtp` (default) |
 | `SMTP_HOST` | `smtp.gmail.com` |
 | `SMTP_PORT` | `587` |
 | `SMTP_USER` | `matias.torres1812@gmail.com` |
@@ -31,6 +42,16 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `SMTP_TLS` | `true` |
 | `SMTP_SSL` | `false` |
 | `FRONTEND_BASE_URL` | `https://vyneural-six.vercel.app` *(nunca localhost: es la base de los enlaces del correo)* |
+
+**Opción B — HTTPS API (gratis, recomendada en Render free):**
+
+| Variable | Valor |
+|---|---|
+| `EMAIL_PROVIDER` | `resend` o `brevo` |
+| `RESEND_API_KEY` | `re_…` (resend.com → API Keys; verificar el remitente en Resend) |
+| `BREVO_API_KEY` | `xkeysib-…` (brevo.com → SMTP & API → API Keys) |
+| `SMTP_FROM` | el correo **verificado** en el proveedor |
+| `SMTP_FROM_NAME` | `Vyneural` |
 
 ### Manuales — API / push
 
@@ -91,8 +112,8 @@ curl -s https://vyneural-backend.onrender.com/health        # → {"status":"ok"
 curl -s https://vyneural-backend.onrender.com/health/db     # → database ok
 curl -s -o /dev/null -w "%{http_code}\n" https://vyneural-backend.onrender.com/docs  # → 200
 
-# 2) Rewrite del frontend (debe responder FastAPI, NO el 404 de Vercel)
-curl -s -w "\n%{http_code}\n" https://vyneural-six.vercel.app/api/v1/push/status
+# 2) Rewrite del frontend (401 "no autorizado" del FastAPI = OK; página 404 de Vercel = NO publicado)
+curl -s -w "\n%{http_code}\n" https://vyneural-six.vercel.app/api/v1/auth/me
 
 # 3) Correo: pedir un reset (llega un mail real si el SMTP está configurado)
 curl -s -X POST https://vyneural-backend.onrender.com/api/v1/auth/forgot-password \
@@ -102,6 +123,34 @@ curl -s -X POST https://vyneural-backend.onrender.com/api/v1/auth/forgot-passwor
 # 4) Automatizado
 node scripts/check-deploy.mjs
 ```
+
+## Troubleshooting — `email_sent: false` (el correo no sale de Render)
+
+`POST /api/v1/auth/resend-verification` devuelve `email_sent: bool`. Si es
+`false`, el backend ACEPTÓ el reenvío pero **no entregó el correo**. Orden de
+revisión:
+
+1. **¿Es un plan free de Render?** Desde 2026-09 Render free bloquea los puertos
+   SMTP 25/465/587 → el envío falla con error de conexión aunque las variables
+   estén perfectas. Verificar con `/health/email?test=1`:
+   `error_kind: connect` = bloqueo de Render (o red). Solución: plan de pago o
+   `EMAIL_PROVIDER=resend|brevo` (HTTPS, no bloqueado).
+2. **¿Están las variables en el servicio CORRECTO?** El servicio real es
+   `vyneural-backend` (no `vyneural-api`, que ni siquiera existe). Abrir
+   Render → el servicio → Environment y confirmar `SMTP_HOST`, `SMTP_USER`,
+   `SMTP_PASSWORD`, `SMTP_FROM` (o `EMAIL_PROVIDER` + API key).
+2. **Logs de Render**: en Logs buscar `EMAIL [VERIFY] failed to=... error=...`
+   (muestra el error exacto del SMTP) o `EMAIL [VERIFY] sent` (entregado). Si
+   al arrancar aparece `PRODUCTION sin SMTP_HOST`, las variables no llegaron a
+   ese servicio.
+3. **App password de Gmail**: `SMTP_PASSWORD` debe ser una *app password*
+   (requiere 2FA activado en la cuenta) — no la contraseña normal. Revisar
+   también si Gmail avisó de un inicio de sesión bloqueado (alerta de
+   seguridad) y aprobarlo.
+4. **Redesplegar tras cambiar variables**: si se editaron las variables después
+   del último deploy, forzar Render → Manual Deploy → Deploy branch.
+5. Verificación final: `node scripts/check-deploy.mjs --email TU-EMAIL` y/o
+   registrar un usuario y tocar "Reenviar" → debe devolver `email_sent: true`.
 
 ## Cómo se publica
 

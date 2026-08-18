@@ -49,12 +49,18 @@ export const ServiceWorkerNotificationProvider = (deps = {}) => ({
   },
 });
 
-// Desactivado por diseño: no existe backend de Web Push (P0, Fase 13).
-// canHandle() siempre false → nunca se intenta, y la UI lo declara así.
-export const PushNotificationProvider = () => ({
+// El provider de push NO dispara notificaciones locales: el SW muestra las
+// que llegan del backend (handlers `push`/`notificationclick`). canHandle()
+// siempre false → nunca compite con el SW/local. `configured` refleja el
+// estado REAL del backend (deps.pushConfigured): la API exista no basta, y
+// la UI y el diagnóstico lo declaran honestamente.
+export const PushNotificationProvider = (deps = {}) => ({
   name: 'push',
-  enabled: false,
-  configured: false,
+  // Sin backend configurado el provider queda DESACTIVADO (honestidad): la
+  // API exista no basta. Con backend, `enabled` pasa a true pero canHandle()
+  // sigue en false (el SW muestra el push entrante; nunca compite local).
+  enabled: !!(deps && deps.pushConfigured),
+  configured: !!(deps && deps.pushConfigured),
   canHandle() {
     return false;
   },
@@ -147,7 +153,7 @@ export function createNotificationManager(deps = {}) {
     providers: [
       ServiceWorkerNotificationProvider(deps),
       LocalNotificationProvider(deps),
-      PushNotificationProvider(),
+      PushNotificationProvider(deps),
       CalendarProvider(deps),
     ],
     onShown: deps.onShown || null,

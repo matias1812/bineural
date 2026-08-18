@@ -48,6 +48,21 @@ export class ApiError extends Error {
   }
 }
 
+// Notifica al bridge nativo (APK) cambios de sesión: el worker de segundo
+// plano necesita el token para sincronizar alarmas del servidor y reportar
+// el estado del dispositivo aunque la app esté cerrada.
+function bridgeNotify(command, payload) {
+  try {
+    if (typeof window === 'undefined') return;
+    const b = window.AndroidBridge || window.AndroidBridgeNative;
+    if (b && typeof b.postMessage === 'function') {
+      b.postMessage(JSON.stringify({ command, payload: payload || null }));
+    }
+  } catch (_) {
+    /* bridge no disponible: la web sigue igual */
+  }
+}
+
 // Registra la sesión (access + refresh) tras login/register.
 export function storeSession(session) {
   setAccessToken(session.access_token);
@@ -56,6 +71,11 @@ export function storeSession(session) {
   } catch (_) {
     /* sin storage */
   }
+  bridgeNotify('STORE_AUTH', {
+    access_token: session.access_token || null,
+    user_id: session.user_id || null,
+    email: session.email || null,
+  });
 }
 
 export function getRefreshToken() {
@@ -73,6 +93,98 @@ export function clearSession() {
   } catch (_) {
     /* sin storage */
   }
+  bridgeNotify('CLEAR_AUTH', null);
+}
+
+// ── HTTP nativo en la APK (sin CORS) ───────────────────────────────────────
+// El WebView de la APK carga desde file:// (origen opaco → Origin: null) y no
+// puede depender de que el backend liste "null" en CORS. Cuando el bridge
+// nativo está presente (AndroidBridgeNative, disponible desde el arranque de
+// la página), TODAS las llamadas API se hacen por HttpURLConnection nativo vía
+// el comando API_REQUEST: funcionan siempre, sin depender de la config del
+// servidor. La web/PWA siguen usando fetch (same-origin vía proxy).
+const NATIVE_TIMEOUT_MS = 30000;
+let nativeApiSeq = 0;
+const nativeApiPending = new Map();
+
+function isNativeApiAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    window.AndroidBridgeNative &&
+    typeof window.AndroidBridgeNative.postMessage === 'function'
+  );
+}
+
+// El lado Kotlin llama a esta función (evaluateJavascript) al terminar el
+// HTTP nativo. Se registra UNA vez; el id identifica la promesa pendiente.
+if (typeof window !== 'undefined' && !window.__vyneuralApiResponse) {
+  window.__vyneuralApiResponse = (rid, json) => {
+    const entry = nativeApiPending.get(rid);
+    if (!entry) return;
+    nativeApiPending.delete(rid);
+    clearTimeout(entry.timer);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(json);
+    } catch (_) {
+      parsed = null;
+    }
+    if (!parsed || parsed.error) {
+      entry.reject(new ApiError(0, 'sin conexión con el servidor', 'NETWORK'));
+    } else {
+      // Misma forma que el fetch web: { status, text } (request() lee res.text).
+      entry.resolve({ status: parsed.status, text: parsed.body || '' });
+    }
+  };
+}
+
+function nativeApiFetch(path, { method = 'GET', headers, body } = {}) {
+  const bridge = window.AndroidBridgeNative;
+  return new Promise((resolve, reject) => {
+    const id = ++nativeApiSeq;
+    const timer = setTimeout(() => {
+      nativeApiPending.delete(id);
+      reject(new ApiError(0, 'sin conexión con el servidor', 'NETWORK'));
+    }, NATIVE_TIMEOUT_MS);
+    nativeApiPending.set(id, { resolve, reject, timer });
+    let ack = null;
+    try {
+      ack = bridge.postMessage(
+        JSON.stringify({
+          command: 'API_REQUEST',
+          payload: { id, method, path, body: body === undefined ? null : body, headers: headers || null },
+        }),
+      );
+    } catch (_) {
+      ack = null;
+    }
+    // El bridge nativo devuelve el ACK como STRING (el wrapper window.AndroidBridge
+    // lo parsea; acá llamamos a AndroidBridgeNative directo).
+    let ackObj = null;
+    try {
+      ackObj = typeof ack === 'string' ? JSON.parse(ack) : ack;
+    } catch (_) {
+      ackObj = null;
+    }
+    if (!ackObj || ackObj.status !== 'ACCEPTED') {
+      clearTimeout(timer);
+      nativeApiPending.delete(id);
+      reject(new ApiError(0, 'sin conexión con el servidor', 'NETWORK'));
+    }
+  });
+}
+
+// Petición HTTP unificada (web: fetch; APK: bridge nativo) → { status, text }.
+async function performFetch(path, { method = 'GET', headers, body } = {}) {
+  if (isNativeApiAvailable()) {
+    return nativeApiFetch(path, { method, headers, body });
+  }
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, text: await res.text() };
 }
 
 // Refresh único compartido: varias peticiones 401 no lanzan refreshes paralelos.
@@ -82,17 +194,21 @@ function tryRefresh() {
   if (!refreshToken) {
     refreshPromise = Promise.resolve(false);
   } else {
-    refreshPromise = fetch(`${API_BASE}/api/v1/auth/refresh`, {
+    refreshPromise = performFetch('/api/v1/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
       .then((res) => {
-        if (!res.ok) return false;
-        return res.json().then((j) => {
+        if (res.status < 200 || res.status >= 300) return false;
+        try {
+          const j = res.text ? JSON.parse(res.text) : null;
+          if (!j || !j.access_token) return false;
           storeSession(j);
           return true;
-        });
+        } catch (_) {
+          return false;
+        }
       })
       .catch(() => false);
   }
@@ -107,11 +223,7 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
 
   let res;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    res = await performFetch(path, { method, headers, body });
   } catch (_) {
     throw new ApiError(0, 'sin conexión con el servidor', 'NETWORK');
   }
@@ -123,10 +235,10 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
     throw new ApiError(401, 'sesión expirada', 'UNAUTHORIZED');
   }
 
-  if (!res.ok) {
-    let detail = res.statusText;
+  if (res.status < 200 || res.status >= 300) {
+    let detail = `error ${res.status}`;
     try {
-      const j = await res.json();
+      const j = res.text ? JSON.parse(res.text) : null;
       if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
     } catch (_) {
       /* sin cuerpo JSON */
@@ -134,13 +246,66 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
     throw new ApiError(res.status, detail);
   }
 
-  if (res.status === 204) return null;
-  return res.json();
+  if (res.status === 204 || !res.text) return null;
+  return JSON.parse(res.text);
 }
 
 export const get = (path) => request(path);
-export const post = (path, body) => request(path, { method: 'POST', body });
-export const put = (path, body) => request(path, { method: 'PUT', body });
-export const patch = (path, body) => request(path, { method: 'PATCH', body });
+
+// ── Caché TTL para GET (carga de peticiones) ────────────────────────────────
+// Las listas del /cuenta y de la rutina se repiten al navegar entre páginas
+// con sesión. Este caché en memoria evita re-pedir al backend dentro de la
+// ventana TTL y se invalida automáticamente tras CADA mutación exitosa, así
+// nunca sirve datos viejos después de crear/borrar algo.
+const getCache = new Map(); // path -> { t: ms, data }
+const GET_CACHE_TTL = 8000; // 8 s
+
+/** GET con caché TTL: devuelve el dato fresco o el cacheado (nunca lanza por
+ *  datos viejos: si el fetch falla y hay caché, se usa el caché).
+ *  Deduplica llamadas EN VUELO: dos loadAll() concurrentes comparten la misma
+ *  petición (la segunda espera la primera en vez de pedir otra vez). */
+export async function cachedGet(path, ttl = GET_CACHE_TTL) {
+  const hit = getCache.get(path);
+  // Promesa en vuelo PRIMERO: un entry recién creado aún no tiene `data`
+  // (undefined); si la rama TTL corría antes, una segunda llamada concurrente
+  // resolvía `undefined` en vez de esperar la misma petición (bug real: dos
+  // me() concurrentes en el arranque de /cuenta → perfil "Sesión no disponible").
+  if (hit && hit.promise) return hit.promise;
+  if (hit && hit.data !== undefined && Date.now() - hit.t < ttl) return hit.data;
+  const promise = get(path)
+    .then((data) => {
+      getCache.set(path, { t: Date.now(), data, promise: null });
+      return data;
+    })
+    .catch((err) => {
+      // Sin red pero con caché reciente: mejor datos que error (aditivo).
+      if (hit && hit.data !== undefined) return hit.data;
+      getCache.delete(path);
+      throw err;
+    });
+  getCache.set(path, { t: Date.now(), promise });
+  return promise;
+}
+
+/** Invalida el caché del recurso tras una mutación (create/update/delete). */
+export function invalidateCache(path) {
+  const parts = path.split('/').filter(Boolean);
+  // /api/v1/<recurso>[/…] — se invalida todo el recurso.
+  const prefix = parts.slice(0, 3).join('/');
+  for (const key of [...getCache.keys()]) {
+    if (key.startsWith(prefix)) getCache.delete(key);
+  }
+}
+
+function mutating(method, path, body) {
+  return request(path, { method, body }).then((data) => {
+    invalidateCache(path);
+    return data;
+  });
+}
+
+export const post = (path, body) => mutating('POST', path, body);
+export const put = (path, body) => mutating('PUT', path, body);
+export const patch = (path, body) => mutating('PATCH', path, body);
 export const del = (path, body) =>
-  request(path, { method: 'DELETE', body: body === undefined ? undefined : body });
+  mutating('DELETE', path, body === undefined ? undefined : body);

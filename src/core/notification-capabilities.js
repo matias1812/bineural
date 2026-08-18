@@ -109,8 +109,12 @@ export function capabilitySummary(caps) {
   rows.push({
     key: 'background',
     label: 'Avisos con la app cerrada',
-    status: CAPABILITY_TEXT.backgroundScheduling,
-    note: 'requieren Web Push con servidor, aún no configurado',
+    status: caps.push.configured
+      ? 'Web Push configurado (requiere sesión y suscripción)'
+      : CAPABILITY_TEXT.backgroundScheduling,
+    note: caps.push.configured
+      ? 'el servidor envía el aviso a la hora exacta si el dispositivo está suscrito'
+      : 'requieren Web Push con servidor, aún no configurado',
   });
   rows.push({
     key: 'calendar',
@@ -122,7 +126,11 @@ export function capabilitySummary(caps) {
     key: 'push',
     label: 'Web Push',
     status: caps.push.configured ? 'Configurado' : CAPABILITY_TEXT.push,
-    note: caps.push.supported ? 'soportado por el navegador, sin backend' : 'no soportado por este navegador',
+    note: caps.push.configured
+      ? 'servidor listo (VAPID): activá las notificaciones desde tu cuenta'
+      : caps.push.supported
+        ? 'soportado por el navegador, sin backend'
+        : 'no soportado por este navegador',
   });
   rows.push({
     key: 'mediaSession',

@@ -6,6 +6,9 @@
   --text-dim: #9aa0c3;
   --accent: #a78bfa;
   --accent-soft: rgba(167, 139, 250, 0.16);
+  /* Selects, dropdowns nativos, scrollbars y date pickers en oscuro (sin
+     destellos blancos del sistema). */
+  color-scheme: dark;
 }
 
 * {
@@ -828,6 +831,41 @@ body {
   gap: 7px;
 }
 
+/* Botón para guardar la frecuencia actual en la cuenta (modal compartido
+   con /cuenta). Visible solo dentro del panel personalizado. */
+.custom-save-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.freq-save-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  background: rgba(167, 139, 250, 0.12);
+  color: #c4b5fd;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.freq-save-btn:hover {
+  background: rgba(167, 139, 250, 0.22);
+  transform: translateY(-1px);
+}
+
+.freq-save-btn .ico {
+  width: 15px;
+  height: 15px;
+}
+
 /* Etiqueta + burbujita de ayuda del control. La burbuja se ancla al
    principio de la etiqueta (y no al punto), para que en móvil nunca se
    salga de la pantalla: la etiqueta abarca el ancho del panel. */
@@ -1038,6 +1076,85 @@ body {
   font-size: 13px;
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Barra de rutina secuencial: muestra el itinerario activo, el paso actual
+   y su cuenta regresiva. Nunca autoplay: llega oculta y solo aparece cuando
+   el usuario la inicia desde Tu rutina (aún así espera el play). */
+.seq-bar {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--accent-soft);
+}
+
+.seq-bar .seq-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.seq-bar .seq-label {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.seq-bar .seq-name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.seq-bar .seq-remain {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.seq-track {
+  margin-top: 9px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.seq-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.seq-cancel {
+  appearance: none;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seq-cancel:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.seq-bar {
+  position: relative;
 }
 
 /* ---------------------------------------------------------------- Controles */
@@ -2005,6 +2122,7 @@ body.immersive section.panel:not(.visual-panel),
 body.immersive #cookie-banner,
 body.immersive .info,
 body.immersive .final-cta,
+body.immersive .comments-section,
 body.immersive .site-footer {
   display: none;
 }
@@ -2551,6 +2669,12 @@ body.immersive .controls {
   font-variant-numeric: tabular-nums;
 }
 
+/* Las opciones del desplegable se leen: fondo oscuro + texto claro. */
+.alarm-input option {
+  background: #14162b;
+  color: var(--text);
+}
+
 .alarm-custom {
   padding: 12px 14px;
   margin-bottom: 14px;
@@ -2761,6 +2885,20 @@ body.immersive .controls {
 }
 
 /* ---------------------------------------------------------------- Badge de la campana */
+/* Campana bloqueada sin sesión: se ve deshabilitada y el click avisa que hay
+   que iniciar sesión (el handler de openAlarmModal no abre el modal). */
+.alarm-btn.locked {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.alarm-btn.locked:hover,
+.alarm-btn.locked:active {
+  transform: none;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
 .alarm-badge {
   position: absolute;
   top: -4px;

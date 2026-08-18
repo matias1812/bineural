@@ -132,7 +132,7 @@
         <ul class="trust-row" aria-label="Confianza">
           <li>100% gratis</li>
           <li>Sin cuenta</li>
-          <li>28 estados de frecuencia</li>
+          <li>31 estados de frecuencia</li>
           <li>En tu navegador</li>
         </ul>
       </header>
@@ -176,6 +176,12 @@
             <span class="info-dot" tabindex="0" role="tooltip" aria-label="Qué es la forma de onda" data-tip="El timbre del sonido: senoidal es suave y pura; triangular es más cálida, y diente de sierra o cuadrada suenan más ricas y ásperas.">?</span>
           </span>
           <div id="custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
+          </div>
+          <div class="custom-save-wrap">
+            <button type="button" class="freq-save-btn" id="custom-save-freq" title="Guardar esta frecuencia en tu cuenta">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+              Guardar esta frecuencia
+            </button>
           </div>
         </div>
       </section>
@@ -245,6 +251,19 @@
           <span id="status-freqs"></span>
           <span id="status-state" class="status-state"></span>
         </div>
+
+        <!-- Reproducción secuencial de un itinerario (rutina). Nunca autoplay:
+             llega configurado en pausa y el countdown corre solo con play. -->
+        <div class="seq-bar hidden" id="seq-bar" role="status" aria-live="polite">
+          <div class="seq-info">
+            <span class="seq-label">🧭 Rutina</span>
+            <span class="seq-name" id="seq-name"></span>
+            <span class="seq-step" id="seq-step"></span>
+            <span class="seq-remain" id="seq-remain"></span>
+          </div>
+          <div class="seq-track"><div class="seq-fill" id="seq-fill"></div></div>
+          <button type="button" class="seq-cancel" id="seq-cancel" aria-label="Cancelar la rutina secuencial">✕</button>
+        </div>
       </section>
 
       <section class="controls">
@@ -300,6 +319,7 @@
             <button class="carrier-btn active" data-carrier="estandar">432 Hz · Estándar</button>
             <button class="carrier-btn" data-carrier="estandar220">220 Hz · Estándar impuesto</button>
             <button class="carrier-btn" data-carrier="solfeggio">528 Hz · Solfeggio</button>
+            <button class="carrier-btn" data-carrier="solfeggio963">963 Hz · Solfeggio divino</button>
             <button class="carrier-btn" data-carrier="ancestral">136.1 Hz · Ancestral</button>
             <button class="carrier-btn" data-carrier="schumann">194.7 Hz · Schumann</button>
             <button class="carrier-btn" data-carrier="personalizado">Personalizado</button>
@@ -360,11 +380,15 @@
           La portadora (frecuencia base de cada oído) no cambia el efecto neurológico del latido
           — eso lo determina solo el Δf. Sí cambia el timbre y la sensación subjetiva del sonido.
           La afinación de referencia de Vyneural es A = 432 Hz: las familias de portadora
-          (528 Hz Solfeggio, 136,1 Hz ancestral) se escalan sobre esa referencia, de modo que
-          cada estado conserva su tono relativo — los presets graves suenan más graves y los
-          agudos más agudos, siempre con el mismo latido. Las portadoras graves generan un
-          latido más perceptible; 528 Hz es una frecuencia de la escala Solfeggio con valor
-          simbólico/cultural, sin evidencia científica de propiedades curativas.
+          (528 Hz y 963 Hz Solfeggio, 136,1 Hz ancestral) se escalan sobre esa referencia, de
+          modo que cada estado conserva su tono relativo — los presets graves suenan más graves
+          y los agudos más agudos, siempre con el mismo latido. Las portadoras graves generan
+          un latido más perceptible. Las frecuencias de la escala Solfeggio tienen valor
+          simbólico/cultural, sin evidencia científica de propiedades curativas: 528 Hz es la
+          llamada "frecuencia del amor", y 963 Hz la "frecuencia de Dios" o de la divinidad —
+          se afirma que activa la glándula pineal, conecta con la conciencia superior y
+          armoniza con la unidad cósmica, siempre sin respaldo científico físico. Elegí la que
+          resuene contigo; el latido (Δf) es lo único con efecto neurológico documentado.
         </p>
         <details class="band-details">
           <summary>Ver tabla de frecuencias de referencia</summary>
@@ -411,6 +435,46 @@
         <div class="hero-cta-row" style="margin-top: 0">
           <a class="hero-cta" href="#estados">Comenzar ahora</a>
         </div>
+      </section>
+
+      <!-- Comentarios y ranking (backend opcional, aditivo) -->
+      <section class="comments-section" id="comments">
+        <div class="comments-head">
+          <h2>💬 La comunidad opina</h2>
+          <p class="comments-sub">Valoraciones de personas que usan Vyneural. Dejá la tuya si te ayudó.</p>
+        </div>
+
+        <div class="comments-rank" id="comments-rank" hidden>
+          <div class="comments-rank-score">
+            <span class="comments-average" id="comments-average">—</span>
+            <span class="comments-stars" id="comments-stars" aria-hidden="true"></span>
+            <span class="comments-total" id="comments-total"></span>
+          </div>
+          <div class="comments-bars" id="comments-bars"></div>
+        </div>
+
+        <form class="comments-form" id="comments-form" novalidate>
+          <div class="comments-form-row">
+            <span class="comments-form-label">Tu valoración</span>
+            <div class="comments-star-input" id="comments-star-input" role="radiogroup" aria-label="Valoración en estrellas">
+              <button type="button" class="c-star" data-r="1" aria-label="1 estrella" aria-pressed="false">★</button>
+              <button type="button" class="c-star" data-r="2" aria-label="2 estrellas" aria-pressed="false">★</button>
+              <button type="button" class="c-star" data-r="3" aria-label="3 estrellas" aria-pressed="false">★</button>
+              <button type="button" class="c-star" data-r="4" aria-label="4 estrellas" aria-pressed="false">★</button>
+              <button type="button" class="c-star" data-r="5" aria-label="5 estrellas" aria-pressed="false">★</button>
+            </div>
+          </div>
+          <textarea id="comments-text" maxlength="1000" rows="3" placeholder="Contá cómo te fue con las ondas binaurales… (mínimo 3 caracteres)"></textarea>
+          <div class="comments-form-actions">
+            <span class="comments-auth-hint" id="comments-auth-hint"></span>
+            <button type="submit" class="hero-cta" id="comments-submit">Publicar comentario</button>
+          </div>
+          <p class="comments-error hidden" id="comments-error" role="alert"></p>
+          <p class="comments-ok hidden" id="comments-ok" role="status"></p>
+        </form>
+
+        <ul class="comments-list" id="comments-list"></ul>
+        <p class="comments-empty" id="comments-empty" hidden>Sin comentarios todavía. ¡Sé el primero en dejar tu valoración!</p>
       </section>
 
     </div>
@@ -547,7 +611,7 @@
           <button id="alarm-save" class="quick-start">Guardar recordatorio</button>
         </div>
 
-        <p class="alarm-honest-note">⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse (límite del navegador). El respaldo del calendario sí avisa a la hora exacta. Las notificaciones con la app cerrada (Web Push) requieren un servidor: aún no está configurado.</p>
+        <p class="alarm-honest-note">⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse (límite del navegador). El respaldo del calendario sí avisa a la hora exacta. Las notificaciones con la app cerrada (Web Push) requieren sesión y servidor configurado (este texto se actualiza según el estado real).</p>
         <div class="alarm-backup">
           <p class="alarm-backup-title">¿La app va a estar cerrada? Respalda el aviso en tu calendario:</p>
           <div class="alarm-backup-btns">
@@ -770,5 +834,6 @@
     </footer>
     <script type="module" src="/src/site.js"></script>
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/comments.js"></script>
   </body>
 </html>

@@ -84,24 +84,33 @@
       </header>
 
       <div class="page-body">
-        <!-- Web/PWA: la rutina es exclusiva de la APK → aviso honesto. -->
-        <div class="page-card hidden" id="rutina-apk-gate">
-          <p class="rm-emoji" aria-hidden="true">📲</p>
-          <h2>La rutina es exclusiva de la APK de Android</h2>
-          <p>
-            Programar una sesión para que se repita ciertos días (lunes y jueves, toda la semana…)
-            con alarma real y vibración requiere el reloj del sistema de Android. En la web los
-            recordatorios son de una sola vez y solo suenan con la pestaña abierta.
-          </p>
+        <div class="page-card" id="rutina-daily-card">
+          <div class="rutina-head">
+            <h2>📊 Resumen de hoy</h2>
+            <span class="roadmap-status rs-live">hoy</span>
+          </div>
+          <div id="rutina-daily"></div>
         </div>
 
-        <div id="rutina-content">
         <div class="page-card">
           <div class="rutina-head">
             <h2>Próximas sesiones</h2>
             <span class="roadmap-status rs-live" id="rutina-count">0</span>
           </div>
           <p class="rutina-hint">Se muestran los recordatorios guardados en este dispositivo.</p>
+
+          <!-- Web/PWA: la repetición semanal con alarma real (AlarmManager) es
+               exclusiva de la APK; los itinerarios de abajo sí funcionan acá. -->
+          <div class="page-card hidden" id="rutina-apk-gate">
+            <p class="rm-emoji" aria-hidden="true">📲</p>
+            <h3>Repetición con alarma real: exclusiva de la APK</h3>
+            <p>
+              Un recordatorio que se repita ciertos días con alarma real y vibración necesita el
+              reloj del sistema de Android. Esta lista es de recordatorios de este dispositivo;
+              tus <a href="#rutina-it-list">itinerarios</a> con horario sí te avisan acá con una
+              notificación push.
+            </p>
+          </div>
 
           <ul class="rutina-list" id="rutina-list"></ul>
 
@@ -117,14 +126,38 @@
 
           <p class="rutina-note hidden" id="rutina-platform-note"></p>
         </div>
+
+        <div class="page-card">
+          <div class="rutina-head">
+            <h2>🧭 Mis itinerarios</h2>
+            <span class="roadmap-status rs-live" id="rutina-it-count">0</span>
+          </div>
+          <p class="rutina-hint">
+            Un itinerario es tu rutina de pasos: una secuencia de frecuencias con su duración y,
+            si querés, un horario propio. Con cuenta, se sincronizan y se ven igual en la web y en
+            la APK; con horario configurado te llega un recordatorio por notificación push a este
+            dispositivo (en la APK, además, con la alarma del sistema).
+          </p>
+          <p class="rutina-hint" id="rutina-it-sync" hidden></p>
+
+          <ul class="rutina-list" id="rutina-it-list"></ul>
+
+          <div class="rutina-empty" id="rutina-it-empty">
+            <p class="rm-emoji" aria-hidden="true">🗺️</p>
+            <p><strong>Todavía no tenés itinerarios.</strong></p>
+            <p>
+              Creá uno desde tu <a href="/cuenta">página de cuenta</a>: sumá frecuencias
+              guardadas como pasos con su duración y horario, y arrancalo desde acá con un toque.
+            </p>
+          </div>
         </div>
 
         <div class="page-card">
           <h3>¿Cómo funcionan las alarmas?</h3>
           <ul>
             <li><strong>En la APK:</strong> la alarma la programa el reloj del sistema de Android (AlarmManager). Suena con la app cerrada, con la pantalla bloqueada y tras un reinicio, con vibración. Necesita el permiso de notificaciones y, para disparar a la hora justa, el de alarmas exactas.</li>
-            <li><strong>En la web/PWA:</strong> el recordatorio suena mientras la página está abierta. Para avisos con la pestaña cerrada, usá el respaldo de calendario (Google Calendar o .ics) desde el modal de recordatorios.</li>
-            <li><strong>Repetición (solo APK):</strong> elegí un solo día o varios (por ejemplo lunes y jueves) y la rutina se reprograma sola cada semana gracias al reloj del sistema.</li>
+            <li><strong>En la web/PWA:</strong> el recordatorio de dispositivo suena mientras la página está abierta; para avisos con la pestaña cerrada, usá el respaldo de calendario (Google Calendar o .ics) desde el modal de recordatorios. El horario de un <strong>itinerario</strong> es distinto: lo manda el servidor como notificación push a la hora justa, con o sin la pestaña abierta (necesita permiso de notificaciones activado).</li>
+            <li><strong>Repetición semanal:</strong> en los recordatorios de dispositivo es exclusiva de la APK (reloj del sistema); en los itinerarios funciona en cualquier plataforma con cuenta.</li>
           </ul>
           <p><a class="hero-cta" href="/hoja-de-ruta#alarmas">Ver el estado honesto de las alarmas</a></p>
         </div>

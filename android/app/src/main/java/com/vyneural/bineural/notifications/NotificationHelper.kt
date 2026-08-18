@@ -25,7 +25,11 @@ object NotificationHelper {
     // v2: los canales son inmutables una vez creados; al añadir vibración se
     // cambió el ID para que las instalaciones existentes reciban el canal nuevo
     // (con vibración) en lugar de heredar el viejo sin ella.
-    const val CHANNEL_ALARMS = "bineural_alarms_v2"
+    // v3: la alarma ahora suena con el RINGTONE DE ALARMA del sistema
+    // (USAGE_ALARM), no con el sonido de notificación genérico: es una alarma
+    // real, no un aviso pasivo. Nuevo ID para que las instalaciones existentes
+    // reciban el canal con sonido de alarma.
+    const val CHANNEL_ALARMS = "bineural_alarms_v3"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -46,11 +50,23 @@ object NotificationHelper {
         // P5 — la alarma vibra (patrón de recordatorio) además de sonar: es un
         // aviso de alarma, no una notificación pasiva. El canal se crea con la
         // vibración habilitada desde el arranque para que Android la permita.
+        // v3 — ALARMA REAL: el canal usa el ringtone de ALARMA del sistema con
+        // AudioAttributes USAGE_ALARM (el mismo que la app Reloj): suena alto,
+        // aunque el teléfono esté en silencio/No molestar según la política del
+        // SO, y vibra. No es el "pop" genérico de una notificación.
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ALARMS, "Alarmas Vyneural", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Recordatorios de sesión (con vibración)"
+                description = "Alarmas reales de sesión (sonido de alarma + vibración)"
                 enableVibration(true)
                 setVibrationPattern(VIBRATION_ALARM)
+                setSound(
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                        ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
             },
         )
         // M1 — fin de sesión: aviso suave (sonido del sistema, sin vibración).
@@ -122,10 +138,28 @@ object NotificationHelper {
         return builder.build()
     }
 
-    fun alarmNotification(context: Context, title: String, body: String): Notification {
+    fun alarmNotification(
+        context: Context,
+        title: String,
+        body: String,
+        freq: Double? = null,
+        beat: Double? = null,
+        wave: String? = null,
+    ): Notification {
         ensureChannels(context)
+        val openIntent = Intent(context, MainActivity::class.java)
+        // Deep link (paridad con el Web Push, ver reminders.py:_deep_link): al
+        // tocar la notificación, MainActivity abre la web en esta frecuencia
+        // exacta en vez de la pantalla por defecto. Sin freq (alarma legado sin
+        // config), se abre la app tal cual — comportamiento anterior intacto.
+        if (freq != null) {
+            openIntent.putExtra(MainActivity.EXTRA_FREQ, freq)
+            if (beat != null) openIntent.putExtra(MainActivity.EXTRA_BEAT, beat)
+            if (wave != null) openIntent.putExtra(MainActivity.EXTRA_WAVE, wave)
+            openIntent.putExtra(MainActivity.EXTRA_AUTOSTART, true)
+        }
         val open = PendingIntent.getActivity(
-            context, 0, Intent(context, MainActivity::class.java),
+            context, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(context, CHANNEL_ALARMS)
@@ -134,23 +168,44 @@ object NotificationHelper {
             .setContentText(body)
             .setContentIntent(open)
             .setAutoCancel(true)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            // Vibración + sonido de alarma (P5): el patrón respeta el canal;
-            // con la vibración del canal habilitada, el sistema la ejecuta.
+            // CATEGORY_ALARM (no REMINDER): el sistema la trata como alarma real
+            // (prioridad en No molestar según la política del usuario).
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            // El SONIDO de alarma (ringtone TYPE_ALARM con USAGE_ALARM) lo lleva
+            // el canal v3 (inmutable, se configura al crearse): la notificación
+            // no necesita repetirlo. Vibración con patrón de recordatorio.
             .setVibrate(VIBRATION_ALARM)
-            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 
     /** Publica la alarma. Respeta el permiso POST_NOTIFICATIONS (Android 13+). */
-    fun showAlarm(context: Context, title: String, body: String) {
+    fun showAlarm(
+        context: Context,
+        title: String,
+        body: String,
+        freq: Double? = null,
+        beat: Double? = null,
+        wave: String? = null,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ALARM, alarmNotification(context, title, body))
+        nm.notify(NOTIF_ALARM, alarmNotification(context, title, body, freq, beat, wave))
+    }
+
+    /**
+     * Cancela la notificación de alarma. La usa AlarmSilenceReceiver al vencer
+     * el límite de sonido sin respuesta (AlarmScheduler.ALARM_RING_LIMIT_MS):
+     * corta el sonido/vibración si aún suenan y limpia el sombreado. Es un
+     * no-op si el usuario ya la tocó o descartó.
+     */
+    fun cancelAlarm(context: Context) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(NOTIF_ALARM)
     }
 
     /**

@@ -1,0 +1,1 @@
+import{d as a,v as i,w as t,c as r}from"./site-CvVQixPh.js";const n=()=>r("/api/v1/itineraries"),c=e=>t("/api/v1/itineraries",e),o=e=>a(`/api/v1/itineraries/${e}`),p=e=>i(`/api/v1/itineraries/${e}/toggle`);export{c,o as d,n as l,p as t};
