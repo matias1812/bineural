@@ -3,7 +3,7 @@
 // Uso:
 //   node scripts/check-deploy.mjs
 //   node scripts/check-deploy.mjs --email vos@ejemplo.com
-//   node scripts/check-deploy.mjs --frontend https://vyneural-six.vercel.app --backend https://vyneural-backend.onrender.com
+//   node scripts/check-deploy.mjs --frontend https://www.vyneural.cl --backend https://vyneural-backend.onrender.com
 //
 // Verifica, sin modificar nada:
 //   1. Backend /health y /health/db (servicio + PostgreSQL).
@@ -18,7 +18,7 @@
 
 import { createHash } from 'node:crypto';
 
-const FRONTEND = process.env.FRONTEND_URL || 'https://vyneural-six.vercel.app';
+const FRONTEND = process.env.FRONTEND_URL || 'https://www.vyneural.cl';
 const BACKEND = process.env.BACKEND_URL || 'https://vyneural-backend.onrender.com';
 
 const args = process.argv.slice(2);
