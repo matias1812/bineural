@@ -233,6 +233,18 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
     const ok = await tryRefresh();
     if (ok) return request(path, { method, body, retry: false });
     clearSession();
+    // Confirmado (no solo "sin token": el refresh también falló): avisar a
+    // TODA página, no solo a la que hizo este fetch — antes cada página
+    // tenía que acordarse de llamar expireSession() por su cuenta (/cuenta
+    // lo hacía, /rutina y el generador no), y el chip de la nav quedaba
+    // mostrando la sesión vieja hasta el próximo reload.
+    try {
+      if (typeof document !== 'undefined') {
+        document.dispatchEvent(new CustomEvent('vyneural:session-expired'));
+      }
+    } catch (_) {
+      /* sin document: contexto no-DOM, nada que notificar */
+    }
     throw new ApiError(401, 'sesión expirada', 'UNAUTHORIZED');
   }
 

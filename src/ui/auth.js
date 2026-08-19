@@ -746,6 +746,18 @@ async function syncPushState() {
   showPushBanner();
 }
 
+// Sesión vencida detectada en CUALQUIER página (ver vyneural:session-expired
+// en client.js): limpia el estado local, re-renderiza el chip de la nav
+// ("Iniciar sesión") y notifica a los listeners — sin llamar a la API (la
+// sesión ya no es válida). Misma lógica que window.__vyneuralAuth.expireSession.
+function handleSessionExpired() {
+  clearSession();
+  profile = null;
+  renderNav();
+  notify();
+  document.dispatchEvent(new CustomEvent('vyneural:auth', { detail: { type: 'logout' } }));
+}
+
 async function doLogout() {
   try {
     await logout();
@@ -800,17 +812,14 @@ function init() {
     getProfile: () => profile,
     refresh: () => refreshProfile().then(() => { renderNav(); notify(); }),
     logout: doLogout,
-    // Sesión vencida detectada por otra página (/cuenta): limpiar el estado
-    // local, re-renderizar el chip de la nav ("Iniciar sesión") y notificar a
-    // las pestañas — sin llamar a la API (la sesión ya no es válida).
-    expireSession: () => {
-      clearSession();
-      profile = null;
-      renderNav();
-      notify();
-      document.dispatchEvent(new CustomEvent('vyneural:auth', { detail: { type: 'logout' } }));
-    },
+    // Conservado para quien ya lo llamaba explícitamente (ver /cuenta).
+    expireSession: handleSessionExpired,
   };
+
+  // Fuente centralizada: cualquier fetch autenticado que confirme la sesión
+  // vencida (client.js, tras fallar el refresh) dispara esto, sin que cada
+  // página tenga que detectar el 401 y llamar expireSession() por su cuenta.
+  document.addEventListener('vyneural:session-expired', handleSessionExpired);
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {

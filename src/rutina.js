@@ -1045,14 +1045,46 @@ async function loadItineraries() {
       sync.textContent = 'Sincronizando itinerarios…';
       sync.classList.remove('hidden');
     }
+    // Antes, un 401 (sesión vencida) quedaba atrapado por el .catch(() => [])
+    // de abajo: la lista se veía vacía con el cartel "sincronizado ✓" — el
+    // usuario creía haber perdido sus itinerarios en vez de ver que la
+    // sesión venció. Ahora se detecta el motivo real igual que en /cuenta.
+    let itErr = null;
+    let freqErr = null;
     const [its, freqs] = await Promise.all([
-      listItineraries().catch(() => []),
-      listFrequencies().catch(() => []),
+      listItineraries().catch((err) => {
+        itErr = err;
+        return [];
+      }),
+      listFrequencies().catch((err) => {
+        freqErr = err;
+        return [];
+      }),
     ]);
     savedFreqsMap = new Map((freqs || []).map((f) => [f.id, f]));
     currentIts = its || [];
     renderItineraries(currentIts);
-    if (sync) {
+    const authErr = itErr || freqErr;
+    const isExpired = authErr && authErr.status === 401;
+    const isNetwork = authErr && authErr.status === 0;
+    if (isExpired) {
+      // Sesión realmente inválida: sincronizar el chip de la nav (evita el
+      // estado "logueado" fantasma), igual que /cuenta.
+      if (window.__vyneuralAuth && typeof window.__vyneuralAuth.expireSession === 'function') {
+        window.__vyneuralAuth.expireSession();
+      }
+      if (sync) {
+        sync.textContent = 'Tu sesión venció: iniciá sesión de nuevo para ver tus itinerarios en la nube.';
+        sync.classList.remove('hidden');
+      }
+    } else if (authErr) {
+      if (sync) {
+        sync.textContent = isNetwork
+          ? 'Sin conexión con el servidor: tu sesión sigue guardada, reintentá cuando vuelva.'
+          : 'El backend no está disponible: los itinerarios de la nube no se pudieron cargar.';
+        sync.classList.remove('hidden');
+      }
+    } else if (sync) {
       sync.textContent = 'Itinerarios sincronizados con tu cuenta ✓';
       sync.classList.remove('hidden');
     }
