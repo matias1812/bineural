@@ -11,7 +11,7 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="canonical" href="https://vyneural-six.vercel.app/rutina" />
+    <link rel="canonical" href="https://www.vyneural.cl/rutina" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Vyneural" />
@@ -20,8 +20,8 @@
       property="og:description"
       content="Tus recordatorios de sesiones de ondas binaurales, con repetición por días, frecuencia y próxima sesión."
     />
-    <meta property="og:url" content="https://vyneural-six.vercel.app/rutina" />
-    <meta property="og:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta property="og:url" content="https://www.vyneural.cl/rutina" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="es_ES" />
@@ -32,7 +32,7 @@
       name="twitter:description"
       content="Tus recordatorios de ondas binaurales con repetición semanal, en un solo lugar."
     />
-    <meta name="twitter:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
 
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -45,8 +45,8 @@
         "name": "Tu rutina de Vyneural",
         "description": "Recordatorios y rituales de sesiones de ondas binaurales guardados por el usuario.",
         "inLanguage": "es",
-        "url": "https://vyneural-six.vercel.app/rutina",
-        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://vyneural-six.vercel.app/" }
+        "url": "https://www.vyneural.cl/rutina",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
   </head>
@@ -84,6 +84,20 @@
       </header>
 
       <div class="page-body">
+        <!-- Sin sesión: la rutina entera es de cuenta (itinerarios en la nube +
+             recordatorios). Se oculta rutina-content y se muestra este gate en
+             su lugar — ver updateAuthGate() en rutina.js. -->
+        <div class="page-card" id="rutina-auth-gate" hidden>
+          <p class="rm-emoji" aria-hidden="true">🔒</p>
+          <h3>Iniciá sesión para ver tu rutina</h3>
+          <p>
+            Tus recordatorios e itinerarios viven en tu cuenta, así los ves igual en la web y en
+            la APK. Crear una cuenta es gratis y toma un minuto.
+          </p>
+          <button type="button" class="hero-cta" id="rutina-auth-gate-login">Iniciar sesión / Crear cuenta</button>
+        </div>
+
+        <div id="rutina-content">
         <div class="page-card" id="rutina-daily-card">
           <div class="rutina-head">
             <h2>📊 Resumen de hoy</h2>
@@ -289,8 +303,10 @@
 
         <div class="page-note">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-          Tu rutina se guarda solo en este dispositivo: no hay cuentas ni servidores. Las ondas
-          binaurales son una herramienta de relajación y no sustituyen el consejo médico.
+          Tus recordatorios e itinerarios viven en tu cuenta y se sincronizan entre la web y la
+          APK. Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+          médico.
+        </div>
         </div>
       </div>
     </main>

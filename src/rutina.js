@@ -303,9 +303,19 @@ function weekGridHTML(byDay) {
     return `<div class="wg-hour-label">${hourLabel}</div>${cells}`;
   }).join('');
 
-  return `<div class="week-grid">
-      <div class="wg-corner"></div>${headerCells}
-      ${rows}
+  // Botones ‹ › además del gesto de deslizar: en desktop se ocultan por CSS
+  // (min-width:700px), pero en mobile/APK son la forma confiable de llegar a
+  // sábado/domingo sin depender de que el swipe horizontal se reconozca bien
+  // dentro de una página que también scrollea verticalmente.
+  return `<div class="week-grid-wrap">
+      <button type="button" class="wg-nav-btn wg-nav-prev" data-wg-scroll="-1" aria-label="Ver días anteriores">‹</button>
+      <div class="week-grid-scroll" id="wg-scroll">
+        <div class="week-grid">
+          <div class="wg-corner"></div>${headerCells}
+          ${rows}
+        </div>
+      </div>
+      <button type="button" class="wg-nav-btn wg-nav-next" data-wg-scroll="1" aria-label="Ver días siguientes">›</button>
     </div>`;
 }
 
@@ -330,7 +340,7 @@ function renderItineraries(list) {
 
   const weekLi = document.createElement('li');
   weekLi.className = 'rutina-week-card';
-  weekLi.innerHTML = `<div class="week-grid-scroll">${weekGridHTML(byDay)}</div>`;
+  weekLi.innerHTML = weekGridHTML(byDay);
   itListEl.appendChild(weekLi);
 
   // Itinerarios sin día: secuencias sueltas, reutilizables cuando quieras
@@ -945,6 +955,16 @@ function showReminderNote(msg) {
 // Reordenar pasos desde la rutina (↑/↓): optimista — re-render al momento y
 // se persiste al backend; si falla, se recarga el estado real de la nube.
 itListEl.addEventListener('click', async (e) => {
+  const scrollBtn = e.target.closest('[data-wg-scroll]');
+  if (scrollBtn) {
+    const track = document.getElementById('wg-scroll');
+    if (track) {
+      // Un "día" de ancho (columna + gap) — mismo valor que minmax(112px,…)
+      // en site.css; si la grilla cambia de ancho de columna, ajustar ahí.
+      track.scrollBy({ left: 113 * Number(scrollBtn.dataset.wgScroll), behavior: 'smooth' });
+    }
+    return;
+  }
   const editBtn = e.target.closest('[data-edit]');
   if (editBtn) {
     const it = currentIts.find((x) => x.id === editBtn.dataset.edit);
@@ -1178,7 +1198,28 @@ function refreshState() {
   }
 }
 
+// Toda la rutina (recordatorios + itinerarios) es de cuenta: sin sesión se
+// muestra el gate de login en vez de #rutina-content. `getAccessToken()`
+// solo comprueba que HAY un token guardado (no que siga siendo válido) —
+// igual criterio que el resto de la app; una sesión realmente vencida la
+// detecta loadItineraries() (401) y dispara 'vyneural:auth' vía
+// expireSession(), que re-ejecuta esto y muestra el gate.
+function updateAuthGate() {
+  const gateEl = document.getElementById('rutina-auth-gate');
+  const contentEl = document.getElementById('rutina-content');
+  const loggedIn = !!getAccessToken();
+  if (gateEl) gateEl.hidden = loggedIn;
+  if (contentEl) contentEl.hidden = !loggedIn;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  updateAuthGate();
+  const gateLoginBtn = document.getElementById('rutina-auth-gate-login');
+  if (gateLoginBtn) {
+    gateLoginBtn.addEventListener('click', () => {
+      if (window.__vyneuralAuth) window.__vyneuralAuth.open('login');
+    });
+  }
   wireReminderForm();
   wireItineraryForm();
   // Persistencia durable sin bloquear el arranque (mismo patrón que
@@ -1192,8 +1233,12 @@ document.addEventListener('DOMContentLoaded', () => {
     .then(render)
     .catch(() => {});
   window.addEventListener('storage', render);
-  // Refrescar itinerarios al autenticarse / cambiar de sesión desde la nav.
-  document.addEventListener('vyneural:auth', () => loadItineraries());
+  // Autenticarse / cerrar sesión / que la sesión venza: refrescar el gate y
+  // (si corresponde) los itinerarios.
+  document.addEventListener('vyneural:auth', () => {
+    updateAuthGate();
+    loadItineraries();
+  });
   const go = document.getElementById('rutina-go');
   if (go) go.addEventListener('click', () => (location.href = '/#alarms-view'));
 });

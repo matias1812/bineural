@@ -1692,10 +1692,50 @@ body.immersive .bug-fab {
 /* Horario semanal real: columnas = días, filas = horas, cada sesión en su
    horario — como el horario de un colegio. Envuelto en un scroll horizontal
    (la columna de horas queda "pegada" a la izquierda) para que en celulares
-   se deslice en vez de romperse con 7 columnas angostas. */
+   se deslice en vez de romperse con 7 columnas angostas. Los botones ‹ ›
+   (ver JS) son la forma confiable de llegar a sábado/domingo: el swipe solo
+   a veces gana el gesto contra el scroll vertical de la página. */
+.week-grid-wrap {
+  position: relative;
+}
+
 .week-grid-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: 12px;
+}
+
+.wg-nav-btn {
+  appearance: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.wg-nav-prev {
+  left: -4px;
+}
+
+.wg-nav-next {
+  right: -4px;
+}
+
+@media (min-width: 700px) {
+  /* Desktop: las 7 columnas ya entran sin scroll, los botones estorban. */
+  .wg-nav-btn {
+    display: none;
+  }
 }
 
 .week-grid {

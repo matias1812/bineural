@@ -285,18 +285,32 @@ export async function cachedGet(path, ttl = GET_CACHE_TTL) {
   // me() concurrentes en el arranque de /cuenta → perfil "Sesión no disponible").
   if (hit && hit.promise) return hit.promise;
   if (hit && hit.data !== undefined && Date.now() - hit.t < ttl) return hit.data;
+  // `entry` (no `path`) es la clave de identidad que usamos abajo: un GET
+  // lento (cold start de Render, 20-50s — ver .github/workflows/keep-alive.yml)
+  // puede seguir en vuelo cuando una mutación ya invalidó este recurso. Si al
+  // resolver escribiéramos ciegamente por `path`, esa respuesta vieja pisaba
+  // el caché recién invalidado y el próximo render volvía a mostrar datos de
+  // antes de la mutación (p. ej. un itinerario recién creado, sin su horario).
+  // Comparando `getCache.get(path) === entry` sabemos si seguimos siendo la
+  // entrada vigente antes de escribir.
+  const entry = { t: Date.now(), data: undefined, promise: null };
   const promise = get(path)
     .then((data) => {
-      getCache.set(path, { t: Date.now(), data, promise: null });
+      if (getCache.get(path) === entry) {
+        entry.data = data;
+        entry.t = Date.now();
+        entry.promise = null;
+      }
       return data;
     })
     .catch((err) => {
       // Sin red pero con caché reciente: mejor datos que error (aditivo).
       if (hit && hit.data !== undefined) return hit.data;
-      getCache.delete(path);
+      if (getCache.get(path) === entry) getCache.delete(path);
       throw err;
     });
-  getCache.set(path, { t: Date.now(), promise });
+  entry.promise = promise;
+  getCache.set(path, entry);
   return promise;
 }
 
