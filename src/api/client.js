@@ -291,8 +291,11 @@ export async function cachedGet(path, ttl = GET_CACHE_TTL) {
 /** Invalida el caché del recurso tras una mutación (create/update/delete). */
 export function invalidateCache(path) {
   const parts = path.split('/').filter(Boolean);
-  // /api/v1/<recurso>[/…] — se invalida todo el recurso.
-  const prefix = parts.slice(0, 3).join('/');
+  // /api/v1/<recurso>[/…] — se invalida todo el recurso. Los keys del caché
+  // guardan la barra inicial (cachedGet se llama con '/api/v1/...'); sin
+  // reponerla acá el prefijo nunca matcheaba y esto era un no-op silencioso
+  // — una mutación podía seguir sirviendo el GET viejo hasta 8 s (el TTL).
+  const prefix = '/' + parts.slice(0, 3).join('/');
   for (const key of [...getCache.keys()]) {
     if (key.startsWith(prefix)) getCache.delete(key);
   }

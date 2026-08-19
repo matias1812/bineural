@@ -2,7 +2,10 @@
 // Estrategia: cache-first con revalidación en segundo plano para los assets
 // estáticos (los nombres llevan hash, así un deploy nuevo trae URLs nuevas),
 // y red-al-cache para las navegaciones (con fallback al index).
-const CACHE = 'vyneural-v3';
+// v4: la API (/api/*, /health) ya no pasa por este cache — ver el fetch
+// handler. El bump fuerza a limpiar cualquier respuesta de API vieja que
+// hubiera quedado guardada en v3 antes de este fix.
+const CACHE = 'vyneural-v4';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -28,6 +31,13 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // La API (mismo origen vía el rewrite de Vercel) NUNCA pasa por cache-first:
+  // son datos que cambian (crear/editar/borrar), no assets con hash en el
+  // nombre. Cachearla como si fuera estática servía respuestas viejas de
+  // entrada — ej. crear un itinerario en /cuenta y no verlo en /rutina hasta
+  // que esa URL exacta se pidiera de nuevo en segundo plano. Directo a red.
+  if (url.pathname.startsWith('/api/') || url.pathname === '/health') return;
 
   // Navegaciones: red primero, con revalidación del index en cache.
   if (req.mode === 'navigate') {
@@ -162,6 +172,27 @@ self.addEventListener('push', (e) => {
 // Solo se aceptan mensajes con schema conocido; el resto se ignora. El SW no
 // es un scheduler persistente: aquí solo responde al diagnóstico y ejecuta
 // comandos válidos que la página no puede hacer sola.
+// ── Renovación automática de suscripción (P1) ───────────────────────────────
+// El navegador puede invalidar/rotar una PushSubscription en segundo plano
+// (poco frecuente, pero pasa). Sin este handler, el dispositivo quedaba mudo
+// hasta que alguien abriera la app y notara el problema. El SW no puede
+// autenticar un POST a /push/subscribe (no tiene acceso a localStorage, ahí
+// vive el token de sesión) — solo renueva la suscripción a nivel de
+// navegador; la página la sincroniza con el backend en su próxima carga
+// (ver syncPushState en src/ui/auth.js — reintenta en silencio si el permiso
+// ya estaba concedido, sin mostrar ningún diálogo nuevo).
+self.addEventListener('pushsubscriptionchange', (e) => {
+  const key = e.oldSubscription && e.oldSubscription.options
+    ? e.oldSubscription.options.applicationServerKey
+    : null;
+  if (!key) return; // sin la key no se puede resuscribir; la página lo hará
+  e.waitUntil(
+    self.registration.pushManager
+      .subscribe({ userVisibleOnly: true, applicationServerKey: key })
+      .catch(() => {}),
+  );
+});
+
 self.addEventListener('message', (e) => {
   const m = e && e.data;
   if (!m || typeof m.type !== 'string') return;
