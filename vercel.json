@@ -5,6 +5,12 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/",
+      "has": [{ "type": "host", "value": "vyneural-six.vercel.app" }],
+      "destination": "https://www.vyneural.cl/",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "vyneural-six.vercel.app" }],
       "destination": "https://www.vyneural.cl/:path*",
