@@ -14,6 +14,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://vyneural-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "https://vyneural-backend.onrender.com/health"
     }
   ],
   "headers": [

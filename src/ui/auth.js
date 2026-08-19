@@ -19,7 +19,7 @@
 
 import { login, register, logout, me, verifyEmail, resendVerification, forgotPassword } from '../api/auth.js';
 import { getAccessToken, clearSession } from '../api/client.js';
-import { subscribeToPush } from '../api/push.js';
+import { subscribeToPush, pushStatus } from '../api/push.js';
 import { initBackendIfConfigured } from '../api/integration.js';
 import { pullCloudFavoritesToLocal } from '../api/fav-sync.js';
 
@@ -37,17 +37,12 @@ let wakeupTimer = null; // ver setPending(): avisa cuando el backend tarda (cold
 // usuario termine de escribir) empieza el "despertar" más temprano, sin
 // bloquear nada — best-effort, se ignora cualquier error.
 //
-// `/health` NO pasa por el rewrite `/api/*` de vercel.json (solo reescribe
-// rutas /api/*), así que hace falta el origin del backend directo. Con
-// VITE_API_URL configurada (dev contra un backend remoto) se usa esa; si no
-// hay backend configurado y no estamos en localhost, se asume producción.
+// `/health` tiene su propio rewrite en vercel.json (mismo origen, igual que
+// `/api/*`) — la CSP (`connect-src 'self'`) exige que todo fetch sea same-origin.
 function prewarmBackend() {
   try {
     const configured = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
-    const isLocal = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname || '');
-    const base = configured || (isLocal ? '' : 'https://vyneural-backend.onrender.com');
-    if (!base) return; // dev local sin VITE_API_URL: el proxy de vite ya habla con localhost
-    fetch(`${base}/health`, { method: 'GET' }).catch(() => {});
+    fetch(`${configured}/health`, { method: 'GET' }).catch(() => {});
   } catch (_) {
     /* sin fetch disponible: no rompe nada */
   }
@@ -661,15 +656,94 @@ async function refreshProfile() {
   }
 }
 
-// Tras autenticarse: suscribir push (si el backend lo soporta), traer
-// favoritos de la nube y arrancar la sincronización. Todo best-effort.
+// Tras autenticarse: traer favoritos de la nube, arrancar la sincronización
+// y ofrecer notificaciones push (nunca las activa sola, ver syncPushState).
+// Todo best-effort.
 function afterAuth() {
   const ok = initBackendIfConfigured().catch(() => false);
   Promise.all([
     ok,
     pullCloudFavoritesToLocal().catch(() => false),
-    subscribeToPush().catch(() => ({ configured: false, subscribed: false })),
   ]).catch(() => {});
+  syncPushState();
+}
+
+// ── Notificaciones push: ofrecer, nunca sorprender ──────────────────────────
+// Pedir el permiso del navegador SIN aviso previo (justo al loguearse, sin
+// contexto) es un antipatrón: si el usuario lo rechaza por reflejo,
+// Notification.permission queda en "denied" PARA SIEMPRE — JS ya no puede
+// volver a pedirlo. Por eso acá NUNCA se llama a subscribeToPush() sin que el
+// usuario haya tocado algo primero — salvo que el permiso YA esté concedido
+// (de una sesión o dispositivo anterior), donde resincronizar es inofensivo:
+// no dispara ningún diálogo nuevo, solo mantiene la suscripción del backend
+// al día (ver también pushsubscriptionchange en sw.js).
+const LS_PUSH_BANNER_DISMISSED = 'vyneural_push_banner_dismissed';
+
+function pushBannerDismissed() {
+  try {
+    return localStorage.getItem(LS_PUSH_BANNER_DISMISSED) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function dismissPushBanner() {
+  try {
+    localStorage.setItem(LS_PUSH_BANNER_DISMISSED, 'true');
+  } catch {
+    /* sin almacenamiento: el banner puede reaparecer, no rompe nada */
+  }
+}
+
+function isApkContext() {
+  return typeof window !== 'undefined' && !!(window.AndroidBridge || window.AndroidBridgeNative);
+}
+
+function showPushBanner() {
+  if (document.getElementById('vyneural-push-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'vyneural-push-banner';
+  bar.className = 'push-banner';
+  bar.innerHTML = `
+    <span class="push-banner-text">🔔 Activá notificaciones para que tus recordatorios avisen aunque cierres el navegador.</span>
+    <span class="push-banner-actions">
+      <button type="button" class="push-banner-btn" id="push-banner-accept">Activar</button>
+      <button type="button" class="push-banner-btn push-banner-btn-ghost" id="push-banner-dismiss">Ahora no</button>
+    </span>`;
+  document.body.appendChild(bar);
+  const remove = () => bar.remove();
+  bar.querySelector('#push-banner-dismiss').addEventListener('click', () => {
+    dismissPushBanner();
+    remove();
+  });
+  bar.querySelector('#push-banner-accept').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Activando…';
+    // Acá SÍ dispara el diálogo real del navegador — pero con el gesto del
+    // usuario y el contexto del banner ya leído, no como sorpresa.
+    await subscribeToPush().catch(() => {});
+    // Se decidió (aceptado o el navegador lo rechazó): no insistir de nuevo.
+    dismissPushBanner();
+    remove();
+  });
+}
+
+async function syncPushState() {
+  if (isApkContext()) return; // la APK tiene su propio flujo (bridge nativo, ver cuenta.js)
+  if (typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (Notification.permission === 'granted') {
+    subscribeToPush().catch(() => {});
+    return;
+  }
+  if (Notification.permission !== 'default' || pushBannerDismissed()) return;
+  try {
+    const status = await pushStatus();
+    if (!status || !status.configured) return; // backend sin VAPID: nada que ofrecer
+  } catch {
+    return;
+  }
+  showPushBanner();
 }
 
 async function doLogout() {
@@ -714,6 +788,9 @@ function init() {
       notify();
       pullCloudFavoritesToLocal().catch(() => {});
     });
+    // Visita de vuelta (no un login recién hecho): resincroniza push en
+    // silencio si ya estaba concedido, u ofrece el banner si nunca se decidió.
+    syncPushState();
   }
 
   window.__vyneuralAuth = {
