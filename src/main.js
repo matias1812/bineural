@@ -1024,6 +1024,17 @@ function start({ resume = false, source = 'ui-play' } = {}) {
   if (!resume) {
     sessionStartTime = Date.now();
     sessionAmbient = [...ambientTypes];
+  } else if (!sessionStartTime) {
+    // resumeSession() SIEMPRE llama start({resume:true}) — también para el
+    // primer play de la sesión (no solo para reanudar tras una pausa): sin
+    // esto, sessionStartTime nunca se inicializaba fuera del quickstart
+    // (LS_QUICK, una sola vez por navegador) y recordHistory() no registraba
+    // NINGUNA sesión para un usuario recurrente, aunque el temporizador
+    // terminara solo (bug real, confirmado con un play/stop de prueba: el
+    // historial quedaba vacío). Una pausa→resume real conserva sessionStartTime
+    // (no entra acá, ya es != 0) — la duración sigue midiéndose desde el
+    // arranque original, como corresponde.
+    sessionStartTime = Date.now();
   }
   const p0 = currentParams();
   const prevState = audioState.state;
@@ -2682,52 +2693,57 @@ function updateMediaPosition() {
   }
 }
 
+const seekBy = (secs) => {
+  if (!playing || !timerMinutes || !timerEnd) return;
+  const dur = timerMinutes * 60;
+  const pos = Math.max(0, Math.min(dur, (timerEnd - Date.now()) / 1000 + secs));
+  timerEnd = Date.now() + (dur - pos) * 1000;
+};
+const moveTrack = (dir) => {
+  const visible = cards.filter((c) => !c.classList.contains('filtered-out'));
+  if (!visible.length) return;
+  const idx = visible.findIndex((c) => c.dataset.id === selected.id);
+  const next = visible[(idx + dir + visible.length) % visible.length];
+  selectState(STATES.find((st) => st.id === next.dataset.id));
+};
+// P5 — API de control web estable para integraciones (teclado, scripts,
+// bookmarks, home automation): window.__vyneural con las mismas acciones
+// que Media Session + lectura de estado. Nunca rompe el flujo de la UI.
+// Independiente de MEDIA_SESSION a propósito: el WebView de la APK no
+// expone `navigator.mediaSession` (a diferencia de Chrome for Android), y
+// esto vivía adentro de `if (MEDIA_SESSION)` — window.__vyneural (y con él
+// cualquier integración/automatización) simplemente no existía ahí, aunque
+// no tiene nada que ver con la Media Session API.
+window.__vyneural = {
+  play: () => { if (!playing) resumeSession('api'); return window.__vyneural.state(); },
+  pause: () => { if (playing) pauseSession('api'); return window.__vyneural.state(); },
+  toggle: () => { if (playing) pauseSession('api'); else resumeSession('api'); return window.__vyneural.state(); },
+  stop: () => { if (playing) stop(); return window.__vyneural.state(); },
+  volumeUp: () => { setVolumeBy(0.1); return window.__vyneural.state(); },
+  volumeDown: () => { setVolumeBy(-0.1); return window.__vyneural.state(); },
+  next: () => moveTrack(1),
+  prev: () => moveTrack(-1),
+  seekBy,
+  selectState: (id) => {
+    const st = STATES.find((s) => s.id === id);
+    if (st) selectState(st);
+  },
+  state: () => {
+    const p = currentParams();
+    return {
+      playing,
+      state: selected.id,
+      name: selected.name,
+      base: p.base,
+      beat: p.beat,
+      wave: p.wave,
+      volume: p.volume,
+      timeLeft: timerEnd ? Math.max(0, Math.round((timerEnd - Date.now()) / 1000)) : null,
+    };
+  },
+};
+window.__vyneural.state();
 if (MEDIA_SESSION) {
-  const seekBy = (secs) => {
-    if (!playing || !timerMinutes || !timerEnd) return;
-    const dur = timerMinutes * 60;
-    const pos = Math.max(0, Math.min(dur, (timerEnd - Date.now()) / 1000 + secs));
-    timerEnd = Date.now() + (dur - pos) * 1000;
-  };
-  const moveTrack = (dir) => {
-    const visible = cards.filter((c) => !c.classList.contains('filtered-out'));
-    if (!visible.length) return;
-    const idx = visible.findIndex((c) => c.dataset.id === selected.id);
-    const next = visible[(idx + dir + visible.length) % visible.length];
-    selectState(STATES.find((st) => st.id === next.dataset.id));
-  };
-  // P5 — API de control web estable para integraciones (teclado, scripts,
-  // bookmarks, home automation): window.__vyneural con las mismas acciones
-  // que Media Session + lectura de estado. Nunca rompe el flujo de la UI.
-  window.__vyneural = {
-    play: () => { if (!playing) resumeSession('api'); return window.__vyneural.state(); },
-    pause: () => { if (playing) pauseSession('api'); return window.__vyneural.state(); },
-    toggle: () => { if (playing) pauseSession('api'); else resumeSession('api'); return window.__vyneural.state(); },
-    stop: () => { if (playing) stop(); return window.__vyneural.state(); },
-    volumeUp: () => { setVolumeBy(0.1); return window.__vyneural.state(); },
-    volumeDown: () => { setVolumeBy(-0.1); return window.__vyneural.state(); },
-    next: () => moveTrack(1),
-    prev: () => moveTrack(-1),
-    seekBy,
-    selectState: (id) => {
-      const st = STATES.find((s) => s.id === id);
-      if (st) selectState(st);
-    },
-    state: () => {
-      const p = currentParams();
-      return {
-        playing,
-        state: selected.id,
-        name: selected.name,
-        base: p.base,
-        beat: p.beat,
-        wave: p.wave,
-        volume: p.volume,
-        timeLeft: timerEnd ? Math.max(0, Math.round((timerEnd - Date.now()) / 1000)) : null,
-      };
-    },
-  };
-  window.__vyneural.state();
   try {
     // P6 — en la APK los controles del SO (lock screen, notificación,
     // Bluetooth) los maneja la MediaSession NATIVA; la web no registra
