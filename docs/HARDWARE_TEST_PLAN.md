@@ -123,7 +123,7 @@ web sin validación en dispositivo).
 
 | # | Paso | Esperado | Evidencia a capturar |
 |---|---|---|---|
-| 1 | Abrir https://vyneural-six.vercel.app en Safari | Página carga; el badge muestra "Web" (nunca "APK") | Screenshot del badge |
+| 1 | Abrir https://www.vyneural.cl en Safari | Página carga; el badge muestra "Web" (nunca "APK") | Screenshot del badge |
 | 2 | Tocar **Play** | El audio arranca tras un gesto (requisito de iOS); AudioContext `running` | `GET_AUDIO_STATE`/probe → `ctx: running` |
 | 3 | Audio con pantalla encendida + interacciones (menú, scroll, cambiar estado) | Sin cortes ni glitches; `sid=1` estable | Muestras del probe durante interacciones |
 | 4 | **Bloquear pantalla** (botón lateral) | Comportamiento documentado: iOS suele pausar web audio al bloquear; si se pausa, es LIMITACIÓN DE PLATAFORMA esperada, no bug | Nota de qué ocurrió (pausa vs continua) |

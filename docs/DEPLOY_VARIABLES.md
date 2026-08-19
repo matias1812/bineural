@@ -1,13 +1,15 @@
 # Variables de despliegue — Vyneural (Render + Vercel)
 
-> Estado verificado: **2026-08-17**. Backend real: `https://vyneural-backend.onrender.com`
+> Estado verificado: **2026-08-19**. Backend real: `https://vyneural-backend.onrender.com`
 > (NO `vyneural-api.onrender.com` — ese hostname no tiene servicio, `x-render-routing: no-server`).
+> `node scripts/check-deploy.mjs` corre esta misma verificación (health, rewrite,
+> CORS, hash del APK) contra `https://www.vyneural.cl` en un solo comando.
 
 ## Arquitectura
 
 | Componente | Dónde vive | URL |
 |---|---|---|
-| Web/PWA/APK (frontend) | Vercel | `https://vyneural-six.vercel.app` |
+| Web/PWA/APK (frontend) | Vercel | `https://www.vyneural.cl` (dominio canónico; `vyneural-six.vercel.app` redirige 308 ahí) |
 | API FastAPI | Render Web Service | `https://vyneural-backend.onrender.com` |
 | PostgreSQL | Render Managed PostgreSQL | vinculada vía `DATABASE_URL` |
 
@@ -41,7 +43,7 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `SMTP_FROM_NAME` | `Vyneural` |
 | `SMTP_TLS` | `true` |
 | `SMTP_SSL` | `false` |
-| `FRONTEND_BASE_URL` | `https://vyneural-six.vercel.app` *(nunca localhost: es la base de los enlaces del correo)* |
+| `FRONTEND_BASE_URL` | `https://www.vyneural.cl` *(nunca localhost: es la base de los enlaces del correo)* |
 
 **Opción B — HTTPS API (gratis, recomendada en Render free):**
 
@@ -60,7 +62,7 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `VAPID_PUBLIC_KEY` | generada con `py -m app.push.keys` (o la del `.env` local) |
 | `VAPID_PRIVATE_KEY` | ídem (secreta) |
 | `VAPID_SUBJECT` | `mailto:matias.torres1812@gmail.com` |
-| `CORS_ORIGINS` | `https://vyneural-six.vercel.app,https://vyneural.cl,https://www.vyneural.cl` |
+| `CORS_ORIGINS` | `https://www.vyneural.cl,https://vyneural.cl,https://vyneural-six.vercel.app,null,file://` *(`null`/`file://`: origen opaco del WebView de la APK, sin origen http/https propio)* |
 | `ENVIRONMENT` | `production` |
 | `LOG_LEVEL` | `INFO` |
 
@@ -113,7 +115,7 @@ curl -s https://vyneural-backend.onrender.com/health/db     # → database ok
 curl -s -o /dev/null -w "%{http_code}\n" https://vyneural-backend.onrender.com/docs  # → 200
 
 # 2) Rewrite del frontend (401 "no autorizado" del FastAPI = OK; página 404 de Vercel = NO publicado)
-curl -s -w "\n%{http_code}\n" https://vyneural-six.vercel.app/api/v1/auth/me
+curl -s -w "\n%{http_code}\n" https://www.vyneural.cl/api/v1/auth/me
 
 # 3) Correo: pedir un reset (llega un mail real si el SMTP está configurado)
 curl -s -X POST https://vyneural-backend.onrender.com/api/v1/auth/forgot-password \

@@ -3,7 +3,7 @@
 ## Cómo ejecutar
 
 ```bash
-npm test                       # suite headless (Node) — 71 tests, < 2 s
+npm test                       # suite headless (Node) — 113 tests, < 2 s
 window.runBineuralDiagnostics()# misma suite en el navegador (consola; async → await)
 npm run build                  # build de producción
 ```

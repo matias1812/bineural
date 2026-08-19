@@ -6,7 +6,7 @@ observado + verificado**.
 
 ## Estado actual (v1.1, agosto 2026)
 
-- **MVP desplegado**: https://vyneural-six.vercel.app — web, PWA y APK para
+- **MVP desplegado**: https://www.vyneural.cl — web, PWA y APK para
   Android con un único core de simulación protegido.
 - **104/104 tests** · core intacto (audio/cym/wavefield/simulation/experiments).
 - **APK release**: audio nativo (Foreground Service + MediaSession), alarmas con

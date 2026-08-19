@@ -3,8 +3,8 @@
 > Frecuencias binaurales generadas en tiempo real en tu navegador, tu teléfono
 > o tu app Android. Sin cuentas, sin servidores, sin grabaciones.
 
-**URL**: https://vyneural-six.vercel.app
-**APK Android**: https://vyneural-six.vercel.app/vyneural.apk
+**URL**: https://www.vyneural.cl
+**APK Android**: https://www.vyneural.cl/vyneural.apk
 **Versión**: 1.0.0 (firmada con el keystore de producción)
 
 ## Qué es
@@ -56,10 +56,10 @@ interactivos (cimática y campo de gotas).
 
 ## Cómo usarlo
 
-1. **Web**: abrí https://vyneural-six.vercel.app, elegí un estado, ponete
+1. **Web**: abrí https://www.vyneural.cl, elegí un estado, ponete
    audífonos y tocá ▶.
 2. **PWA**: en el navegador del celular, menú → "Añadir a pantalla de inicio".
-3. **APK**: descargá https://vyneural-six.vercel.app/vyneural.apk (el enlace
+3. **APK**: descargá https://www.vyneural.cl/vyneural.apk (el enlace
    está en el pie de página) e instalala.
 
 ## Limitaciones conocidas (documentadas)

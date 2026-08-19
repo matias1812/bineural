@@ -29,7 +29,14 @@ usuario inicia sesión.
 
 - `/cuenta` — vista de usuario con sesión (badge de verificación, reenvío de
   correo, cambio de contraseña con re-autenticación, vista de horario del
-  itinerario con sus alarmas).
+  itinerario con sus alarmas). Crea/pausa/elimina itinerarios pero no edita
+  sus pasos — eso es exclusivo de `/rutina` (misma cuenta, ambas páginas
+  sincronizadas: crear en una se ve al toque en la otra).
+- `/rutina` — la única página que **exige sesión siempre** (excepción a la
+  regla de arriba: itinerarios y recordatorios viven en la nube, no
+  localmente). Sin sesión muestra un gate de login en vez del generador de
+  itinerarios; con sesión es el editor completo (crear/editar pasos, día de
+  la semana, grilla semanal con horario real).
 - `/verificar?token=…` — confirma el correo tras el registro.
 - `/restablecer?token=…` — crea contraseña nueva desde el correo de
   recuperación.

@@ -26,8 +26,8 @@ una **APK Android offline** con motor de audio nativo.
 - **6 ambientes** sintetizados en vivo (lluvia, río, bosque, pájaros, océano, fuego) con mezclador, sincronizados con el latido.
 - **Motor de audio limpio**: fades sin clics (piso + rampa), fase continua, teardown síncrono de fuentes, watchdog que recupera una sesión muda sin interrumpir.
 - **Permanencia**: en la APK, un *foreground service* con MediaSession mantiene el audio con pantalla bloqueada y controles en lock screen/auriculares (skip/seek = ±10 Hz con retune real).
-- **Cuentas opcionales** (aditivo, nunca bloquea): sincronización de favoritos y frecuencias, itinerarios/rutinas, alarmas y Web Push. La app funciona 100% local sin backend.
-- **Rutina unificada (APK)**: itinerarios con pasos, horario acumulado y botón "Iniciar" que profundiza al generador **sin autoplay**.
+- **Cuentas opcionales** (aditivo, nunca bloquea el generador): sincronización de favoritos y frecuencias. La app funciona 100% local sin backend. Excepción: **`/rutina`** (itinerarios + recordatorios) sí exige cuenta — viven en la nube, no localmente.
+- **Rutina unificada**: itinerarios con pasos, horario acumulado y botón "Iniciar" que profundiza al generador **sin autoplay**; la repetición semanal con alarma real es exclusiva de la APK.
 - **PWA instalable** (manifest + service worker) y **APK Android offline** con el bundle embebido.
 - **Privacidad y seguridad por diseño**: sanitización auditada, ISO 27001 (Anexo A) documentado, cero dependencias de tracking salvo Vercel Analytics opcional.
 
