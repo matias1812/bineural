@@ -1021,30 +1021,35 @@ function start({ resume = false, source = 'ui-play' } = {}) {
   // `playing` se marca antes de applyAudio(): applyAmbient() depende de él
   // para crear las capas de ambiente al arrancar la sesión.
   playing = true;
-  if (!resume) {
+  // `resume` NO alcanza para distinguir "sesión nueva" de "reanudar una
+  // pausa": resumeSession() (el botón play normal, tanto el primer play de
+  // la sesión como cualquier reanudación real) SIEMPRE llama
+  // start({resume:true}) — solo el quickstart de bienvenida (LS_QUICK, una
+  // vez por navegador) llama start() con resume:false. `freshSession` es la
+  // señal correcta: sessionStartTime en 0 significa que no hay una sesión
+  // en curso de verdad, sea cual sea el valor de `resume`. Sin esto,
+  // sessionStartTime/sessionAmbient/sessionLog nunca se inicializaban fuera
+  // del quickstart — recordHistory() no registraba NINGUNA sesión para un
+  // usuario recurrente (bug real, confirmado con un play/stop de prueba: el
+  // historial quedaba vacío), el resumen de sesión mostraba "Ninguno" de
+  // ambiente aunque hubiera sonido de fondo, y sessionLog.integrityText()
+  // (el % de continuidad honesto) siempre devolvía null. Una pausa→resume
+  // real conserva sessionStartTime (no entra acá, ya es != 0) — la duración
+  // y el ambiente siguen midiéndose desde el arranque original, como
+  // corresponde. `resume` sigue intacto para todo lo demás (transición de
+  // audioState, comando nativo START/RESUME): eso ya se resuelve aparte por
+  // si el servicio nativo está corriendo.
+  const freshSession = !resume || !sessionStartTime;
+  if (freshSession) {
     sessionStartTime = Date.now();
     sessionAmbient = [...ambientTypes];
-  } else if (!sessionStartTime) {
-    // resumeSession() SIEMPRE llama start({resume:true}) — también para el
-    // primer play de la sesión (no solo para reanudar tras una pausa): sin
-    // esto, sessionStartTime nunca se inicializaba fuera del quickstart
-    // (LS_QUICK, una sola vez por navegador) y recordHistory() no registraba
-    // NINGUNA sesión para un usuario recurrente, aunque el temporizador
-    // terminara solo (bug real, confirmado con un play/stop de prueba: el
-    // historial quedaba vacío). Una pausa→resume real conserva sessionStartTime
-    // (no entra acá, ya es != 0) — la duración sigue midiéndose desde el
-    // arranque original, como corresponde.
-    sessionStartTime = Date.now();
   }
   const p0 = currentParams();
   const prevState = audioState.state;
   lifecycle.transition('start');
   const tr = audioState.transition(resume ? 'system_play' : 'user_play', { reason: source });
   traceCausal(resume ? 'RESUME' : 'PLAY', source, { from: prevState, to: tr ? tr.to : audioState.state, resume });
-  if (resume) {
-    // Continuar la sesión pausada: el log conserva la duración acumulada.
-    sessionLog.resume({ source });
-  } else {
+  if (freshSession) {
     // Sesión nueva = registro nuevo: si la sesión anterior terminó, se
     // descarta (start() solo se llama desde el estado detenido).
     sessionLog.reset();
@@ -1056,6 +1061,9 @@ function start({ resume = false, source = 'ui-play' } = {}) {
       wave: p0.wave,
       condition: EXP_CONDITION_TO_SESSION[expCondition] || 'BINAURAL',
     });
+  } else {
+    // Continuar la sesión pausada: el log conserva la duración acumulada.
+    sessionLog.resume({ source });
   }
   // Reclama la Media Session ANTES de que suene el audio: el navegador
   // asocia el controlador de notificaciones a la sesión en marcha y algunos
