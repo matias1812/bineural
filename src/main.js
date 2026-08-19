@@ -76,8 +76,10 @@ import { initBackendIfConfigured } from './api/integration.js';
 import { getAccessToken } from './api/client.js';
 // Favoritos en la nube (aditivo): solo actúa con sesión iniciada.
 import { syncFavoriteToCloud, syncUnfavoriteFromCloud } from './api/fav-sync.js';
-// Guardar frecuencias personalizadas (modal compartido con /cuenta).
-import { openFreqModal } from './ui/freq-modal.js';
+// Guardar frecuencias personalizadas: inline, junto al panel de ajuste (ver
+// #custom-save-freq más abajo) — ya no un modal aparte, para tener toda la
+// config del panel personalizado en un solo lugar bajo el reproductor.
+import { createFrequency } from './api/frequencies.js';
 // Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
@@ -1991,19 +1993,51 @@ function updateCarrierWarning() {
   carrierWarning.classList.toggle('hidden', !(typeof base === 'number' && base < 80));
 }
 
-// Guardar la frecuencia actual en la cuenta (modal compartido con /cuenta).
-// El prefill usa los valores en vivo del panel personalizado / estado actual.
+// Guardar la frecuencia actual en la cuenta: inline, junto al panel de
+// ajuste (ya no un modal aparte). Los valores salen en vivo del panel
+// personalizado / estado actual, igual que antes.
 const customSaveFreqBtn = document.getElementById('custom-save-freq');
+const customSaveNameEl = document.getElementById('custom-save-name');
+const customSaveNoteEl = document.getElementById('custom-save-note');
+
+function setCustomSaveNote(msg, isError) {
+  if (!customSaveNoteEl) return;
+  customSaveNoteEl.textContent = msg;
+  customSaveNoteEl.classList.toggle('hidden', !msg);
+  customSaveNoteEl.classList.toggle('custom-save-note-error', !!isError);
+}
+
 if (customSaveFreqBtn) {
-  customSaveFreqBtn.addEventListener('click', () => {
+  customSaveFreqBtn.addEventListener('click', async () => {
+    // Guardar frecuencias vive en el backend: sin sesión, se pide iniciar
+    // sesión (mismo gesto que el resto de las acciones que requieren cuenta).
+    if (!getAccessToken()) {
+      setCustomSaveNote('');
+      const auth = window.__vyneuralAuth;
+      if (auth && typeof auth.open === 'function') auth.open('login');
+      return;
+    }
     const p = currentParams();
-    openFreqModal({
-      name: selected.custom ? '' : `Mi ${selected.name}`,
-      carrier: Math.round((p.base || 220) * 10) / 10,
-      beat: Math.round((p.beat || 10) * 10) / 10,
-      wave: p.wave || 'sine',
-      source: 'generator',
-    });
+    const name = (customSaveNameEl && customSaveNameEl.value.trim())
+      || (selected.custom ? 'Personalizada' : `Mi ${selected.name}`);
+    customSaveFreqBtn.disabled = true;
+    setCustomSaveNote('Guardando…');
+    try {
+      await createFrequency({
+        name: name.slice(0, 120),
+        carrier_frequency: Math.round((p.base || 220) * 10) / 10,
+        beat_frequency: Math.round((p.beat || 10) * 10) / 10,
+        waveform: p.wave || 'sine',
+        condition: 'binaural',
+        config: { source: 'generator' },
+      });
+      if (customSaveNameEl) customSaveNameEl.value = '';
+      setCustomSaveNote('✅ Guardada en tu cuenta.');
+    } catch (err) {
+      setCustomSaveNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
+    } finally {
+      customSaveFreqBtn.disabled = false;
+    }
   });
 }
 
@@ -4979,3 +5013,22 @@ goalFilter.addEventListener('click', (e) => {
   // El filtro elegido también se guarda para la próxima visita.
   saveSession();
 });
+
+// Persistir el estado abierto/cerrado de "¿Cómo funciona?": que no se
+// resetee a cerrado en cada visita si el usuario ya lo abrió una vez.
+const comoFunciona = document.getElementById('como-funciona');
+if (comoFunciona) {
+  const LS_COMO_FUNCIONA = 'vyneural_como_funciona_open';
+  try {
+    if (localStorage.getItem(LS_COMO_FUNCIONA) === 'true') comoFunciona.open = true;
+  } catch {
+    /* sin almacenamiento: siempre arranca cerrado */
+  }
+  comoFunciona.addEventListener('toggle', () => {
+    try {
+      localStorage.setItem(LS_COMO_FUNCIONA, String(comoFunciona.open));
+    } catch {
+      /* sin almacenamiento */
+    }
+  });
+}

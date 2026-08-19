@@ -1429,17 +1429,13 @@ body.immersive .bug-fab {
 }
 
 /* Itinerario DENTRO de la rutina: cabecera + línea de tiempo de pasos. */
+/* Itinerario suelto (sin día): cabecera + meta + pasos apilados, ya no en
+   fila (no hay más badge de cantidad de pasos a la izquierda). */
 .rutina-item-it {
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
-.rutina-head-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1 1 100%;
-  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .rutina-timeline {
@@ -1526,6 +1522,35 @@ body.immersive .bug-fab {
   cursor: default;
 }
 
+/* La rutina/itinerario en pantallas angostas: nada de scroll horizontal.
+   La cabecera y cada paso apilan en vez de exprimirse en una sola fila.
+   `flex: 1 1 100%` en el cuerpo del paso (en vez de calcular a mano el ancho
+   fijo de los íconos vecinos) es lo que lo hace robusto: si no entra junto a
+   los íconos, pasa solo a su propia línea y ahí sí ocupa el 100% disponible. */
+@media (max-width: 480px) {
+  .rutina-item {
+    flex-wrap: wrap;
+  }
+
+  .rutina-week {
+    grid-template-columns: 1fr;
+  }
+
+  .rutina-step {
+    flex-wrap: wrap;
+  }
+
+  .rutina-step-body {
+    flex: 1 1 100%;
+  }
+
+  .rutina-step-reorder {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+
 /* Resumen diario de la rutina: práctica de hoy + próximo recordatorio. */
 .daily-grid {
   display: grid;
@@ -1569,6 +1594,246 @@ body.immersive .bug-fab {
   margin: 0;
   font-size: 12.5px;
   color: var(--text-dim);
+}
+
+/* Horario semanal de la rutina: un itinerario ES un día — un bloque por cada
+   día lunes→domingo, como el horario de un colegio, cada uno con SU
+   itinerario completo (cabecera + pasos) adentro. Grilla fluida. */
+.rutina-week-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.rutina-week {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.rutina-day-block {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+
+.rutina-day-block-empty {
+  opacity: 0.55;
+}
+
+.rutina-day-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+/* Cabecera de itinerario (nombre + Iniciar): tanto en su bloque del día
+   como en un itinerario suelto sin día. */
+.rutina-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rutina-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rutina-card-name em {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-style: normal;
+}
+
+.rutina-start-sm {
+  padding: 5px 11px;
+  font-size: 11.5px;
+}
+
+.rutina-card-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rutina-edit-btn {
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rutina-edit-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Horario semanal real: columnas = días, filas = horas, cada sesión en su
+   horario — como el horario de un colegio. Envuelto en un scroll horizontal
+   (la columna de horas queda "pegada" a la izquierda) para que en celulares
+   se deslice en vez de romperse con 7 columnas angostas. */
+.week-grid-scroll {
+  overflow-x: auto;
+  border-radius: 12px;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: 52px repeat(7, minmax(112px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 620px;
+}
+
+.wg-corner,
+.wg-hour-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+}
+
+.wg-corner {
+  z-index: 3;
+}
+
+.wg-day-head,
+.wg-hour-label,
+.wg-cell {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wg-day-head {
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+  min-width: 0;
+}
+
+.wg-day-head-empty {
+  opacity: 0.5;
+}
+
+.wg-day-name {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.wg-day-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wg-day-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.wg-icon-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wg-icon-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.wg-day-note {
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+
+.wg-hour-label {
+  padding: 4px 6px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: flex-start;
+}
+
+.wg-cell {
+  min-height: 34px;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wg-session {
+  appearance: none;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 10.5px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.wg-session:hover {
+  background: rgba(167, 139, 250, 0.28);
+}
+
+.wg-session b {
+  font-variant-numeric: tabular-nums;
 }
 
 .rutina-empty {
@@ -2562,16 +2827,23 @@ html:not(.in-app) .in-app-only {
 
 .it-step-freq-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
 .it-step-freq-row select {
   flex: 1;
-  min-width: 0;
+  /* Ancho mínimo real, no 0: en pantallas angostas un <select> nativo no
+     baja de este ancho aunque min-width:0 se lo pida (el texto de la opción
+     elegida no se trunca) — por eso el botón de al lado terminaba empujado
+     fuera de la pantalla. flex-wrap arriba es el otro lado del arreglo: si
+     ninguno de los dos entra en una fila, el botón pasa a la suya. */
+  min-width: 160px;
 }
 
 .it-step-custom-btn {
+  flex: none;
   padding: 8px 12px;
   font-size: 0.85em;
   white-space: nowrap;
@@ -2590,11 +2862,13 @@ html:not(.in-app) .in-app-only {
   display: none;
 }
 
+/* Chips de día (L M X J V S D): usados por el formulario de recordatorio
+   suelto de /rutina (repetición semanal exclusiva de la APK). */
 .it-step-days-wrap {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  justify-content: flex-end;
+  margin: 10px 0;
 }
 
 .it-step-days-label {
@@ -2606,6 +2880,7 @@ html:not(.in-app) .in-app-only {
 .it-step-days {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .day-chip {
@@ -2625,6 +2900,141 @@ html:not(.in-app) .in-app-only {
   background: linear-gradient(135deg, #a78bfa, #6366f1);
   border-color: transparent;
   color: #fff;
+}
+
+.day-chip:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Panel "Personalizar" de un paso de itinerario: mismos controles que el
+   panel personalizado del generador (portadora/ritmo con sliders + forma de
+   onda con botones) en vez de un modal con campos numéricos sueltos. */
+.custom {
+  margin-top: 4px;
+  padding: 16px;
+  background: #14162b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.custom.hidden {
+  display: none;
+}
+
+.ctrl-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slider-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
+.slider-row input[type='range'] {
+  flex: 1 1 140px;
+  accent-color: var(--accent);
+  max-width: 320px;
+}
+
+.wave-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wave-btn {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.wave-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--text);
+}
+
+.wave-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Guardar la frecuencia armada con los sliders: nombre + botón, con aviso
+   de resultado debajo (mismo patrón que el panel del generador). */
+.custom-save-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.custom-save-name-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.custom-save-name-label em {
+  font-weight: 400;
+  font-style: normal;
+}
+
+.custom-save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.custom-save-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+}
+
+.custom-save-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.custom-save-note.hidden {
+  display: none;
+}
+
+.custom-save-note-error {
+  color: #f87171;
+}
+
+@media (max-width: 420px) {
+  .custom-save-row {
+    flex-direction: column;
+  }
 }
 
 .cuenta-btn {
@@ -3081,5 +3491,88 @@ html:not(.in-app) .in-app-only {
   .comment-date {
     margin-left: 0;
     width: 100%;
+  }
+}
+
+/* Banner de notificaciones push: ofrece activar, nunca sorprende con el
+   diálogo nativo sin contexto (ver syncPushState en src/ui/auth.js). */
+.push-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: #14162c;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.push-banner-text {
+  flex: 1 1 260px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.push-banner-actions {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.push-banner-btn {
+  appearance: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  background: rgba(167, 139, 250, 0.14);
+  color: #c4b5fd;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.push-banner-btn:hover:not(:disabled) {
+  background: rgba(167, 139, 250, 0.24);
+}
+
+.push-banner-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.push-banner-btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+@media (max-width: 480px) {
+  .push-banner {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    transform: none;
+    max-width: none;
+  }
+
+  .push-banner-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .push-banner-btn {
+    flex: 1;
+    text-align: center;
   }
 }

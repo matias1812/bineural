@@ -831,16 +831,63 @@ body {
   gap: 7px;
 }
 
-/* Botón para guardar la frecuencia actual en la cuenta (modal compartido
-   con /cuenta). Visible solo dentro del panel personalizado. */
+/* Guardar la frecuencia actual en la cuenta: inline, dentro del mismo panel
+   personalizado (ya no un modal aparte) — nombre + botón en una fila, con
+   un aviso de resultado debajo. */
 .custom-save-wrap {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 2px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.custom-save-name-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9aa0c3;
+}
+
+.custom-save-name-label em {
+  font-weight: 400;
+  font-style: normal;
+}
+
+.custom-save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.custom-save-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+}
+
+.custom-save-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: #9aa0c3;
+}
+
+.custom-save-note.hidden {
+  display: none;
+}
+
+.custom-save-note-error {
+  color: #f87171;
 }
 
 .freq-save-btn {
   appearance: none;
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -856,14 +903,25 @@ body {
   transition: background 0.2s ease, transform 0.15s ease;
 }
 
-.freq-save-btn:hover {
+.freq-save-btn:hover:not(:disabled) {
   background: rgba(167, 139, 250, 0.22);
   transform: translateY(-1px);
+}
+
+.freq-save-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .freq-save-btn .ico {
   width: 15px;
   height: 15px;
+}
+
+@media (max-width: 420px) {
+  .custom-save-row {
+    flex-direction: column;
+  }
 }
 
 /* Etiqueta + burbujita de ayuda del control. La burbuja se ancla al
@@ -1664,6 +1722,41 @@ body {
   color: var(--text);
   margin-bottom: 10px;
   font-size: 16px;
+}
+
+/* "¿Cómo funciona Vyneural?" es un <details> ahora (colapsado por defecto):
+   todo ese texto siempre visible debajo del reproductor era puro ruido
+   visual para quien ya sabe cómo va. El resto del contenido no cambia. */
+.info-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.info[open] .info-summary {
+  margin-bottom: 14px;
+}
+
+.info-summary::-webkit-details-marker {
+  display: none;
+}
+
+.info-summary::before {
+  content: '▸';
+  color: var(--accent);
+  transition: transform 0.15s ease;
+  flex: none;
+}
+
+.info[open] .info-summary::before {
+  transform: rotate(90deg);
 }
 
 /* Anclas: que la nav sticky no tape el inicio de cada sección. */

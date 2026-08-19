@@ -14,9 +14,14 @@
 // nace solo con un gesto explícito del usuario (P5.1/P5.6).
 
 import { getAccessToken } from './api/client.js';
-import { listItineraries, reorderItineraryItems } from './api/itineraries.js';
-import { listFrequencies } from './api/frequencies.js';
+import { listItineraries, createItinerary, updateItinerary, reorderItineraryItems } from './api/itineraries.js';
+import { listFrequencies, createFrequency } from './api/frequencies.js';
+import { createAlarm } from './api/alarms.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
+import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
+import { getAlarms, saveAlarms, fireAlarm, rruleFor, nextAlarmAt, requestPermission } from './notifications.js';
+import { createNativeBridgeAdapter } from './platform/native-bridge.js';
+import { PROFILES } from './models/profiles.js';
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -29,39 +34,19 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-const LS_ALARMS = 'vyneural_alarms';
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const DAY_NAMES = [
   'domingo', 'lunes', 'martes', 'miércoles',
   'jueves', 'viernes', 'sábado',
 ];
 
-function getAlarms() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(LS_ALARMS) || '[]');
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveAlarms(alarms) {
-  try {
-    localStorage.setItem(LS_ALARMS, JSON.stringify(alarms));
-  } catch {
-    /* sin almacenamiento */
-  }
-}
+// Mismo adaptador que usa el generador (src/main.js) para el bridge nativo:
+// getAlarms/saveAlarms (arriba) ya vienen de notifications.js, así que la
+// rutina y el generador leen/escriben exactamente el mismo espejo.
+const nativeBridge = createNativeBridgeAdapter();
 
 function cancelNativeAlarm(alarmId) {
-  try {
-    const b = window.AndroidBridgeNative;
-    if (b && typeof b.postMessage === 'function') {
-      b.postMessage(JSON.stringify({ command: 'CANCEL_ALARM', payload: { alarmId } }));
-    }
-  } catch {
-    /* sin bridge: solo se quita de la lista */
-  }
+  if (nativeBridge.present) nativeBridge.cancelAlarm(alarmId);
 }
 
 function daysLabel(days) {
@@ -153,22 +138,17 @@ function stepLabel(item) {
   };
 }
 
-// Mismo mapeo que ICS_DAY en notifications.js (JS Date.getDay(): 0=domingo).
-const RRULE_DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+// Lunes → domingo (0=domingo, se muestra al final).
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
-function daysFromRepeatRule(rule) {
-  const m = rule && /BYDAY=([A-Z,]+)/.exec(rule);
-  if (!m) return [];
-  return m[1].split(',').map((c) => RRULE_DAY_CODES.indexOf(c)).filter((d) => d >= 0);
-}
-
-// Horario real del paso (hora de reloj + días), a diferencia del offset
-// acumulado que ya calcula la línea de tiempo. Si tiene horario, el paso
-// tiene una alarma de recordatorio (Web Push) sincronizada en el backend.
+// Horario real del paso (hora de reloj), a diferencia del offset acumulado
+// que ya calcula la línea de tiempo. Si tiene horario, el paso tiene una
+// alarma de recordatorio (Web Push) sincronizada en el backend — la
+// repetición semanal (o "una vez") la calcula el backend según el día del
+// ITINERARIO (item.repeat_rule ya viene derivado, no se elige por paso).
 function scheduleLabel(item) {
   if (!item.time_of_day) return '';
-  const days = daysFromRepeatRule(item.repeat_rule);
-  const when = days.length ? `${item.time_of_day} · ${daysLabel(days)}` : `${item.time_of_day} · una vez`;
+  const when = item.repeat_rule ? `${item.time_of_day} · se repite` : `${item.time_of_day} · una vez`;
   return ` · 🔔 ${when}`;
 }
 
@@ -192,10 +172,10 @@ function seqUrlParams(items, name) {
   return `&seq=${encodeURIComponent(JSON.stringify({ name, steps }))}`;
 }
 
-// La línea de tiempo del itinerario: sus pasos en orden con duración y horario
-// acumulado (00:00 → 10:00 → 20:00…), como el horario de /cuenta. El itinerario
-// ES la rutina: se ve completo adentro de esta vista, no solo como enlace.
-function itineraryTimelineHTML(items, itId) {
+// Los pasos de UN itinerario, en orden, con reordenamiento manual (↑/↓): el
+// día ya no vive acá (es de todo el itinerario, ver dayBlockHTML/renderItineraries),
+// así que todos los pasos son simplemente su secuencia interna.
+function itineraryStepsHTML(items, itId) {
   let cursor = 0;
   const rows = items.map((item, i) => {
     const s = stepLabel(item);
@@ -220,11 +200,112 @@ function itineraryTimelineHTML(items, itId) {
         </span>
       </div>`;
   }).join('');
-  const total = items.reduce((acc, it) => acc + (it.duration || 0), 0);
-  const totalLabel = total > 0 ? ` · total ${fmtDuration(total)}` : '';
-  return `<div class="rutina-timeline" data-it="${escapeHtml(itId)}">
-      ${rows || '<p class="rutina-empty-inline">Sin pasos: funciona como aviso de horario.</p>'}
-      <p class="rutina-timeline-total">🧭 ${items.length} paso${items.length === 1 ? '' : 's'}${totalLabel}</p>
+  return rows || '<p class="rutina-empty-inline">Sin pasos: funciona como aviso de horario.</p>';
+}
+
+// Cabecera + pasos de UN itinerario, reutilizada tanto en su bloque del día
+// (semana) como en la lista de itinerarios sueltos (sin día).
+function itineraryCardHTML(it, { compact } = {}) {
+  const items = (it.items || []).slice().sort((a, b) => a.position - b.position);
+  const startHref = items.length
+    ? `/?${freqUrlParams(firstFrequency(items))}${seqUrlParams(items, it.name || 'Rutina')}`
+    : '/#states-grid';
+  const paused = it.is_active === false ? ' <em>(en pausa)</em>' : '';
+  const meta = compact
+    ? ''
+    : `<div class="rutina-meta">${[
+        it.is_active === false ? 'en pausa' : 'activo',
+        items.length ? fmtDuration(items.reduce((acc, x) => acc + (x.duration || 0), 0)) : 'sin duración fija',
+        it.timezone || 'UTC',
+      ].join(' · ')}</div>`;
+  return `<div class="rutina-card-head">
+      <span class="rutina-card-name">${escapeHtml(it.name || 'Itinerario')}${paused}</span>
+      <span class="rutina-card-actions">
+        <button type="button" class="rutina-edit-btn" data-edit="${escapeHtml(it.id)}" aria-label="Editar ${escapeHtml(it.name || 'itinerario')}">✎</button>
+        <a class="rutina-start${compact ? ' rutina-start-sm' : ''}" href="${escapeHtml(startHref)}">Iniciar</a>
+      </span>
+    </div>
+    ${meta}
+    <div class="rutina-timeline" data-it="${escapeHtml(it.id)}">${itineraryStepsHTML(items, it.id)}</div>`;
+}
+
+// Rango de horas a mostrar: de la primera a la última hora con algún paso
+// agendado (con un margen de 1 h a cada lado), o un rango por defecto
+// razonable (6→22) si todavía no hay nada — así la grilla sirve de guía
+// vacía en vez de no mostrar nada.
+function computeHourRange(byDay) {
+  let minH = 24;
+  let maxH = -1;
+  byDay.forEach((it) => {
+    (it.items || []).forEach((item) => {
+      if (!item.time_of_day) return;
+      const h = parseInt(item.time_of_day.slice(0, 2), 10);
+      if (Number.isFinite(h)) {
+        if (h < minH) minH = h;
+        if (h > maxH) maxH = h;
+      }
+    });
+  });
+  if (maxH < 0) return { start: 6, end: 22 };
+  return { start: Math.max(0, minH - 1), end: Math.min(23, maxH + 1) };
+}
+
+// Horario real: columnas = días (L→D), filas = horas, cada sesión ubicada en
+// su horario. Los pasos sin horario no tienen dónde ir en esta grilla — se
+// cuentan en la cabecera del día ("+N sin horario"); se editan/ven completos
+// desde "Editar" (misma lista de pasos que ya mostraba /cuenta).
+function weekGridHTML(byDay) {
+  const { start, end } = computeHourRange(byDay);
+  const hours = [];
+  for (let h = start; h <= end; h++) hours.push(h);
+
+  const headerCells = WEEK_ORDER.map((day) => {
+    const it = byDay.get(day);
+    if (!it) {
+      return `<div class="wg-day-head wg-day-head-empty">
+          <span class="wg-day-name">${DAY_NAMES[day].slice(0, 3)}</span>
+          <button type="button" class="wg-icon-btn" data-add-day="${day}" aria-label="Crear itinerario para ${DAY_NAMES[day]}">＋</button>
+        </div>`;
+    }
+    const items = (it.items || []).slice().sort((a, b) => a.position - b.position);
+    const startHref = items.length
+      ? `/?${freqUrlParams(firstFrequency(items))}${seqUrlParams(items, it.name || 'Rutina')}`
+      : null;
+    const noTimeCount = items.filter((i) => !i.time_of_day).length;
+    return `<div class="wg-day-head">
+        <span class="wg-day-name">${DAY_NAMES[day].slice(0, 3)}</span>
+        <span class="wg-day-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</span>
+        <span class="wg-day-actions">
+          <button type="button" class="wg-icon-btn" data-edit="${escapeHtml(it.id)}" aria-label="Editar ${escapeHtml(it.name || '')}">✎</button>
+          ${startHref ? `<a class="wg-icon-btn" href="${escapeHtml(startHref)}" aria-label="Iniciar ${escapeHtml(it.name || '')}">▶</a>` : ''}
+        </span>
+        ${noTimeCount ? `<small class="wg-day-note">+${noTimeCount} sin horario</small>` : ''}
+      </div>`;
+  }).join('');
+
+  const rows = hours.map((h) => {
+    const hourLabel = `${String(h).padStart(2, '0')}:00`;
+    const cells = WEEK_ORDER.map((day) => {
+      const it = byDay.get(day);
+      if (!it) return '<div class="wg-cell"></div>';
+      const items = (it.items || []).filter(
+        (item) => item.time_of_day && parseInt(item.time_of_day.slice(0, 2), 10) === h,
+      );
+      if (!items.length) return '<div class="wg-cell"></div>';
+      const chips = items.map((item) => {
+        const s = stepLabel(item);
+        return `<button type="button" class="wg-session" data-edit="${escapeHtml(it.id)}">
+            <b>${escapeHtml(item.time_of_day)}</b> ${escapeHtml(s.name)}
+          </button>`;
+      }).join('');
+      return `<div class="wg-cell">${chips}</div>`;
+    }).join('');
+    return `<div class="wg-hour-label">${hourLabel}</div>${cells}`;
+  }).join('');
+
+  return `<div class="week-grid">
+      <div class="wg-corner"></div>${headerCells}
+      ${rows}
     </div>`;
 }
 
@@ -235,52 +316,29 @@ function renderItineraries(list) {
   itListEl.classList.toggle('hidden', !has);
   itEmptyEl.classList.toggle('hidden', has);
   if (itCountEl) itCountEl.textContent = String(list.length);
+  if (!has) return;
 
+  // Un itinerario ES un día (a lo sumo uno por día, no se repite — ver
+  // backend). El horario semanal se muestra siempre, lunes→domingo, aunque
+  // algún día quede sin itinerario todavía: sirve de guía para programarlo.
+  const byDay = new Map();
+  const loose = [];
   list.forEach((it) => {
-    const items = (it.items || []).slice().sort((a, b) => a.position - b.position);
+    if (it.day_of_week != null) byDay.set(it.day_of_week, it);
+    else loose.push(it);
+  });
+
+  const weekLi = document.createElement('li');
+  weekLi.className = 'rutina-week-card';
+  weekLi.innerHTML = `<div class="week-grid-scroll">${weekGridHTML(byDay)}</div>`;
+  itListEl.appendChild(weekLi);
+
+  // Itinerarios sin día: secuencias sueltas, reutilizables cuando quieras
+  // (no forman parte de la rotación semanal).
+  loose.forEach((it) => {
     const li = document.createElement('li');
     li.className = 'rutina-item rutina-item-it';
-
-    const badge = document.createElement('span');
-    badge.className = 'rutina-day-badge';
-    badge.textContent = String(items.length);
-
-    const body = document.createElement('div');
-    body.className = 'rutina-body';
-
-    const name = document.createElement('div');
-    name.className = 'rutina-name';
-    name.textContent = it.name || 'Itinerario';
-
-    const meta = document.createElement('div');
-    meta.className = 'rutina-meta';
-    const totalSec = items.reduce((acc, item) => acc + (item.duration || 0), 0);
-    meta.textContent = [
-      it.is_active === false ? 'en pausa' : 'activo',
-      totalSec > 0 ? fmtDuration(totalSec) : 'sin duración fija',
-      it.timezone || 'UTC',
-    ].join(' · ');
-
-    body.append(name, meta);
-
-    const start = document.createElement('a');
-    start.className = 'rutina-start';
-    // Iniciar lleva al generador con la PRIMERA frecuencia + la secuencia
-    // completa (?seq=…): reproduce los pasos en orden. Play siempre manual.
-    start.href = items.length
-      ? `/?${freqUrlParams(firstFrequency(items))}${seqUrlParams(items, it.name || 'Rutina')}`
-      : '/#states-grid';
-    start.textContent = 'Iniciar'; // lleva al generador configurado; play manual
-
-    // El itinerario completo, adentro de la rutina: cabecera + línea de tiempo.
-    const head = document.createElement('div');
-    head.className = 'rutina-head-row';
-    head.append(badge, body, start);
-
-    li.append(head);
-    const timeline = document.createElement('div');
-    timeline.innerHTML = itineraryTimelineHTML(items, it.id);
-    li.appendChild(timeline.firstElementChild);
+    li.innerHTML = itineraryCardHTML(it);
     itListEl.appendChild(li);
   });
 }
@@ -295,9 +353,616 @@ let savedFreqsMap = new Map();
 let itinerariesLoaded = false;
 let currentIts = [];
 
+// ── Crear y editar itinerario directo desde /rutina (mismo formulario que
+// /cuenta, sin mandar a otra página) ────────────────────────────────────────
+let itSteps = []; // pasos del itinerario en construcción (crear o editar)
+let editingItineraryId = null;
+
+function formatHzShort(hz) {
+  if (hz == null) return '';
+  const r = Math.round(hz * 10) / 10;
+  return `${Number.isInteger(r) ? r : r.toFixed(1)} Hz`;
+}
+
+// El select combina las predefinidas (siempre disponibles) con las que el
+// usuario ya guardó en su cuenta. "p:<id>" = predefinida, "f:<uuid>" = guardada.
+function populateStepFreqs() {
+  const sel = document.getElementById('it-step-freq');
+  if (!sel) return;
+  const predefined = PROFILES
+    .map((p) => `<option value="p:${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${formatHzShort(p.stimulus.carrierBase)}</option>`)
+    .join('');
+  const saved = [...savedFreqsMap.values()]
+    .map((f) => `<option value="f:${escapeHtml(f.id)}">${escapeHtml(f.name || 'Frecuencia')} · ${formatHzShort(f.carrier_frequency ?? f.left_frequency)}</option>`)
+    .join('');
+  sel.innerHTML = `<optgroup label="Predefinidas">${predefined}</optgroup>`
+    + (saved ? `<optgroup label="Mis frecuencias">${saved}</optgroup>` : '');
+  sel.disabled = false;
+}
+
+function findMatchingSavedFreq(profile) {
+  return [...savedFreqsMap.values()].find(
+    (f) =>
+      Math.abs((f.carrier_frequency ?? 0) - profile.stimulus.carrierBase) < 0.05 &&
+      Math.abs((f.beat_frequency ?? 0) - profile.stimulus.beat) < 0.05 &&
+      (f.waveform || 'sine') === (profile.stimulus.modulation || 'sine'),
+  );
+}
+
+// Resuelve el value del select ("p:<id>" | "f:<uuid>") a una frecuencia real:
+// las predefinidas se guardan en la cuenta la primera vez que se usan.
+async function resolveStepFrequency(value) {
+  if (value.startsWith('f:')) {
+    return savedFreqsMap.get(value.slice(2)) || null;
+  }
+  if (value.startsWith('p:')) {
+    const profile = PROFILES.find((p) => p.id === value.slice(2));
+    if (!profile) return null;
+    const existing = findMatchingSavedFreq(profile);
+    if (existing) return existing;
+    const created = await createFrequency({
+      name: profile.name,
+      carrier_frequency: profile.stimulus.carrierBase,
+      beat_frequency: profile.stimulus.beat,
+      waveform: profile.stimulus.modulation || 'sine',
+      condition: 'binaural',
+      config: { source: 'itinerary-preset', profile_id: profile.id },
+    });
+    savedFreqsMap.set(created.id, created);
+    return created;
+  }
+  return null;
+}
+
+function renderItSteps() {
+  const ul = document.getElementById('it-steps');
+  const empty = document.getElementById('it-steps-empty');
+  if (!ul) return;
+  ul.innerHTML = '';
+  const has = itSteps.length > 0;
+  ul.classList.toggle('hidden', !has);
+  if (empty) empty.classList.toggle('hidden', has);
+  itSteps.forEach((step, i) => {
+    const li = document.createElement('li');
+    li.className = 'cuenta-item';
+    const bell = step.notification_enabled === false ? '🔕' : '🔔';
+    const schedule = step.time_of_day ? `${step.time_of_day} · ${bell}` : '';
+    li.innerHTML = `<div class="cuenta-item-body">
+        <b>${i + 1}. ${escapeHtml(step.name)}</b>
+        <small>${step.duration} min${schedule ? ` · ${escapeHtml(schedule)}` : ''}</small>
+      </div>
+      <button type="button" class="cuenta-item-del" data-step="${i}" aria-label="Quitar paso">✕</button>`;
+    ul.appendChild(li);
+  });
+}
+
+function toggleStepNotifyWrap() {
+  const wrap = document.getElementById('it-step-notify-wrap');
+  const timeEl = document.getElementById('it-step-time');
+  if (wrap) wrap.classList.toggle('hidden', !(timeEl && timeEl.value));
+}
+
+// Deshabilita los días ya ocupados por OTRO itinerario (no se puede repetir);
+// el propio día del itinerario en edición queda habilitado para no bloquearlo.
+function populateItineraryDaySelect() {
+  const sel = document.getElementById('itinerary-day');
+  if (!sel) return;
+  const taken = new Set(
+    currentIts
+      .filter((it) => it.day_of_week != null && it.id !== editingItineraryId)
+      .map((it) => it.day_of_week),
+  );
+  Array.from(sel.options).forEach((opt) => {
+    if (opt.value === '') return;
+    opt.disabled = taken.has(Number(opt.value));
+  });
+}
+
+// ── Panel "Personalizar" de un paso: mismos ajustes que el generador
+// (portadora/ritmo con sliders + forma de onda + condición experimental).
+const IT_CUSTOM_WAVES = [
+  { id: 'sine', label: 'Senoidal' },
+  { id: 'triangle', label: 'Triangular' },
+  { id: 'square', label: 'Cuadrada' },
+  { id: 'sawtooth', label: 'Diente de sierra' },
+];
+let itCustomWave = 'sine';
+
+const IT_CUSTOM_CARRIERS = [
+  { hz: 432, label: '432 Hz · Estándar' },
+  { hz: 220, label: '220 Hz · Estándar impuesto' },
+  { hz: 528, label: '528 Hz · Solfeggio' },
+  { hz: 963, label: '963 Hz · Solfeggio divino' },
+  { hz: 136.1, label: '136.1 Hz · Ancestral' },
+  { hz: 194.7, label: '194.7 Hz · Schumann' },
+];
+
+const IT_CUSTOM_CONDITIONS = [
+  { id: 'binaural', label: 'Binaural' },
+  { id: 'pure-tone', label: 'Tono puro' },
+  { id: 'noise', label: 'Ruido' },
+  { id: 'amplitude-modulation', label: 'AM' },
+  { id: 'none', label: 'Sin estímulo' },
+];
+let itCustomCondition = 'binaural';
+
+function populateItCustomWaveOptions() {
+  const wrap = document.getElementById('it-custom-wave-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_WAVES.map(
+    (w) => `<button type="button" class="wave-btn${w.id === itCustomWave ? ' active' : ''}" data-wave="${w.id}">${escapeHtml(w.label)}</button>`,
+  ).join('');
+}
+
+function syncItCustomWaveButtons() {
+  document.querySelectorAll('#it-custom-wave-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.wave === itCustomWave);
+  });
+}
+
+function populateItCustomCarrierOptions() {
+  const wrap = document.getElementById('it-custom-carrier-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_CARRIERS.map(
+    (c) => `<button type="button" class="wave-btn" data-hz="${c.hz}">${escapeHtml(c.label)}</button>`,
+  ).join('');
+}
+
+function populateItCustomCondOptions() {
+  const wrap = document.getElementById('it-custom-cond-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_CONDITIONS.map(
+    (c) => `<button type="button" class="wave-btn${c.id === itCustomCondition ? ' active' : ''}" data-cond="${c.id}">${escapeHtml(c.label)}</button>`,
+  ).join('');
+}
+
+function syncItCustomCondButtons() {
+  document.querySelectorAll('#it-custom-cond-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.cond === itCustomCondition);
+  });
+}
+
+function updateItCustomLabels() {
+  const base = document.getElementById('it-custom-base');
+  const beat = document.getElementById('it-custom-beat');
+  const baseLabel = document.getElementById('it-custom-base-label');
+  const beatLabel = document.getElementById('it-custom-beat-label');
+  if (base && baseLabel) baseLabel.textContent = `Portadora: ${base.value} Hz`;
+  if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
+}
+
+function setItCustomNote(msg, isError) {
+  const noteEl = document.getElementById('it-custom-save-note');
+  if (!noteEl) return;
+  noteEl.textContent = msg;
+  noteEl.classList.toggle('hidden', !msg);
+  noteEl.classList.toggle('custom-save-note-error', !!isError);
+}
+
+function wireItCustomPanel() {
+  const toggle = document.getElementById('it-step-custom');
+  const panel = document.getElementById('it-custom-panel');
+  if (!toggle || !panel) return;
+  populateItCustomWaveOptions();
+  populateItCustomCarrierOptions();
+  populateItCustomCondOptions();
+  const baseEl = document.getElementById('it-custom-base');
+  const beatEl = document.getElementById('it-custom-beat');
+  if (baseEl) baseEl.addEventListener('input', updateItCustomLabels);
+  if (beatEl) beatEl.addEventListener('input', updateItCustomLabels);
+  const waveWrap = document.getElementById('it-custom-wave-options');
+  if (waveWrap) {
+    waveWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn) return;
+      itCustomWave = btn.dataset.wave;
+      syncItCustomWaveButtons();
+    });
+  }
+  const carrierWrap = document.getElementById('it-custom-carrier-options');
+  if (carrierWrap) {
+    carrierWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn || !baseEl) return;
+      baseEl.value = btn.dataset.hz;
+      updateItCustomLabels();
+    });
+  }
+  const condWrap = document.getElementById('it-custom-cond-options');
+  if (condWrap) {
+    condWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn) return;
+      itCustomCondition = btn.dataset.cond;
+      syncItCustomCondButtons();
+    });
+  }
+  toggle.addEventListener('click', () => {
+    const willOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !willOpen);
+    toggle.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) updateItCustomLabels();
+  });
+  const saveBtn = document.getElementById('it-custom-save');
+  const nameEl = document.getElementById('it-custom-save-name');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      setItCustomNote('Guardando…');
+      try {
+        const carrier = (baseEl && parseFloat(baseEl.value)) || 220;
+        const beat = (beatEl && parseFloat(beatEl.value)) || 10;
+        const name = (nameEl && nameEl.value.trim()) || 'Personalizada';
+        const frequency = await createFrequency({
+          name: name.slice(0, 120),
+          carrier_frequency: Math.round(carrier * 10) / 10,
+          beat_frequency: Math.round(beat * 10) / 10,
+          waveform: itCustomWave,
+          condition: itCustomCondition,
+          config: { source: 'itinerary' },
+        });
+        savedFreqsMap.set(frequency.id, frequency);
+        populateStepFreqs();
+        const sel = document.getElementById('it-step-freq');
+        if (sel) sel.value = `f:${frequency.id}`;
+        if (nameEl) nameEl.value = '';
+        setItCustomNote('✅ Lista — seleccionada para este paso.');
+        panel.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', 'false');
+      } catch (err) {
+        setItCustomNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function startEditItinerary(it) {
+  editingItineraryId = it.id;
+  const details = document.getElementById('itinerary-form-details');
+  const summary = document.getElementById('itinerary-form-summary');
+  if (summary) summary.textContent = `✏️ Editando: ${it.name || 'itinerario'}`;
+  document.getElementById('itinerary-name').value = it.name || '';
+  document.getElementById('itinerary-desc').value = it.description || '';
+  const dayEl = document.getElementById('itinerary-day');
+  itSteps = (it.items || []).slice().sort((a, b) => a.position - b.position).map((item) => {
+    const f = savedFreqsMap.get(item.frequency_id);
+    return {
+      frequency_id: item.frequency_id,
+      name: f ? f.name : 'Frecuencia',
+      duration: Math.max(1, Math.round((item.duration || 0) / 60)),
+      time_of_day: item.time_of_day || null,
+      notification_enabled: item.configuration ? item.configuration.notification_enabled !== false : true,
+    };
+  });
+  renderItSteps();
+  if (dayEl) dayEl.value = it.day_of_week != null ? String(it.day_of_week) : '';
+  populateItineraryDaySelect();
+  const submitBtn = document.getElementById('itinerary-submit');
+  if (submitBtn) submitBtn.textContent = 'Guardar cambios';
+  const cancelBtn = document.getElementById('itinerary-cancel-edit');
+  if (cancelBtn) cancelBtn.classList.remove('hidden');
+  if (details) {
+    details.open = true;
+    details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function cancelEditItinerary() {
+  editingItineraryId = null;
+  itSteps = [];
+  renderItSteps();
+  const summary = document.getElementById('itinerary-form-summary');
+  if (summary) summary.textContent = '＋ Crear itinerario';
+  const submitBtn = document.getElementById('itinerary-submit');
+  if (submitBtn) submitBtn.textContent = 'Crear itinerario';
+  const cancelBtn = document.getElementById('itinerary-cancel-edit');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+  const itForm = document.getElementById('itinerary-form');
+  if (itForm) itForm.reset();
+  populateItineraryDaySelect();
+}
+
+function wireItineraryForm() {
+  const add = document.getElementById('it-step-add');
+  const timeEl = document.getElementById('it-step-time');
+  if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
+  wireItCustomPanel();
+  populateStepFreqs();
+
+  if (add) {
+    add.addEventListener('click', async () => {
+      const sel = document.getElementById('it-step-freq');
+      const dur = document.getElementById('it-step-duration');
+      const notifyEl = document.getElementById('it-step-notify');
+      if (!sel.value) return;
+      add.disabled = true;
+      try {
+        const freq = await resolveStepFrequency(sel.value);
+        if (!freq) return;
+        const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
+        const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
+        itSteps.push({
+          frequency_id: freq.id,
+          name: freq.name || 'Frecuencia',
+          duration,
+          time_of_day,
+          notification_enabled: notifyEl ? notifyEl.checked : true,
+        });
+        renderItSteps();
+        if (timeEl) timeEl.value = '';
+        if (notifyEl) notifyEl.checked = true;
+        toggleStepNotifyWrap();
+      } catch (err) {
+        alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
+      } finally {
+        add.disabled = false;
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    const del = e.target.closest('#it-steps [data-step]');
+    if (!del) return;
+    const i = parseInt(del.dataset.step, 10);
+    if (Number.isFinite(i) && itSteps[i]) {
+      itSteps.splice(i, 1);
+      renderItSteps();
+    }
+  });
+
+  const cancelBtn = document.getElementById('itinerary-cancel-edit');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      cancelEditItinerary();
+      const details = document.getElementById('itinerary-form-details');
+      if (details) details.open = false;
+    });
+  }
+
+  const itForm = document.getElementById('itinerary-form');
+  if (itForm) {
+    itForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const name = document.getElementById('itinerary-name').value.trim();
+      const desc = document.getElementById('itinerary-desc').value.trim() || undefined;
+      if (!name) return;
+      let tz = 'UTC';
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch (_) { /* default */ }
+      const dayEl = document.getElementById('itinerary-day');
+      const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
+      const items = itSteps.map((s, i) => ({
+        frequency_id: s.frequency_id,
+        position: i,
+        duration: s.duration * 60,
+        configuration: s.time_of_day ? { notification_enabled: s.notification_enabled !== false } : {},
+        time_of_day: s.time_of_day || undefined,
+      }));
+      const submitBtn = document.getElementById('itinerary-submit');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        if (editingItineraryId) {
+          await updateItinerary(editingItineraryId, { name: name.slice(0, 120), description: desc, day_of_week, items });
+        } else {
+          await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, day_of_week, items });
+        }
+        cancelEditItinerary();
+        const details = document.getElementById('itinerary-form-details');
+        if (details) details.open = false;
+        loadItineraries();
+      } catch (err) {
+        alert(`No se pudo guardar el itinerario: ${(err && err.detail) || 'error'}`);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+}
+
+// ── Crear recordatorio directo desde /rutina (sin pasar por el generador) ──
+// Mismo AlarmManager que src/main.js (misma clase, mismo store durable +
+// espejo localStorage): así un recordatorio creado acá lo ve el generador
+// tal cual, y viceversa — un solo dueño de los datos, dos puntos de entrada.
+const alarmManagerInstance = new AlarmManager({
+  // La rutina no tiene reproductor: al disparar, solo notifica (nunca arranca
+  // audio — REGLA DE ORO). Sin la pestaña de /rutina abierta tampoco dispara
+  // acá; es la misma limitación honesta que ya documenta esta página.
+  onFire: (alarm) => fireAlarm(alarm),
+  onSync: render,
+  channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vyneural-alarms') : null,
+  locks: typeof navigator !== 'undefined' && navigator.locks ? navigator.locks : null,
+});
+
+function reminderPreset() {
+  const sel = document.getElementById('reminder-state');
+  return PROFILES.find((p) => p.id === (sel && sel.value)) || PROFILES[0];
+}
+
+function populateReminderPresets() {
+  const sel = document.getElementById('reminder-state');
+  if (!sel) return;
+  sel.innerHTML = '';
+  PROFILES.forEach((p) => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.custom ? 'Personalizado (a tu medida)' : `${p.name} · ${p.band}`;
+    sel.appendChild(opt);
+  });
+}
+
+// Próxima fecha ≥ ahora cuyo día (getDay: 0=domingo…6=sábado) esté en `days`
+// — mismo cálculo que el generador (src/main.js:nextOccurrenceAt).
+function nextOccurrenceAt(hh, mm, days, fromMs = Date.now()) {
+  if (!days || days.length === 0) return null;
+  for (let i = 0; i < 9; i++) {
+    const d = new Date(fromMs);
+    d.setDate(d.getDate() + i);
+    if (days.includes(d.getDay())) {
+      const cand = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0);
+      if (cand.getTime() >= fromMs) return cand.getTime();
+    }
+  }
+  return null;
+}
+
+function reminderDaysSelected() {
+  const wrap = document.getElementById('reminder-days');
+  if (!wrap) return [];
+  return [...wrap.querySelectorAll('.day-chip[aria-pressed="true"]')]
+    .map((b) => parseInt(b.dataset.day, 10));
+}
+
+function scheduleNativeReminder(alarm) {
+  // La repetición semanal (días) es exclusiva de la APK — el AlarmManager
+  // nativo del SO es el único que puede reprogramarse con la app cerrada.
+  if (!nativeBridge.present) return false;
+  const r = nativeBridge.scheduleAlarm({
+    alarmId: alarm.id,
+    title: `Sesión ${Math.round(alarm.freq)} Hz`,
+    body: `${alarm.name} · ${Math.round(alarm.freq)} Hz · ${alarm.beat} Hz`,
+    atMs: alarm.nextAt,
+    days: alarm.days && alarm.days.length ? alarm.days : undefined,
+    freq: alarm.freq,
+    beat: alarm.beat,
+    wave: alarm.wave || 'sine',
+  });
+  return !!(r && r.ok);
+}
+
+function wireReminderForm() {
+  const form = document.getElementById('reminder-form');
+  const stateSel = document.getElementById('reminder-state');
+  const customRow = document.getElementById('reminder-custom-row');
+  const daysWrap = document.getElementById('reminder-days-wrap');
+  const timeEl = document.getElementById('reminder-time');
+  if (!form || !stateSel) return;
+
+  populateReminderPresets();
+  // Los días de repetición son exclusivos de la APK (ver nota de la página):
+  // en web/PWA el selector ni se muestra, para no prometer algo que no cumple.
+  if (daysWrap) daysWrap.classList.toggle('hidden', !IN_APK);
+
+  stateSel.addEventListener('change', () => {
+    const p = reminderPreset();
+    if (customRow) customRow.classList.toggle('hidden', !p.custom);
+  });
+
+  const daysEl = document.getElementById('reminder-days');
+  if (daysEl) {
+    daysEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.day-chip');
+      if (!btn) return;
+      const on = btn.getAttribute('aria-pressed') === 'true';
+      btn.setAttribute('aria-pressed', String(!on));
+      btn.classList.toggle('active', !on);
+    });
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const p = reminderPreset();
+      const base = document.getElementById('reminder-base');
+      const beat = document.getElementById('reminder-beat');
+      const minutesEl = document.getElementById('reminder-minutes');
+      const time = timeEl.value || '08:00';
+      const days = IN_APK ? reminderDaysSelected() : [];
+      const [hh, mm] = time.split(':').map(Number);
+      const nextAt = days.length ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime() : nextAlarmAt(time).getTime();
+      const alarm = {
+        id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        time,
+        name: p.custom ? 'Personalizado' : p.name,
+        freq: p.custom ? (parseFloat(base.value) || 220) : p.base,
+        beat: p.custom ? (parseFloat(beat.value) || 10) : p.beat,
+        wave: 'sine',
+        minutes: parseInt(minutesEl.value, 10) || 0,
+        days,
+        nextAt,
+      };
+      const nativeOwned = scheduleNativeReminder(alarm);
+      if (nativeOwned) alarm.external = true;
+      await alarmManagerInstance.create(alarm);
+      // Sincronizar a la nube (best-effort): con sesión, el backend manda el
+      // Web Push a la hora exacta aunque la app esté cerrada.
+      if (getAccessToken()) {
+        let timezone = 'UTC';
+        try {
+          timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        } catch (_) { /* sin zona del navegador */ }
+        createAlarm({
+          name: alarm.name || 'Recordatorio',
+          enabled: true,
+          scheduled_at: new Date(alarm.nextAt).toISOString(),
+          timezone,
+          config: { freq: alarm.freq, beat: alarm.beat, wave: alarm.wave, minutes: alarm.minutes, localId: alarm.id },
+          repeat_rule: days.length ? rruleFor(days) : null,
+          notification_enabled: true,
+        })
+          .then((created) => {
+            if (created && created.id) {
+              alarm.cloudId = created.id;
+              alarmManagerInstance.create(alarm).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+      const perm = await requestPermission();
+      showReminderNote(
+        perm !== 'granted' && perm !== 'unsupported'
+          ? 'Recordatorio guardado — activá las notificaciones para que te avise.'
+          : 'Recordatorio guardado ✓',
+      );
+      form.reset();
+      if (customRow) customRow.classList.add('hidden');
+      document.querySelectorAll('#reminder-days .day-chip').forEach((b) => {
+        b.setAttribute('aria-pressed', 'false');
+        b.classList.remove('active');
+      });
+      const details = form.closest('details');
+      if (details) details.open = false;
+      render();
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+
+function showReminderNote(msg) {
+  const hint = document.getElementById('reminder-hint');
+  if (!hint) return;
+  hint.textContent = msg;
+  window.setTimeout(() => {
+    hint.textContent = 'Sin días marcados, el recordatorio es de una sola vez.';
+  }, 4000);
+}
+
 // Reordenar pasos desde la rutina (↑/↓): optimista — re-render al momento y
 // se persiste al backend; si falla, se recarga el estado real de la nube.
 itListEl.addEventListener('click', async (e) => {
+  const editBtn = e.target.closest('[data-edit]');
+  if (editBtn) {
+    const it = currentIts.find((x) => x.id === editBtn.dataset.edit);
+    if (it) startEditItinerary(it);
+    return;
+  }
+  const addDayBtn = e.target.closest('[data-add-day]');
+  if (addDayBtn) {
+    cancelEditItinerary();
+    const details = document.getElementById('itinerary-form-details');
+    const dayEl = document.getElementById('itinerary-day');
+    if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
+    if (details) {
+      details.open = true;
+      details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    return;
+  }
   const btn = e.target.closest('[data-reorder]');
   if (!btn || btn.disabled) return;
   const itId = btn.dataset.it;
@@ -452,8 +1117,10 @@ function render() {
     del.textContent = '✕';
     del.addEventListener('click', () => {
       cancelNativeAlarm(a.id);
-      saveAlarms(getAlarms().filter((x) => x.id !== a.id));
-      render();
+      // Vía el AlarmManager (no un localStorage.setItem crudo): así también
+      // se borra del store durable (IndexedDB), no solo del espejo — si no,
+      // el generador podía seguir viéndola viva la próxima vez que abriera.
+      alarmManagerInstance.cancel(a.id).then(render);
     });
 
     li.append(badge, body, del);
@@ -480,12 +1147,18 @@ function refreshState() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  wireReminderForm();
+  wireItineraryForm();
+  // Persistencia durable sin bloquear el arranque (mismo patrón que
+  // src/main.js): el espejo localStorage ya deja ver algo mientras tanto.
   refreshState();
-  // Refrescar si otra pestaña guarda/borra una alarma mientras vemos la página.
-  if (typeof BroadcastChannel !== 'undefined') {
-    const ch = new BroadcastChannel('vyneural-alarms');
-    ch.onmessage = () => render();
-  }
+  createDurableStore()
+    .then((store) => {
+      alarmManagerInstance.store = store;
+      return alarmManagerInstance.init();
+    })
+    .then(render)
+    .catch(() => {});
   window.addEventListener('storage', render);
   // Refrescar itinerarios al autenticarse / cambiar de sesión desde la nav.
   document.addEventListener('vyneural:auth', () => loadItineraries());

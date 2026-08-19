@@ -24,7 +24,7 @@ import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js'
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { openFreqModal } from './ui/freq-modal.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
-import { requestPermission, rruleFor } from './notifications.js';
+import { requestPermission } from './notifications.js';
 import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 
 const $ = (id) => document.getElementById(id);
@@ -33,10 +33,10 @@ let pushState = { supported: false, configured: false, public_key: null };
 let savedFreqs = []; // frecuencias guardadas, para armar pasos de itinerario
 let currentAlarms = []; // alarmas, para la vista de horario del itinerario
 let itSteps = []; // pasos del itinerario en construcción
-let itStepDays = new Set(); // días de repetición elegidos para el próximo paso a añadir
+let currentItineraries = []; // últimos itinerarios cargados (para saber qué días ya están ocupados)
 
-// 0=domingo…6=sábado (mismo orden que DAY_LETTERS en rutina.js/notifications.js).
-const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+// 0=domingo…6=sábado (mismo orden que en rutina.js/notifications.js).
+const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
@@ -231,29 +231,23 @@ function fmtDuration(totalSeconds) {
   return m ? `${h} h ${String(m).padStart(2, '0')} min` : `${h} h`;
 }
 
-// Vista de horario de un itinerario: línea de tiempo de sus pasos (con
-// duraciones acumuladas) y las alarmas como anclas de horario.
-// Mismo mapeo que ICS_DAY en notifications.js (JS Date.getDay(): 0=domingo).
-const RRULE_DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-
-function daysFromRepeatRule(rule) {
-  const m = rule && /BYDAY=([A-Z,]+)/.exec(rule);
-  if (!m) return [];
-  return m[1].split(',').map((c) => RRULE_DAY_CODES.indexOf(c)).filter((d) => d >= 0);
-}
-
+// El día de un itinerario ya no se infiere de sus pasos: es un campo propio
+// (it.day_of_week). Acá solo se listan sus pasos en orden, cada uno con su
+// horario si tiene — la repetición semanal (si el itinerario tiene día) o
+// "una vez" (si no) la calcula el backend, ver _derive_repeat_rule.
 function scheduleHTML(it) {
   const items = (it.items || []).slice().sort((a, b) => a.position - b.position);
+  const dayLabel = it.day_of_week != null ? DAY_NAMES[it.day_of_week] : null;
+
   let cursor = 0;
-  const timeline = items.map((item, i) => {
+  const rows = items.map((item, i) => {
     const freq = savedFreqs.find((f) => f.id === item.frequency_id);
     const name = freq ? freq.name : (item.configuration && item.configuration.name) || `Paso ${i + 1}`;
     const dur = item.duration || 0;
     const start = cursor;
     cursor += dur;
-    const days = daysFromRepeatRule(item.repeat_rule);
     const schedule = item.time_of_day
-      ? ` · 🔔 ${item.time_of_day}${days.length ? ` · ${days.map((d) => DAY_LETTERS[d]).join(' ')}` : ' · una vez'}`
+      ? ` · 🔔 ${item.time_of_day}${dayLabel ? ` · cada ${dayLabel}` : ' · una vez'}`
       : '';
     return `<div class="schedule-row">
         <span class="schedule-step">${i + 1}</span>
@@ -277,8 +271,8 @@ function scheduleHTML(it) {
   }).join('');
 
   return `<div class="schedule-timeline">
-      <h4>🧭 Horario de pasos</h4>
-      ${timeline || '<p class="cuenta-empty">Este itinerario no tiene pasos: funciona como aviso de horario.</p>'}
+      <h4>🧭 ${dayLabel ? `Pasos de ${dayLabel}` : 'Horario de pasos'}</h4>
+      ${rows || '<p class="cuenta-empty">Este itinerario no tiene pasos: funciona como aviso de horario.</p>'}
     </div>
     <div class="schedule-alarms">
       <h4>⏰ Alarmas</h4>
@@ -313,15 +307,19 @@ function renderDevices(items) {
 }
 
 function renderItineraries(items) {
+  currentItineraries = items || [];
   renderList(
     'cuenta-itineraries',
     'cuenta-itineraries-empty',
     items,
     (it) => {
       const n = (it.items || []).length;
+      const day = it.day_of_week != null
+        ? `📅 ${DAY_NAMES[it.day_of_week][0].toUpperCase()}${DAY_NAMES[it.day_of_week].slice(1)}`
+        : 'sin día fijo';
       return `<div class="cuenta-item-body">
           <b>${escapeHtml(it.name)}</b>
-          <small>${n} paso${n === 1 ? '' : 's'} · ${it.is_active ? 'activo' : 'en pausa'} · ${escapeHtml(it.timezone || 'UTC')}</small>
+          <small>${day} · ${n} paso${n === 1 ? '' : 's'} · ${it.is_active ? 'activo' : 'en pausa'} · ${escapeHtml(it.timezone || 'UTC')}</small>
         </div>
         <div class="cuenta-item-actions">
           <button type="button" class="cuenta-item-btn" data-act="toggleit" data-id="${escapeHtml(it.id)}">${it.is_active ? 'Pausar' : 'Activar'}</button>
@@ -331,6 +329,7 @@ function renderItineraries(items) {
         <div class="schedule hidden" data-schedule="${escapeHtml(it.id)}">${scheduleHTML(it)}</div>`;
     },
   );
+  populateItineraryDaySelect();
 }
 
 function fmtDate(iso) {
@@ -476,6 +475,16 @@ function renderPush() {
       '✅ Este dispositivo ya está suscrito: las notificaciones llegan incluso con la pestaña cerrada (web/PWA).';
     if (sub) sub.disabled = true;
     if (unsub) unsub.disabled = false;
+    return;
+  }
+  // "denied" es permanente para JS: Notification.requestPermission() ya no
+  // vuelve a mostrar el diálogo. Tocar "Activar" acá fallaría en silencio sin
+  // esto — la única salida es reactivarlo a mano en los ajustes del sitio.
+  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+    text.textContent =
+      'Bloqueaste las notificaciones en este navegador. Para activarlas: tocá el candado 🔒 (o ⓘ) junto a la dirección del sitio → Permisos → Notificaciones → Permitir, y recargá la página.';
+    if (sub) sub.disabled = true;
+    if (unsub) unsub.disabled = true;
     return;
   }
   text.textContent =
@@ -665,17 +674,17 @@ function wireForms() {
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       } catch (_) { /* default */ }
       try {
+        const dayEl = $('itinerary-day');
+        const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
         const items = itSteps.map((s, i) => ({
           frequency_id: s.frequency_id,
           position: i,
           duration: s.duration * 60,
           configuration: s.time_of_day ? { notification_enabled: s.notification_enabled !== false } : {},
           time_of_day: s.time_of_day || undefined,
-          repeat_rule: s.time_of_day ? rruleFor(s.days) || undefined : undefined,
         }));
-        await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, items });
+        await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, day_of_week, items });
         itSteps = [];
-        itStepDays.clear();
         renderItSteps();
         itForm.reset();
         const details = itForm.closest('details');
@@ -776,10 +785,9 @@ function renderItSteps() {
     const li = document.createElement('li');
     li.className = 'cuenta-item';
     const bell = step.notification_enabled === false ? '🔕' : '🔔';
-    const days = step.days && step.days.length
-      ? ` · ${bell} ${[...step.days].sort((a, b) => a - b).map((d) => DAY_LETTERS[d]).join(' ')}`
-      : step.time_of_day ? ` · ${bell} una vez` : '';
-    const schedule = step.time_of_day ? `${step.time_of_day}${days}` : '';
+    // El día ya no se elige por paso: sale del itinerario. Acá solo se ve el
+    // horario (la repetición semanal depende del día que se elija arriba).
+    const schedule = step.time_of_day ? `${step.time_of_day} · ${bell}` : '';
     li.innerHTML = `<div class="cuenta-item-body">
         <b>${i + 1}. ${escapeHtml(step.name)}</b>
         <small>${step.duration} min${schedule ? ` · ${escapeHtml(schedule)}` : ''}</small>
@@ -789,16 +797,16 @@ function renderItSteps() {
   });
 }
 
-function wireItineraryDays() {
-  const wrap = $('it-step-days');
-  if (!wrap) return;
-  wrap.addEventListener('click', (e) => {
-    const btn = e.target.closest('.day-chip');
-    if (!btn) return;
-    const day = Number(btn.dataset.day);
-    if (itStepDays.has(day)) itStepDays.delete(day);
-    else itStepDays.add(day);
-    btn.classList.toggle('active', itStepDays.has(day));
+// Deshabilita en el <select> los días que ya tiene ocupados OTRO itinerario
+// del usuario (no se puede repetir día) — validación honesta antes de que el
+// backend la rechace con 409.
+function populateItineraryDaySelect() {
+  const sel = $('itinerary-day');
+  if (!sel) return;
+  const taken = new Set(currentItineraries.filter((it) => it.day_of_week != null).map((it) => it.day_of_week));
+  Array.from(sel.options).forEach((opt) => {
+    if (opt.value === '') return;
+    opt.disabled = taken.has(Number(opt.value));
   });
 }
 
@@ -834,14 +842,179 @@ function toggleStepNotifyWrap() {
   if (wrap) wrap.classList.toggle('hidden', !(timeEl && timeEl.value));
 }
 
+// ── Panel "Personalizar" de un paso: mismos ajustes que el generador ───────
+// (portadora/ritmo con sliders + forma de onda), en vez del modal simple.
+// Guarda una Frequency nueva (igual que el modal) y la deja seleccionada.
+const IT_CUSTOM_WAVES = [
+  { id: 'sine', label: 'Senoidal' },
+  { id: 'triangle', label: 'Triangular' },
+  { id: 'square', label: 'Cuadrada' },
+  { id: 'sawtooth', label: 'Diente de sierra' },
+];
+let itCustomWave = 'sine';
+
+// Mismas referencias que "Portadora" en el generador (src/main.js CARRIER_BASE):
+// acá son solo un atajo para poner el slider en un valor conocido, no la
+// familia de afinación completa (esa reescala el beat de un estado preset;
+// acá ya estamos en modo "portadora + ritmo a mano").
+const IT_CUSTOM_CARRIERS = [
+  { hz: 432, label: '432 Hz · Estándar' },
+  { hz: 220, label: '220 Hz · Estándar impuesto' },
+  { hz: 528, label: '528 Hz · Solfeggio' },
+  { hz: 963, label: '963 Hz · Solfeggio divino' },
+  { hz: 136.1, label: '136.1 Hz · Ancestral' },
+  { hz: 194.7, label: '194.7 Hz · Schumann' },
+];
+
+// Mismas 5 condiciones que "Condición experimental" en el generador — el
+// modelo Frequency.condition ya soporta esto, solo faltaba elegirlo acá.
+const IT_CUSTOM_CONDITIONS = [
+  { id: 'binaural', label: 'Binaural' },
+  { id: 'pure-tone', label: 'Tono puro' },
+  { id: 'noise', label: 'Ruido' },
+  { id: 'amplitude-modulation', label: 'AM' },
+  { id: 'none', label: 'Sin estímulo' },
+];
+let itCustomCondition = 'binaural';
+
+function populateItCustomWaveOptions() {
+  const wrap = $('it-custom-wave-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_WAVES.map(
+    (w) => `<button type="button" class="wave-btn${w.id === itCustomWave ? ' active' : ''}" data-wave="${w.id}">${escapeHtml(w.label)}</button>`,
+  ).join('');
+}
+
+function syncItCustomWaveButtons() {
+  document.querySelectorAll('#it-custom-wave-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.wave === itCustomWave);
+  });
+}
+
+function populateItCustomCarrierOptions() {
+  const wrap = $('it-custom-carrier-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_CARRIERS.map(
+    (c) => `<button type="button" class="wave-btn" data-hz="${c.hz}">${escapeHtml(c.label)}</button>`,
+  ).join('');
+}
+
+function populateItCustomCondOptions() {
+  const wrap = $('it-custom-cond-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_CONDITIONS.map(
+    (c) => `<button type="button" class="wave-btn${c.id === itCustomCondition ? ' active' : ''}" data-cond="${c.id}">${escapeHtml(c.label)}</button>`,
+  ).join('');
+}
+
+function syncItCustomCondButtons() {
+  document.querySelectorAll('#it-custom-cond-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.cond === itCustomCondition);
+  });
+}
+
+function updateItCustomLabels() {
+  const base = $('it-custom-base');
+  const beat = $('it-custom-beat');
+  const baseLabel = $('it-custom-base-label');
+  const beatLabel = $('it-custom-beat-label');
+  if (base && baseLabel) baseLabel.textContent = `Portadora: ${base.value} Hz`;
+  if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
+}
+
+function setItCustomNote(msg, isError) {
+  const noteEl = $('it-custom-save-note');
+  if (!noteEl) return;
+  noteEl.textContent = msg;
+  noteEl.classList.toggle('hidden', !msg);
+  noteEl.classList.toggle('custom-save-note-error', !!isError);
+}
+
+function wireItCustomPanel() {
+  const toggle = $('it-step-custom');
+  const panel = $('it-custom-panel');
+  if (!toggle || !panel) return;
+  populateItCustomWaveOptions();
+  populateItCustomCarrierOptions();
+  populateItCustomCondOptions();
+  const baseEl = $('it-custom-base');
+  const beatEl = $('it-custom-beat');
+  if (baseEl) baseEl.addEventListener('input', updateItCustomLabels);
+  if (beatEl) beatEl.addEventListener('input', updateItCustomLabels);
+  const waveWrap = $('it-custom-wave-options');
+  if (waveWrap) {
+    waveWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn) return;
+      itCustomWave = btn.dataset.wave;
+      syncItCustomWaveButtons();
+    });
+  }
+  const carrierWrap = $('it-custom-carrier-options');
+  if (carrierWrap) {
+    // Atajo, no un toggle: pone el slider en ese valor y lo dejás ajustar
+    // desde ahí (por eso no queda "active" ninguno de estos botones).
+    carrierWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn || !baseEl) return;
+      baseEl.value = btn.dataset.hz;
+      updateItCustomLabels();
+    });
+  }
+  const condWrap = $('it-custom-cond-options');
+  if (condWrap) {
+    condWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn) return;
+      itCustomCondition = btn.dataset.cond;
+      syncItCustomCondButtons();
+    });
+  }
+  toggle.addEventListener('click', () => {
+    const willOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !willOpen);
+    toggle.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) updateItCustomLabels();
+  });
+  const saveBtn = $('it-custom-save');
+  const nameEl = $('it-custom-save-name');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      setItCustomNote('Guardando…');
+      try {
+        const carrier = (baseEl && parseFloat(baseEl.value)) || 220;
+        const beat = (beatEl && parseFloat(beatEl.value)) || 10;
+        const name = (nameEl && nameEl.value.trim()) || 'Personalizada';
+        const frequency = await createFrequency({
+          name: name.slice(0, 120),
+          carrier_frequency: Math.round(carrier * 10) / 10,
+          beat_frequency: Math.round(beat * 10) / 10,
+          waveform: itCustomWave,
+          condition: itCustomCondition,
+          config: { source: 'itinerary' },
+        });
+        if (nameEl) nameEl.value = '';
+        setItCustomNote('✅ Lista — seleccionada para este paso.');
+        panel.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', 'false');
+        // Mismo evento que dispara el modal compartido: recarga la lista de
+        // frecuencias y preselecciona esta en el desplegable del paso.
+        document.dispatchEvent(new CustomEvent('vyneural:freq-saved', { detail: { frequency } }));
+      } catch (err) {
+        setItCustomNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
 function wireItinerarySteps() {
   const add = $('it-step-add');
-  const custom = $('it-step-custom');
   const timeEl = $('it-step-time');
   if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
-  if (custom) {
-    custom.addEventListener('click', () => openFreqModal({ source: 'itinerary' }));
-  }
+  wireItCustomPanel();
   if (!add) return;
   add.addEventListener('click', async () => {
     const sel = $('it-step-freq');
@@ -854,13 +1027,11 @@ function wireItinerarySteps() {
       if (!freq) return;
       const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
       const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
-      const days = time_of_day ? [...itStepDays] : [];
       itSteps.push({
         frequency_id: freq.id,
         name: freq.name || 'Frecuencia',
         duration,
         time_of_day,
-        days,
         notification_enabled: notifyEl ? notifyEl.checked : true,
       });
       renderItSteps();
@@ -868,8 +1039,6 @@ function wireItinerarySteps() {
       // frecuencia/duración se dejan como estaban: es común encadenar pasos
       // parecidos, pero el horario es específico de cada uno).
       if (timeEl) timeEl.value = '';
-      itStepDays.clear();
-      document.querySelectorAll('#it-step-days .day-chip.active').forEach((b) => b.classList.remove('active'));
       if (notifyEl) notifyEl.checked = true;
       toggleStepNotifyWrap();
     } catch (err) {
@@ -991,7 +1160,6 @@ function init() {
   wireVerify();
   wirePasswordForm();
   wireItinerarySteps();
-  wireItineraryDays();
 
   // Estado de sincronización en vivo.
   const syncEl = $('cuenta-sync-status');

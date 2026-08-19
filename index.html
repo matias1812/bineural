@@ -178,10 +178,15 @@
           <div id="custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
           </div>
           <div class="custom-save-wrap">
-            <button type="button" class="freq-save-btn" id="custom-save-freq" title="Guardar esta frecuencia en tu cuenta">
-              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
-              Guardar esta frecuencia
-            </button>
+            <label class="custom-save-name-label" for="custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
+            <div class="custom-save-row">
+              <input type="text" id="custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
+              <button type="button" class="freq-save-btn" id="custom-save-freq" title="Guardar esta frecuencia en tu cuenta">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+                Guardar
+              </button>
+            </div>
+            <p class="custom-save-note hidden" id="custom-save-note" role="status"></p>
           </div>
         </div>
       </section>
@@ -353,8 +358,8 @@
         </div>
       </section>
 
-      <section class="info" id="como-funciona">
-        <h3>¿Cómo funciona Vyneural?</h3>
+      <details class="info" id="como-funciona">
+        <summary class="info-summary">¿Cómo funciona Vyneural?</summary>
         <ol class="how-steps">
           <li><span class="hs-num">1</span><p><b>Cada oído recibe una frecuencia</b> ligeramente diferente.</p></li>
           <li><span class="hs-num">2</span><p><b>El cerebro percibe la diferencia</b> entre ambas como un latido suave.</p></li>
@@ -427,7 +432,7 @@
             <li>📚 Fuentes: <a href="/que-son-las-ondas-binaurales">qué son las ondas binaurales</a> · <a href="https://en.wikipedia.org/wiki/Binaural_beats" target="_blank" rel="noopener noreferrer">binaural beats (Wikipedia)</a></li>
           </ul>
         </div>
-      </section>
+      </details>
 
       <section class="final-cta">
         <h2>¿Listo para tu primera sesión?</h2>
