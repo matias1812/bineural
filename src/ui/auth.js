@@ -737,6 +737,10 @@ async function syncPushState() {
     return;
   }
   if (Notification.permission !== 'default' || pushBannerDismissed()) return;
+  // /cuenta ya tiene su propio panel dedicado ("🔔 Notificaciones push") con
+  // el mismo botón "Activar" — mostrar el banner flotante ahí es redundante
+  // (y en mobile se pisa con el FAB de reportar bug).
+  if (typeof location !== 'undefined' && location.pathname.replace(/\/+$/, '') === '/cuenta') return;
   try {
     const status = await pushStatus();
     if (!status || !status.configured) return; // backend sin VAPID: nada que ofrecer

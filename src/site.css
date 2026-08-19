@@ -3626,7 +3626,8 @@ html:not(.in-app) .in-app-only {
   .push-banner {
     left: 12px;
     right: 12px;
-    bottom: 12px;
+    /* deja libre el círculo de .bug-fab (54px + 20px de margen inferior) */
+    bottom: 82px;
     transform: none;
     max-width: none;
   }
