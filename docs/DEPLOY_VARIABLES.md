@@ -60,7 +60,7 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `VAPID_PUBLIC_KEY` | generada con `py -m app.push.keys` (o la del `.env` local) |
 | `VAPID_PRIVATE_KEY` | ídem (secreta) |
 | `VAPID_SUBJECT` | `mailto:matias.torres1812@gmail.com` |
-| `CORS_ORIGINS` | `https://vyneural-six.vercel.app,https://vyneural.cl` |
+| `CORS_ORIGINS` | `https://vyneural-six.vercel.app,https://vyneural.cl,https://www.vyneural.cl` |
 | `ENVIRONMENT` | `production` |
 | `LOG_LEVEL` | `INFO` |
 
