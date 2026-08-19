@@ -1,6 +1,7 @@
 node_modules
 dist
 .freebuff
+emu.log
 
 .vercel
 .env*
