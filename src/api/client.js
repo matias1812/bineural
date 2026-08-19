@@ -189,11 +189,20 @@ async function performFetch(path, { method = 'GET', headers, body } = {}) {
 }
 
 // Refresh único compartido: varias peticiones 401 no lanzan refreshes paralelos.
+// Devuelve { ok, network }: `network:true` distingue "no pudimos ni preguntar
+// si el refresh token sirve" (backend caído/dormido — Render free tira cold
+// starts de 20-50s, ver .github/workflows/keep-alive.yml) de "el servidor
+// contestó que el token NO sirve". Antes ambos casos devolvían `false` por
+// igual y request() limpiaba la sesión en los dos — un cold start (que
+// coincide justo con el escenario más común: el usuario vuelve después de
+// los 15 min que dura el access token, así que el backend probablemente se
+// durmió mientras tanto) bastaba para desloguear a alguien con un refresh
+// token de 30 días perfectamente válido.
 function tryRefresh() {
   if (refreshPromise) return refreshPromise;
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
-    refreshPromise = Promise.resolve(false);
+    refreshPromise = Promise.resolve({ ok: false, network: false });
   } else {
     refreshPromise = performFetch('/api/v1/auth/refresh', {
       method: 'POST',
@@ -201,17 +210,17 @@ function tryRefresh() {
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
       .then((res) => {
-        if (res.status < 200 || res.status >= 300) return false;
+        if (res.status < 200 || res.status >= 300) return { ok: false, network: false };
         try {
           const j = res.text ? JSON.parse(res.text) : null;
-          if (!j || !j.access_token) return false;
+          if (!j || !j.access_token) return { ok: false, network: false };
           storeSession(j);
-          return true;
+          return { ok: true, network: false };
         } catch (_) {
-          return false;
+          return { ok: false, network: false };
         }
       })
-      .catch(() => false);
+      .catch(() => ({ ok: false, network: true }));
   }
   return refreshPromise.finally(() => {
     refreshPromise = null;
@@ -230,14 +239,22 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
   }
 
   if (res.status === 401 && retry) {
-    const ok = await tryRefresh();
+    const { ok, network } = await tryRefresh();
     if (ok) return request(path, { method, body, retry: false });
+    if (network) {
+      // No pudimos ni preguntar (backend caído/dormido): el refresh token
+      // sigue guardado tal cual — NO es una sesión inválida, es que ahora
+      // mismo no hay forma de confirmarla. El próximo request (cuando el
+      // backend responda) puede refrescar normal, sin haber perdido nada.
+      throw new ApiError(0, 'sin conexión con el servidor', 'NETWORK');
+    }
     clearSession();
-    // Confirmado (no solo "sin token": el refresh también falló): avisar a
-    // TODA página, no solo a la que hizo este fetch — antes cada página
-    // tenía que acordarse de llamar expireSession() por su cuenta (/cuenta
-    // lo hacía, /rutina y el generador no), y el chip de la nav quedaba
-    // mostrando la sesión vieja hasta el próximo reload.
+    // Confirmado (no solo "sin token": el refresh también falló porque el
+    // SERVIDOR dijo que el token no sirve): avisar a TODA página, no solo a
+    // la que hizo este fetch — antes cada página tenía que acordarse de
+    // llamar expireSession() por su cuenta (/cuenta lo hacía, /rutina y el
+    // generador no), y el chip de la nav quedaba mostrando la sesión vieja
+    // hasta el próximo reload.
     try {
       if (typeof document !== 'undefined') {
         document.dispatchEvent(new CustomEvent('vyneural:session-expired'));

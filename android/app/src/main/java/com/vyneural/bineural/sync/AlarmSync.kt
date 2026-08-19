@@ -210,28 +210,49 @@ object AlarmSync {
      *  de inmediato en vez de seguir pegándole al backend cada 5 min. */
     private fun shouldRetryWithRefresh(context: Context): Boolean {
         if (LifecycleManager.state == "FOREGROUND") return false
-        if (refreshAccessToken(context)) return true
-        BineuralLog.e("alarmsync", "refresh falló: sesión muerta, limpiando estado nativo")
-        AuthStore.clear(context)
-        clearSynced(context)
-        return false
+        when (refreshAccessToken(context)) {
+            RefreshOutcome.OK -> return true
+            RefreshOutcome.NETWORK_FAILURE -> {
+                // No pudimos ni preguntar (backend caído/dormido — Render free
+                // tira cold starts de 20-50s, y este ciclo corre cada 5 min sin
+                // que el usuario esté mirando, así que es MUY probable pegarle
+                // al backend recién despertando). El refresh token de 30 días
+                // sigue guardado tal cual: el próximo ciclo reintenta solo.
+                BineuralLog.d("alarmsync", "refresh: fallo de red, sesión intacta, reintenta en el próximo ciclo")
+                return false
+            }
+            RefreshOutcome.REJECTED -> {
+                // El servidor contestó que el refresh token NO sirve de verdad
+                // (vencido/revocado): ahí sí la sesión está muerta.
+                BineuralLog.e("alarmsync", "refresh: token rechazado por el servidor, limpiando estado nativo")
+                AuthStore.clear(context)
+                clearSynced(context)
+                return false
+            }
+        }
     }
 
-    private fun refreshAccessToken(context: Context): Boolean {
-        val refreshToken = AuthStore.refreshToken(context) ?: return false
+    private enum class RefreshOutcome { OK, NETWORK_FAILURE, REJECTED }
+
+    private fun refreshAccessToken(context: Context): RefreshOutcome {
+        val refreshToken = AuthStore.refreshToken(context) ?: return RefreshOutcome.REJECTED
         val body = JSONObject().put("refresh_token", refreshToken)
         val result = httpPost("${BuildConfig.API_BASE}/api/v1/auth/refresh", body)
-        if (result.code !in 200..299 || result.body == null) return false
+        // code == -1 es httpPost's propio marcador de fallo de red/timeout (ver
+        // HttpResult más abajo) — cualquier código HTTP real (incluido 401) es
+        // un rechazo explícito del servidor, no un problema de conectividad.
+        if (result.code == -1) return RefreshOutcome.NETWORK_FAILURE
+        if (result.code !in 200..299 || result.body == null) return RefreshOutcome.REJECTED
         return try {
             val json = JSONObject(result.body)
-            val newAccess = json.optString("access_token", null) ?: return false
-            val newRefresh = json.optString("refresh_token", null) ?: return false
+            val newAccess = json.optString("access_token", null) ?: return RefreshOutcome.REJECTED
+            val newRefresh = json.optString("refresh_token", null) ?: return RefreshOutcome.REJECTED
             AuthStore.saveTokens(context, newAccess, newRefresh)
             BineuralLog.d("alarmsync", "access token refrescado en background")
-            true
+            RefreshOutcome.OK
         } catch (e: Exception) {
             BineuralLog.e("alarmsync", "refresh: respuesta inválida", e)
-            false
+            RefreshOutcome.REJECTED
         }
     }
 
