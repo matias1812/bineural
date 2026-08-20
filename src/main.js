@@ -2185,7 +2185,12 @@ let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  if (installBanner && !lsGet('ob-install-v1', null)) installBanner.classList.remove('hidden');
+  // Dentro de la APK ya instalada "Instalá Vyneural" no tiene sentido —
+  // el WebView nativo no debería disparar beforeinstallprompt, pero si
+  // algún Chromium de fábrica lo hace igual, no mostrar el banner ahí.
+  if (installBanner && !nativeBridge.present && !lsGet('ob-install-v1', null)) {
+    installBanner.classList.remove('hidden');
+  }
 });
 if (installBtn) {
   installBtn.addEventListener('click', async () => {
