@@ -486,7 +486,10 @@ function populateItineraryDaySelect() {
 }
 
 // ── Panel "Personalizar" de un paso: mismos ajustes que el generador
-// (portadora/ritmo con sliders + forma de onda + condición experimental).
+// (portada/ritmo con sliders + forma de onda + condición experimental).
+// Vocabulario: "portada" = la frecuencia base (preset o libre, en Hz);
+// "portadoras" = los tonos de afinación fijos (solfeggios/estándares —
+// 432/528/963/136.1/194.7 Hz), que solo fijan un valor concreto de portada.
 const IT_CUSTOM_WAVES = [
   { id: 'sine', label: 'Senoidal' },
   { id: 'triangle', label: 'Triangular' },
@@ -504,7 +507,7 @@ const IT_CUSTOM_CARRIERS = [
   { hz: 194.7, label: '194.7 Hz · Schumann' },
 ];
 
-// La portadora va de 20 a 19999 Hz (todo el rango audible, a pedido) — pero
+// La portada va de 20 a 19999 Hz (todo el rango audible, a pedido) — pero
 // un slider LINEAL en un rango así es inservible: cada pixel de arrastre
 // mueve cientos de Hz y es imposible afinar cerca de los valores que de
 // verdad se usan (100-1000 Hz). El <input type="range"> ahora es una
@@ -548,7 +551,7 @@ let itCustomCondition = 'binaural';
 
 // La condición experimental NO se agrega acá a propósito: el generador
 // todavía no la usa para nada en la reproducción (ver audio-provider.js) —
-// guardarla sería un dato muerto. Ambiente y portadora SÍ se escuchan de
+// guardarla sería un dato muerto. Ambiente y portada SÍ se escuchan de
 // verdad, por eso se guardan y viajan con la frecuencia.
 const IT_CUSTOM_AMBIENTS = [
   { id: 'lluvia', label: '🌧️ Lluvia' },
@@ -614,7 +617,7 @@ function updateItCustomLabels() {
   const beat = document.getElementById('it-custom-beat');
   const baseLabel = document.getElementById('it-custom-base-label');
   const beatLabel = document.getElementById('it-custom-beat-label');
-  if (baseLabel) baseLabel.textContent = `Portadora: ${formatHzShort(itCustomCarrierHz)}`;
+  if (baseLabel) baseLabel.textContent = `Portada: ${formatHzShort(itCustomCarrierHz)}`;
   if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
 }
 
@@ -629,10 +632,10 @@ function setItCustomNote(msg, isError) {
 // Antes de abrir "Personalizar", carga la personalización con lo que YA
 // está elegido en el select (en vez de arrancar siempre desde los defaults
 // del HTML: 220 Hz / 10 Hz / senoidal / sin ambiente). Dos casos:
-//  - "p:<id>" (predefinida): la portadora arranca en el valor propio del
+//  - "p:<id>" (predefinida): la portada arranca en el valor propio del
 //    preset (uno de los predeterminados con sentido, no un default genérico)
 //    — el ritmo/beat es lo que en general se ajusta para afinar la sesión.
-//  - "f:<uuid>" (ya guardada): carga TODO lo suyo — portadora, ritmo, onda,
+//  - "f:<uuid>" (ya guardada): carga TODO lo suyo — portada, ritmo, onda,
 //    condición, ambiente y nombre — para editar/afinar sobre lo guardado,
 //    no perderlo y volver a empezar de cero.
 function prefillItCustomFromSelection() {
