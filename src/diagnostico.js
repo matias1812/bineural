@@ -426,7 +426,7 @@ function updatePlatformUI() {
     badge.classList.remove('hidden', 'web');
     badge.classList.add('pwa');
   } else {
-    badge.textContent = 'WEB';
+    badge.textContent = '.cl';
     badge.classList.remove('hidden', 'pwa');
     badge.classList.add('web');
   }

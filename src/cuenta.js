@@ -1140,6 +1140,13 @@ function wirePasswordForm() {
 function init() {
   renderGate();
 
+  // Enlace directo desde el menú de cuenta (⋯ → Permisos, ver src/ui/auth.js):
+  // sin esto, "Permisos" y "Mi cuenta" llevaban exactamente al mismo lugar
+  // sin indicar dónde mirar.
+  if (window.location.hash === '#push') {
+    document.getElementById('cuenta-push-status')?.closest('.page-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   const recoverLogin = $('cuenta-recover-login');
   if (recoverLogin) {
     recoverLogin.addEventListener('click', () => {

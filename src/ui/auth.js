@@ -154,6 +154,22 @@ function renderNav() {
   });
   menu.appendChild(cuenta);
 
+  const permisos = document.createElement('button');
+  permisos.type = 'button';
+  permisos.className = 'auth-menu-item';
+  permisos.setAttribute('role', 'menuitem');
+  permisos.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Permisos</span>`;
+  permisos.addEventListener('click', () => {
+    closeMenu();
+    const here = window.location.pathname.replace(/\/+$/, '');
+    if (here.endsWith('/cuenta')) {
+      document.getElementById('cuenta-push-status')?.closest('.page-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    window.location.href = '/cuenta#push';
+  });
+  menu.appendChild(permisos);
+
   const salir = document.createElement('button');
   salir.type = 'button';
   salir.className = 'auth-menu-item auth-menu-danger';

@@ -98,7 +98,7 @@ function updatePlatformBadge() {
     badge.textContent = 'PWA';
     badge.classList.add('pwa');
   } else {
-    badge.textContent = 'WEB';
+    badge.textContent = '.cl';
     badge.classList.add('web');
   }
 }
