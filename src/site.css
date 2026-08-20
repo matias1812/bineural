@@ -311,7 +311,7 @@ a:hover {
   color: var(--text);
 }
 
-.page-body ul,
+.page-body ul:not(.rutina-list),
 .page-body ol {
   margin: 0 0 18px 22px;
   color: #c6cbe6;
