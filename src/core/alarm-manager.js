@@ -180,7 +180,13 @@ export class AlarmManager {
         const legacy = JSON.parse(localStorage.getItem(this.mirrorKey) || '[]');
         if (Array.isArray(legacy)) {
           for (const a of legacy) {
-            if (a && a.id && a.nextAt && a.nextAt > this.now()) {
+            // No filtramos por "todavía en el futuro": una alarma ya vencida
+            // pero dentro de graceMs debe seguir viva para que el tick
+            // inmediato la dispare (onFire). Filtrarla acá la borraba en
+            // silencio antes de que el scheduler llegara a verla — el
+            // recordatorio pendiente desaparecía sin avisar al reabrir la app.
+            // _expireOverdue() ya se encarga de descartar lo realmente viejo.
+            if (a && a.id && a.nextAt) {
               this.alarms.set(a.id, { ...a, state: ALARM_STATES.SCHEDULED });
             }
           }
