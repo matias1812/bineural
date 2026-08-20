@@ -1,1 +1,0 @@
-import{x as a,d as t,B as r,y as s}from"./site-CDQm-AOx.js";const o=()=>a("/api/v1/itineraries"),c=e=>s("/api/v1/itineraries",e),p=e=>t(`/api/v1/itineraries/${e}`),d=e=>r(`/api/v1/itineraries/${e}/toggle`),l=(e,i)=>r(`/api/v1/itineraries/${e}/reorder`,{order:i});export{c,p as d,o as l,l as r,d as t};

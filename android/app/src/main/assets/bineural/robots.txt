@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://vyneural-six.vercel.app/sitemap.xml
+Sitemap: https://www.vyneural.cl/sitemap.xml

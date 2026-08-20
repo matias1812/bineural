@@ -15,6 +15,9 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
+    <!-- Verificación de propiedad en Google Search Console — NO quitar aunque
+         la verificación ya se haya completado (Google la revalida). -->
+    <meta name="google-site-verification" content="1ktGe1ziryaY1uZVaY9tRwl8IjyG6hSu7cBgMlk9ZmI" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" />
@@ -22,7 +25,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Vyneural" />
-    <link rel="canonical" href="https://vyneural-six.vercel.app/" />
+    <link rel="canonical" href="https://www.vyneural.cl/" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
@@ -32,8 +35,8 @@
       property="og:description"
       content="Genera ondas binaurales gratis en tu navegador: meditación, sueño, relajación y concentración. Todo en tiempo real con la Web Audio API."
     />
-    <meta property="og:url" content="https://vyneural-six.vercel.app/" />
-    <meta property="og:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta property="og:url" content="https://www.vyneural.cl/" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="es_ES" />
@@ -45,7 +48,7 @@
       name="twitter:description"
       content="Genera ondas binaurales gratis en tu navegador: meditación, sueño, relajación y concentración."
     />
-    <meta name="twitter:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
 
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
@@ -56,7 +59,7 @@
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "Vyneural",
-        "url": "https://vyneural-six.vercel.app/",
+        "url": "https://www.vyneural.cl/",
         "description": "Generador gratuito de ondas binaurales para meditación, sueño, relajación y concentración, con sonidos de ambiente en tiempo real —lluvia, río, bosque, pájaros, océano y fuego— generados en el navegador.",
         "applicationCategory": "HealthApplication",
         "operatingSystem": "Any",
@@ -65,14 +68,16 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" src="./assets/main-CWMX2Z1d.js"></script>
-    <link rel="modulepreload" href="./assets/site-CDQm-AOx.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DHdNxLHU.js">
-    <link rel="modulepreload" href="./assets/freq-modal-Z9bs3xhp.js">
+    <script type="module" src="./assets/main-C1XbKXhU.js"></script>
+    <link rel="modulepreload" href="./assets/site-C_bEqRF-.js">
+    <link rel="modulepreload" href="./assets/alarms-VOeojMDQ.js">
     <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
-    <link rel="modulepreload" href="./assets/capabilities-D1xo3vqC.js">
-    <link rel="stylesheet" href="./assets/site-CHleZ_PQ.css">
-    <link rel="stylesheet" href="./assets/main-DH-PjnVE.css">
+    <link rel="modulepreload" href="./assets/alarm-manager-Bb-n1NcZ.js">
+    <link rel="modulepreload" href="./assets/native-bridge-BVY3Ub9D.js">
+    <link rel="modulepreload" href="./assets/capabilities-CxVrsE9A.js">
+    <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
+    <link rel="stylesheet" href="./assets/site-DzDrNjqa.css">
+    <link rel="stylesheet" href="./assets/main-CcPBiLYw.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -186,10 +191,15 @@
           <div id="custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
           </div>
           <div class="custom-save-wrap">
-            <button type="button" class="freq-save-btn" id="custom-save-freq" title="Guardar esta frecuencia en tu cuenta">
-              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
-              Guardar esta frecuencia
-            </button>
+            <label class="custom-save-name-label" for="custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
+            <div class="custom-save-row">
+              <input type="text" id="custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
+              <button type="button" class="freq-save-btn" id="custom-save-freq" title="Guardar esta frecuencia en tu cuenta">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+                Guardar
+              </button>
+            </div>
+            <p class="custom-save-note hidden" id="custom-save-note" role="status"></p>
           </div>
         </div>
       </section>
@@ -361,8 +371,8 @@
         </div>
       </section>
 
-      <section class="info" id="como-funciona">
-        <h3>¿Cómo funciona Vyneural?</h3>
+      <details class="info" id="como-funciona">
+        <summary class="info-summary">¿Cómo funciona Vyneural?</summary>
         <ol class="how-steps">
           <li><span class="hs-num">1</span><p><b>Cada oído recibe una frecuencia</b> ligeramente diferente.</p></li>
           <li><span class="hs-num">2</span><p><b>El cerebro percibe la diferencia</b> entre ambas como un latido suave.</p></li>
@@ -435,7 +445,7 @@
             <li>📚 Fuentes: <a href="/que-son-las-ondas-binaurales">qué son las ondas binaurales</a> · <a href="https://en.wikipedia.org/wiki/Binaural_beats" target="_blank" rel="noopener noreferrer">binaural beats (Wikipedia)</a></li>
           </ul>
         </div>
-      </section>
+      </details>
 
       <section class="final-cta">
         <h2>¿Listo para tu primera sesión?</h2>

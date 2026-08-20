@@ -11,7 +11,7 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="canonical" href="https://vyneural-six.vercel.app/cuenta" />
+    <link rel="canonical" href="https://www.vyneural.cl/cuenta" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Vyneural" />
@@ -20,8 +20,8 @@
       property="og:description"
       content="Perfil, favoritos sincronizados, alarmas e itinerarios de tu cuenta Vyneural."
     />
-    <meta property="og:url" content="https://vyneural-six.vercel.app/cuenta" />
-    <meta property="og:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta property="og:url" content="https://www.vyneural.cl/cuenta" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="es_ES" />
@@ -32,7 +32,7 @@
       name="twitter:description"
       content="Tus datos, favoritos y rutinas sincronizados en Vyneural."
     />
-    <meta name="twitter:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
 
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
@@ -45,17 +45,17 @@
         "name": "Mi cuenta de Vyneural",
         "description": "Perfil, favoritos sincronizados, alarmas e itinerarios de la cuenta de Vyneural.",
         "inLanguage": "es",
-        "url": "https://vyneural-six.vercel.app/cuenta",
-        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://vyneural-six.vercel.app/" }
+        "url": "https://www.vyneural.cl/cuenta",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-CKVqI8iD.js"></script>
-    <link rel="modulepreload" href="./assets/site-CDQm-AOx.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DHdNxLHU.js">
-    <link rel="modulepreload" href="./assets/freq-modal-Z9bs3xhp.js">
-    <link rel="modulepreload" href="./assets/itineraries-5MUdCsiH.js">
+    <script type="module" src="./assets/cuenta-D1j7z9Fl.js"></script>
+    <link rel="modulepreload" href="./assets/site-C_bEqRF-.js">
+    <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
+    <link rel="modulepreload" href="./assets/alarms-VOeojMDQ.js">
+    <link rel="modulepreload" href="./assets/freq-cover-C0iNcOsL.js">
     <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
-    <link rel="stylesheet" href="./assets/site-CHleZ_PQ.css">
+    <link rel="stylesheet" href="./assets/site-DzDrNjqa.css">
   </head>
   <body>
     <header class="site-nav">
@@ -154,79 +154,111 @@
             </div>
           </div>
 
-          <div class="card-grid">
-            <div class="page-card">
-              <h3>⏰ Mis alarmas</h3>
-              <ul class="cuenta-list" id="cuenta-alarms"></ul>
-              <p class="cuenta-empty" id="cuenta-alarms-empty">
-                Sin alarmas sincronizadas. Las alarmas de la web/PWA son datos: la
-                ejecución siempre depende del cliente.
-              </p>
-            </div>
+          <div class="page-card">
+            <h3>⏰ Mis alarmas</h3>
+            <ul class="cuenta-list" id="cuenta-alarms"></ul>
+            <p class="cuenta-empty" id="cuenta-alarms-empty">
+              Sin alarmas sincronizadas. Las alarmas de la web/PWA son datos: la
+              ejecución siempre depende del cliente.
+            </p>
+          </div>
 
-            <div class="page-card">
-              <h3>🗺️ Mis itinerarios</h3>
-              <ul class="cuenta-list" id="cuenta-itineraries"></ul>
-              <p class="cuenta-empty" id="cuenta-itineraries-empty">Sin itinerarios creados.</p>
-              <details class="cuenta-create">
-                <summary>＋ Crear itinerario</summary>
-                <form id="itinerary-form" class="cuenta-form">
-                  <label>Nombre
-                    <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
-                  </label>
-                  <label>Descripción <em>(opcional)</em>
-                    <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
-                  </label>
-                  <fieldset class="cuenta-steps">
-                    <legend>Pasos — frecuencias en secuencia <em>(opcional)</em></legend>
-                    <div class="cuenta-form-row">
-                      <label>Frecuencia
-                        <span class="it-step-freq-row">
-                          <select id="it-step-freq"></select>
-                          <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom">🎨 Personalizar</button>
-                        </span>
-                      </label>
-                      <label>Duración (min)
-                        <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
-                      </label>
-                    </div>
-                    <div class="cuenta-form-row">
-                      <label>Horario <em>(opcional)</em>
-                        <input id="it-step-time" type="time" />
-                      </label>
-                      <div class="it-step-days-wrap">
-                        <span class="it-step-days-label">Repetir</span>
-                        <div class="it-step-days" id="it-step-days" role="group" aria-label="Días de repetición del recordatorio">
-                          <button type="button" class="day-chip" data-day="1">L</button>
-                          <button type="button" class="day-chip" data-day="2">M</button>
-                          <button type="button" class="day-chip" data-day="3">X</button>
-                          <button type="button" class="day-chip" data-day="4">J</button>
-                          <button type="button" class="day-chip" data-day="5">V</button>
-                          <button type="button" class="day-chip" data-day="6">S</button>
-                          <button type="button" class="day-chip" data-day="0">D</button>
-                        </div>
-                      </div>
-                    </div>
-                    <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
-                      <input type="checkbox" id="it-step-notify" checked />
-                      🔔 Avisarme con notificación a esa hora
+          <!-- Full width, no en card-grid: con el día de la semana + el
+               formulario de pasos, esta tarjeta es mucho más alta que su
+               antigua pareja ("Mis alarmas") — en una grilla de 2 columnas
+               dejaba un hueco enorme al lado (el bug reportado). -->
+          <div class="page-card">
+            <h3>🗺️ Mis itinerarios</h3>
+            <ul class="cuenta-list" id="cuenta-itineraries"></ul>
+            <p class="cuenta-empty" id="cuenta-itineraries-empty">Sin itinerarios creados.</p>
+            <details class="cuenta-create">
+              <summary>＋ Crear itinerario</summary>
+              <form id="itinerary-form" class="cuenta-form">
+                <label>Nombre
+                  <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
+                </label>
+                <label>Descripción <em>(opcional)</em>
+                  <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
+                </label>
+                <label>Día de la semana <em>(opcional)</em>
+                  <select id="itinerary-day">
+                    <option value="">Sin día fijo (secuencia suelta)</option>
+                    <option value="1">Lunes</option>
+                    <option value="2">Martes</option>
+                    <option value="3">Miércoles</option>
+                    <option value="4">Jueves</option>
+                    <option value="5">Viernes</option>
+                    <option value="6">Sábado</option>
+                    <option value="0">Domingo</option>
+                  </select>
+                </label>
+                <p class="cuenta-empty" id="itinerary-day-hint">
+                  Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
+                  con su horario). No podés repetir el mismo día en dos itinerarios.
+                </p>
+                <fieldset class="cuenta-steps">
+                  <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
+                  <div class="cuenta-form-row">
+                    <label>Frecuencia
+                      <span class="it-step-freq-row">
+                        <select id="it-step-freq"></select>
+                        <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom" aria-expanded="false">🎨 Personalizar</button>
+                      </span>
                     </label>
-                    <p class="cuenta-empty" id="it-step-time-hint">
-                      Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
-                      arriba si preferís que quede solo agendado, sin notificación).
-                      Sin días marcados, es de una sola vez.
-                    </p>
-                    <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
-                    <ul class="cuenta-list" id="it-steps"></ul>
-                    <p class="cuenta-empty" id="it-steps-empty">
-                      Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
-                      al activarse te avisa de arrancar la sesión.
-                    </p>
-                  </fieldset>
-                  <button type="submit" class="cuenta-btn">Crear itinerario</button>
-                </form>
-              </details>
-            </div>
+                    <label>Duración (min)
+                      <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
+                    </label>
+                  </div>
+
+                  <!-- Mismos ajustes que el panel del generador (portadora/ritmo/onda):
+                       "Personalizar" acá arma una frecuencia a medida con la misma
+                       experiencia, no un formulario aparte con campos numéricos. -->
+                  <div class="custom hidden" id="it-custom-panel">
+                    <span class="ctrl-label"><span>Portadora <em>(referencia rápida, después ajustá con el slider)</em></span></span>
+                    <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de referencia"></div>
+                    <label class="slider-row">
+                      <span class="ctrl-label"><span id="it-custom-base-label">Portadora: 220 Hz</span></span>
+                      <input id="it-custom-base" type="range" min="60" max="1000" step="1" value="220" />
+                    </label>
+                    <label class="slider-row">
+                      <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
+                      <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
+                    </label>
+                    <span class="ctrl-label"><span>Forma de onda</span></span>
+                    <div id="it-custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
+                    <span class="ctrl-label"><span>Condición experimental</span></span>
+                    <div id="it-custom-cond-options" class="wave-options" role="radiogroup" aria-label="Condición del estímulo"></div>
+                    <div class="custom-save-wrap">
+                      <label class="custom-save-name-label" for="it-custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
+                      <div class="custom-save-row">
+                        <input type="text" id="it-custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
+                        <button type="button" class="cuenta-btn" id="it-custom-save">Usar esta frecuencia</button>
+                      </div>
+                      <p class="custom-save-note hidden" id="it-custom-save-note" role="status"></p>
+                    </div>
+                  </div>
+                  <label>Horario <em>(opcional)</em>
+                    <input id="it-step-time" type="time" />
+                  </label>
+                  <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
+                    <input type="checkbox" id="it-step-notify" checked />
+                    🔔 Avisarme con notificación a esa hora
+                  </label>
+                  <p class="cuenta-empty" id="it-step-time-hint">
+                    Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
+                    arriba si preferís que quede solo agendado, sin notificación). Se repite cada
+                    semana en el día del itinerario; si el itinerario no tiene día, es de una sola vez.
+                  </p>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
+                  <ul class="cuenta-list" id="it-steps"></ul>
+                  <p class="cuenta-empty" id="it-steps-empty">
+                    Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
+                    al activarse te avisa de arrancar la sesión.
+                  </p>
+                </fieldset>
+                <button type="submit" class="cuenta-btn">Crear itinerario</button>
+              </form>
+            </details>
           </div>
 
           <div class="page-card">

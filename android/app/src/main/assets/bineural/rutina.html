@@ -11,7 +11,7 @@
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="canonical" href="https://vyneural-six.vercel.app/rutina" />
+    <link rel="canonical" href="https://www.vyneural.cl/rutina" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Vyneural" />
@@ -20,8 +20,8 @@
       property="og:description"
       content="Tus recordatorios de sesiones de ondas binaurales, con repetición por días, frecuencia y próxima sesión."
     />
-    <meta property="og:url" content="https://vyneural-six.vercel.app/rutina" />
-    <meta property="og:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta property="og:url" content="https://www.vyneural.cl/rutina" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="es_ES" />
@@ -32,7 +32,7 @@
       name="twitter:description"
       content="Tus recordatorios de ondas binaurales con repetición semanal, en un solo lugar."
     />
-    <meta name="twitter:image" content="https://vyneural-six.vercel.app/og.png" />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
 
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
@@ -45,15 +45,18 @@
         "name": "Tu rutina de Vyneural",
         "description": "Recordatorios y rituales de sesiones de ondas binaurales guardados por el usuario.",
         "inLanguage": "es",
-        "url": "https://vyneural-six.vercel.app/rutina",
-        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://vyneural-six.vercel.app/" }
+        "url": "https://www.vyneural.cl/rutina",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/rutina-CYc_ytP-.js"></script>
-    <link rel="modulepreload" href="./assets/site-CDQm-AOx.js">
-    <link rel="modulepreload" href="./assets/itineraries-5MUdCsiH.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DHdNxLHU.js">
-    <link rel="stylesheet" href="./assets/site-CHleZ_PQ.css">
+    <script type="module" src="./assets/rutina-KeE3_pKj.js"></script>
+    <link rel="modulepreload" href="./assets/site-C_bEqRF-.js">
+    <link rel="modulepreload" href="./assets/freq-cover-C0iNcOsL.js">
+    <link rel="modulepreload" href="./assets/alarms-VOeojMDQ.js">
+    <link rel="modulepreload" href="./assets/alarm-manager-Bb-n1NcZ.js">
+    <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
+    <link rel="modulepreload" href="./assets/native-bridge-BVY3Ub9D.js">
+    <link rel="stylesheet" href="./assets/site-DzDrNjqa.css">
   </head>
   <body>
     <header class="site-nav">
@@ -85,10 +88,24 @@
           repite, con qué frecuencia y cuándo es la próxima sesión. En la APK estas alarmas las
           programa el reloj del sistema, con vibración y con la app cerrada.
         </p>
-        <a class="hero-cta" href="/#alarms-view">＋ Agregar recordatorio</a>
+        <a class="hero-cta" href="#rutina-reminder-form">＋ Agregar recordatorio</a>
       </header>
 
       <div class="page-body">
+        <!-- Sin sesión: la rutina entera es de cuenta (itinerarios en la nube +
+             recordatorios). Se oculta rutina-content y se muestra este gate en
+             su lugar — ver updateAuthGate() en rutina.js. -->
+        <div class="page-card" id="rutina-auth-gate" hidden>
+          <p class="rm-emoji" aria-hidden="true">🔒</p>
+          <h3>Iniciá sesión para ver tu rutina</h3>
+          <p>
+            Tus recordatorios e itinerarios viven en tu cuenta, así los ves igual en la web y en
+            la APK. Crear una cuenta es gratis y toma un minuto.
+          </p>
+          <button type="button" class="hero-cta" id="rutina-auth-gate-login">Iniciar sesión / Crear cuenta</button>
+        </div>
+
+        <div id="rutina-content">
         <div class="page-card" id="rutina-daily-card">
           <div class="rutina-head">
             <h2>📊 Resumen de hoy</h2>
@@ -122,14 +139,51 @@
           <div class="rutina-empty" id="rutina-empty">
             <p class="rm-emoji" aria-hidden="true">🧘</p>
             <p><strong>Todavía no tenés recordatorios.</strong></p>
-            <p>
-              Creá uno desde el generador: elegí el estado o una frecuencia personalizada, la hora
-              y — si querés — los días de la semana para convertirlo en rutina.
-            </p>
-            <p><a class="hero-cta" href="/#alarms-view">Ir al generador y crear mi rutina</a></p>
+            <p>Creá uno acá abajo: elegí el estado o una frecuencia personalizada y la hora.</p>
           </div>
 
           <p class="rutina-note hidden" id="rutina-platform-note"></p>
+
+          <details class="cuenta-create" id="rutina-reminder-form">
+            <summary>＋ Crear recordatorio</summary>
+            <form class="cuenta-form" id="reminder-form">
+              <label>Estado
+                <select id="reminder-state"></select>
+              </label>
+              <div class="cuenta-form-row hidden" id="reminder-custom-row">
+                <label>Portadora (Hz)
+                  <input id="reminder-base" type="number" min="2" max="19999" step="0.1" value="220" />
+                </label>
+                <label>Ritmo (Hz)
+                  <input id="reminder-beat" type="number" min="0" max="499" step="0.5" value="10" />
+                </label>
+              </div>
+              <div class="cuenta-form-row">
+                <label>Hora
+                  <input id="reminder-time" type="time" required />
+                </label>
+                <label>Duración (min) <em>(opcional)</em>
+                  <input id="reminder-minutes" type="number" min="0" max="240" step="1" value="0" />
+                </label>
+              </div>
+              <div class="it-step-days-wrap" id="reminder-days-wrap">
+                <span class="it-step-days-label">Repetir (solo APK)</span>
+                <div class="it-step-days" id="reminder-days" role="group" aria-label="Días de repetición">
+                  <button type="button" class="day-chip" data-day="1" aria-pressed="false">L</button>
+                  <button type="button" class="day-chip" data-day="2" aria-pressed="false">M</button>
+                  <button type="button" class="day-chip" data-day="3" aria-pressed="false">X</button>
+                  <button type="button" class="day-chip" data-day="4" aria-pressed="false">J</button>
+                  <button type="button" class="day-chip" data-day="5" aria-pressed="false">V</button>
+                  <button type="button" class="day-chip" data-day="6" aria-pressed="false">S</button>
+                  <button type="button" class="day-chip" data-day="0" aria-pressed="false">D</button>
+                </div>
+              </div>
+              <p class="cuenta-empty" id="reminder-hint">
+                Sin días marcados, el recordatorio es de una sola vez.
+              </p>
+              <button type="submit" class="cuenta-btn">Guardar recordatorio</button>
+            </form>
+          </details>
         </div>
 
         <div class="page-card">
@@ -150,11 +204,99 @@
           <div class="rutina-empty" id="rutina-it-empty">
             <p class="rm-emoji" aria-hidden="true">🗺️</p>
             <p><strong>Todavía no tenés itinerarios.</strong></p>
-            <p>
-              Creá uno desde tu <a href="/cuenta">página de cuenta</a>: sumá frecuencias
-              guardadas como pasos con su duración y horario, y arrancalo desde acá con un toque.
-            </p>
+            <p>Creá uno acá abajo: elegí un día, sumá pasos con su horario y guardalo.</p>
           </div>
+
+          <details class="cuenta-create" id="itinerary-form-details">
+            <summary id="itinerary-form-summary">＋ Crear itinerario</summary>
+            <form id="itinerary-form" class="cuenta-form">
+              <input type="hidden" id="itinerary-edit-id" value="" />
+              <label>Nombre
+                <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
+              </label>
+              <label>Descripción <em>(opcional)</em>
+                <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
+              </label>
+              <label>Día de la semana <em>(opcional)</em>
+                <select id="itinerary-day">
+                  <option value="">Sin día fijo (secuencia suelta)</option>
+                  <option value="1">Lunes</option>
+                  <option value="2">Martes</option>
+                  <option value="3">Miércoles</option>
+                  <option value="4">Jueves</option>
+                  <option value="5">Viernes</option>
+                  <option value="6">Sábado</option>
+                  <option value="0">Domingo</option>
+                </select>
+              </label>
+              <p class="cuenta-empty" id="itinerary-day-hint">
+                Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
+                con su horario). No podés repetir el mismo día en dos itinerarios.
+              </p>
+              <fieldset class="cuenta-steps">
+                <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
+                <div class="cuenta-form-row">
+                  <label>Frecuencia
+                    <span class="it-step-freq-row">
+                      <select id="it-step-freq"></select>
+                      <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom" aria-expanded="false">🎨 Personalizar</button>
+                    </span>
+                  </label>
+                  <label>Duración (min)
+                    <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
+                  </label>
+                </div>
+
+                <div class="custom hidden" id="it-custom-panel">
+                  <span class="ctrl-label"><span>Portadora <em>(referencia rápida, después ajustá con el slider)</em></span></span>
+                  <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de referencia"></div>
+                  <label class="slider-row">
+                    <span class="ctrl-label"><span id="it-custom-base-label">Portadora: 220 Hz</span></span>
+                    <input id="it-custom-base" type="range" min="60" max="1000" step="1" value="220" />
+                  </label>
+                  <label class="slider-row">
+                    <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
+                    <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
+                  </label>
+                  <span class="ctrl-label"><span>Forma de onda</span></span>
+                  <div id="it-custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
+                  <span class="ctrl-label"><span>Condición experimental</span></span>
+                  <div id="it-custom-cond-options" class="wave-options" role="radiogroup" aria-label="Condición del estímulo"></div>
+                  <div class="custom-save-wrap">
+                    <label class="custom-save-name-label" for="it-custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
+                    <div class="custom-save-row">
+                      <input type="text" id="it-custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
+                      <button type="button" class="cuenta-btn" id="it-custom-save">Usar esta frecuencia</button>
+                    </div>
+                    <p class="custom-save-note hidden" id="it-custom-save-note" role="status"></p>
+                  </div>
+                </div>
+
+                <label>Horario <em>(opcional)</em>
+                  <input id="it-step-time" type="time" />
+                </label>
+                <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
+                  <input type="checkbox" id="it-step-notify" checked />
+                  🔔 Avisarme con notificación a esa hora
+                </label>
+                <p class="cuenta-empty" id="it-step-time-hint">
+                  Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
+                  arriba si preferís que quede solo agendado, sin notificación). Se repite cada
+                  semana en el día del itinerario; si el itinerario no tiene día, es de una sola vez.
+                </p>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
+                <ul class="cuenta-list" id="it-steps"></ul>
+                <p class="cuenta-empty" id="it-steps-empty">
+                  Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
+                  al activarse te avisa de arrancar la sesión.
+                </p>
+              </fieldset>
+              <div class="cuenta-form-row">
+                <button type="submit" class="cuenta-btn" id="itinerary-submit">Crear itinerario</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="itinerary-cancel-edit">Cancelar edición</button>
+              </div>
+            </form>
+          </details>
         </div>
 
         <div class="page-card">
@@ -169,8 +311,10 @@
 
         <div class="page-note">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-          Tu rutina se guarda solo en este dispositivo: no hay cuentas ni servidores. Las ondas
-          binaurales son una herramienta de relajación y no sustituyen el consejo médico.
+          Tus recordatorios e itinerarios viven en tu cuenta y se sincronizan entre la web y la
+          APK. Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+          médico.
+        </div>
         </div>
       </div>
     </main>
