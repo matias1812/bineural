@@ -390,6 +390,10 @@ function formatHzShort(hz) {
 function populateStepFreqs() {
   const sel = document.getElementById('it-step-freq');
   if (!sel) return;
+  // savedFreqsMap se termina de cargar async (loadItineraries) DESPUÉS de
+  // este primer poblado — se vuelve a llamar cuando llega, y sin conservar
+  // el value un usuario que ya venía eligiendo algo lo perdía sin avisar.
+  const prevValue = sel.value;
   const predefined = PROFILES
     .map((p) => `<option value="p:${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${formatHzShort(p.stimulus.carrierBase)}</option>`)
     .join('');
@@ -399,6 +403,7 @@ function populateStepFreqs() {
   sel.innerHTML = `<optgroup label="Predefinidas">${predefined}</optgroup>`
     + (saved ? `<optgroup label="Mis frecuencias">${saved}</optgroup>` : '');
   sel.disabled = false;
+  if (prevValue && [...sel.options].some((o) => o.value === prevValue)) sel.value = prevValue;
 }
 
 function findMatchingSavedFreq(profile) {
@@ -589,6 +594,59 @@ function setItCustomNote(msg, isError) {
   noteEl.classList.toggle('custom-save-note-error', !!isError);
 }
 
+// Antes de abrir "Personalizar", carga la personalización con lo que YA
+// está elegido en el select (en vez de arrancar siempre desde los defaults
+// del HTML: 220 Hz / 10 Hz / senoidal / sin ambiente). Dos casos:
+//  - "p:<id>" (predefinida): la portadora arranca en el valor propio del
+//    preset (uno de los predeterminados con sentido, no un default genérico)
+//    — el ritmo/beat es lo que en general se ajusta para afinar la sesión.
+//  - "f:<uuid>" (ya guardada): carga TODO lo suyo — portadora, ritmo, onda,
+//    condición, ambiente y nombre — para editar/afinar sobre lo guardado,
+//    no perderlo y volver a empezar de cero.
+function prefillItCustomFromSelection() {
+  const sel = document.getElementById('it-step-freq');
+  const baseEl = document.getElementById('it-custom-base');
+  const beatEl = document.getElementById('it-custom-beat');
+  const nameEl = document.getElementById('it-custom-save-name');
+  if (!sel || !sel.value) return;
+  let carrier = null;
+  let beat = null;
+  let wave = null;
+  let condition = null;
+  let ambient = null;
+  let name = null;
+  if (sel.value.startsWith('p:')) {
+    const profile = PROFILES.find((p) => p.id === sel.value.slice(2));
+    if (profile) {
+      carrier = profile.stimulus.carrierBase;
+      beat = profile.stimulus.beat;
+      wave = profile.stimulus.modulation || 'sine';
+      name = profile.name;
+    }
+  } else if (sel.value.startsWith('f:')) {
+    const freq = savedFreqsMap.get(sel.value.slice(2));
+    if (freq) {
+      carrier = freq.carrier_frequency ?? freq.left_frequency;
+      beat = freq.beat_frequency;
+      wave = freq.waveform || 'sine';
+      condition = freq.condition || 'binaural';
+      ambient = freqAmbient(freq);
+      name = freq.name;
+    }
+  }
+  if (carrier != null && baseEl) baseEl.value = String(Math.round(carrier * 10) / 10);
+  if (beat != null && beatEl) beatEl.value = String(Math.round(beat * 10) / 10);
+  if (wave) {
+    itCustomWave = wave;
+    syncItCustomWaveButtons();
+  }
+  itCustomCondition = condition || 'binaural';
+  syncItCustomCondButtons();
+  itCustomAmbient = new Set(ambient || []);
+  syncItCustomAmbientButtons();
+  if (nameEl && name) nameEl.value = name;
+}
+
 function wireItCustomPanel() {
   const toggle = document.getElementById('it-step-custom');
   const panel = document.getElementById('it-custom-panel');
@@ -643,7 +701,10 @@ function wireItCustomPanel() {
     const willOpen = panel.classList.contains('hidden');
     panel.classList.toggle('hidden', !willOpen);
     toggle.setAttribute('aria-expanded', String(willOpen));
-    if (willOpen) updateItCustomLabels();
+    if (willOpen) {
+      prefillItCustomFromSelection();
+      updateItCustomLabels();
+    }
   });
   const saveBtn = document.getElementById('it-custom-save');
   const nameEl = document.getElementById('it-custom-save-name');
@@ -1304,6 +1365,11 @@ async function loadItineraries() {
     // lista quedaba SIEMPRE calculada con currentIts=[] y jamás se
     // refrescaba con los itinerarios reales.
     render();
+    // El <select> de "＋ Añadir paso" se pobló UNA vez al abrir el
+    // formulario, antes de que savedFreqsMap tuviera datos reales (esto se
+    // resuelve async, arriba) — sin repoblarlo acá, "Mis frecuencias" nunca
+    // mostraba nada guardado en sesiones anteriores, aunque existiera.
+    populateStepFreqs();
   }
 }
 
