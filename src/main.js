@@ -84,7 +84,7 @@ import { createFrequency } from './api/frequencies.js';
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
 // rompe la alarma local.
-import { createAlarm, deleteAlarm } from './api/alarms.js';
+import { createAlarm, deleteAlarm, listAlarms as listServerAlarms } from './api/alarms.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -4753,6 +4753,49 @@ updateHistory();
 // (savedSession se leyó antes de selectState(), que sí guarda una sesión).
 if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession && !lsGet(LS_QUICK, null)) {
   showQuickstart();
+}
+
+// Recordatorio pendiente: si abrís la web/APK SIN tocar la notificación (la
+// cerraste, no llegó, el permiso estaba apagado, etc.) y ya había una alarma
+// vencida, dejarla lista para reproducir en vez de silencio — mismo criterio
+// que un deep link de notificación (freq/beat/wave), nunca autoplay. Si ya
+// venís de un deep link explícito (?freq=… o ?seq=…), esa alarma YA es la
+// que abriste: no hay nada "pendiente" que buscar además.
+async function checkPendingReminder() {
+  const now = Date.now();
+  const local = getAlarms()
+    .filter((a) => a.nextAt && a.nextAt <= now && a.freq > 0)
+    .sort((a, b) => a.nextAt - b.nextAt)[0];
+  let pending = local
+    ? { name: local.name, freq: local.freq, beat: local.beat, wave: local.wave }
+    : null;
+  if (!pending && getAccessToken()) {
+    try {
+      const serverAlarms = await listServerAlarms();
+      const due = (serverAlarms || [])
+        .filter((a) => a.enabled && a.scheduled_at && new Date(a.scheduled_at).getTime() <= now)
+        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
+      if (due && due.config && due.config.freq > 0) {
+        pending = { name: due.name, freq: due.config.freq, beat: due.config.beat, wave: due.config.wave };
+      }
+    } catch (_) {
+      /* sin red: no bloquea la carga normal, se reintenta la próxima visita */
+    }
+  }
+  if (!pending) return;
+  customBase.value = String(Math.round(pending.freq * 10) / 10);
+  customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
+  selectedWave = pending.wave || 'sine';
+  const customState = STATES.find((s) => s.custom);
+  if (customState) selectState(customState);
+  updateCustomLabels();
+  syncWaveButtons();
+  updateCustomPanel();
+  syncCarrierChips();
+  showToast(`⏰ Tenías pendiente: ${pending.name || 'un recordatorio'} — tocá play cuando quieras`);
+}
+if (!isFinite(deepFreq) && !deepSeq) {
+  checkPendingReminder();
 }
 
 // Deep link de alarma (?autostart=true): P5.6 (C1) — NO arranca audio en la
