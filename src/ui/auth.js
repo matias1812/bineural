@@ -170,6 +170,19 @@ function renderNav() {
   });
   menu.appendChild(permisos);
 
+  const faq = document.createElement('button');
+  faq.type = 'button';
+  faq.className = 'auth-menu-item';
+  faq.setAttribute('role', 'menuitem');
+  faq.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg><span>Preguntas frecuentes</span>`;
+  faq.addEventListener('click', () => {
+    closeMenu();
+    const here = window.location.pathname.replace(/\/+$/, '');
+    if (here.endsWith('/preguntas-frecuentes')) return;
+    window.location.href = '/preguntas-frecuentes';
+  });
+  menu.appendChild(faq);
+
   const salir = document.createElement('button');
   salir.type = 'button';
   salir.className = 'auth-menu-item auth-menu-danger';
