@@ -650,6 +650,11 @@ function wireItCustomPanel() {
   if (saveBtn) {
     saveBtn.addEventListener('click', async () => {
       saveBtn.disabled = true;
+      // Mismo motivo que en "＋ Añadir paso": esto crea la frecuencia en el
+      // servidor antes de poder agregarla como paso — sin bloquear Guardar,
+      // un click rápido podía mandar el itinerario sin esta personalizada.
+      const submitBtn = document.getElementById('itinerary-submit');
+      if (submitBtn) submitBtn.disabled = true;
       setItCustomNote('Guardando…');
       try {
         const carrier = (baseEl && parseFloat(baseEl.value)) || 220;
@@ -679,6 +684,7 @@ function wireItCustomPanel() {
         setItCustomNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
       } finally {
         saveBtn.disabled = false;
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -780,6 +786,14 @@ function wireItineraryForm() {
       const notifyEl = document.getElementById('it-step-notify');
       if (!sel.value) return;
       add.disabled = true;
+      // resolveStepFrequency() puede pegarle a la red (createFrequency para
+      // un preset/personalizado sin resolver todavía) — sin bloquear Guardar
+      // acá, un click rápido en "Crear itinerario" mandaba el itinerario con
+      // ESTE paso todavía sin empujar a itSteps: el paso desaparecía en
+      // silencio, sin error, exactamente el bug reportado en vivo (2 pasos
+      // agregados, 1 solo guardado).
+      const submitBtn = document.getElementById('itinerary-submit');
+      if (submitBtn) submitBtn.disabled = true;
       try {
         const freq = await resolveStepFrequency(sel.value);
         if (!freq) return;
@@ -800,6 +814,7 @@ function wireItineraryForm() {
         alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
       } finally {
         add.disabled = false;
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
