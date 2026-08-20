@@ -13,7 +13,7 @@
 // lleva al generador configurado (freq/beat/wave) SIN autostart: el audio
 // nace solo con un gesto explícito del usuario (P5.1/P5.6).
 
-import { getAccessToken } from './api/client.js';
+import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
 import { listItineraries, createItinerary, updateItinerary, reorderItineraryItems } from './api/itineraries.js';
 import { listFrequencies, createFrequency } from './api/frequencies.js';
 import { createAlarm } from './api/alarms.js';
@@ -763,6 +763,11 @@ function wireItineraryForm() {
         const details = document.getElementById('itinerary-form-details');
         if (details) details.open = false;
         loadItineraries();
+        // En la APK, sin esto el recordatorio recién guardado esperaba el
+        // próximo ciclo de sync nativo (~5 min) para programarse en el
+        // reloj del sistema — si el horario elegido caía antes, nunca
+        // llegaba a sonar (ver notifyNativeAlarmsChanged en api/client.js).
+        notifyNativeAlarmsChanged();
       } catch (err) {
         alert(`No se pudo guardar el itinerario: ${(err && err.detail) || 'error'}`);
       } finally {

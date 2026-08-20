@@ -5,7 +5,7 @@
 // app sigue funcionando igual.
 
 import { me, changePassword, resendVerification } from './api/auth.js';
-import { getAccessToken } from './api/client.js';
+import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
 import { listFavorites, removeFavorite } from './api/favorites.js';
 import {
   listFrequencies,
@@ -625,10 +625,13 @@ async function handleAction(e) {
     await deleteFrequency(id).catch(() => {});
   } else if (act === 'delalarm') {
     await deleteAlarm(id).catch(() => {});
+    notifyNativeAlarmsChanged();
   } else if (act === 'delit') {
     await deleteItinerary(id).catch(() => {});
+    notifyNativeAlarmsChanged();
   } else if (act === 'toggleit') {
     await toggleItinerary(id).catch(() => {});
+    notifyNativeAlarmsChanged();
   } else if (act === 'forgetdev') {
     await forgetDevice(id).catch(() => {});
   } else if (act === 'scheduleit') {
@@ -684,6 +687,10 @@ function wireForms() {
           time_of_day: s.time_of_day || undefined,
         }));
         await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, day_of_week, items });
+        // Ver notifyNativeAlarmsChanged en api/client.js: sin esto, la APK
+        // esperaba hasta ~5 min (el ciclo de sync nativo) para programar la
+        // alarma del itinerario recién creado en el reloj del sistema.
+        notifyNativeAlarmsChanged();
         itSteps = [];
         renderItSteps();
         itForm.reset();

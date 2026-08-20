@@ -302,6 +302,16 @@ class AndroidBridge(
                     AlarmSync.clearSynced(context)
                     respond("OK", command, null)
                 }
+                "SYNC_ALARMS" -> {
+                    // La web creó/editó/borró un recordatorio o un paso de
+                    // itinerario con horario: resincronizar YA en vez de
+                    // esperar el ciclo periódico (~5 min) — si el horario
+                    // elegido cae antes de ese próximo ciclo, la alarma
+                    // nativa nunca se programa (ver AlarmSync.syncAlarms:
+                    // scheduled_at ya vencido → se descarta en silencio).
+                    AlarmSync.run(context)
+                    respond("OK", command, null)
+                }
                 "API_REQUEST" -> {
                     // HTTP nativo (sin CORS): el WebView de la APK carga desde
                     // file:// (origen opaco → Origin: null) y el backend no puede

@@ -63,6 +63,16 @@ function bridgeNotify(command, payload) {
   }
 }
 
+// Avisa al nativo que una alarma/itinerario cambió (creado, editado o
+// borrado): sin esto, el ciclo de sincronización nativo (AlarmSync.kt) solo
+// se dispara al iniciar sesión o cada ~5 min — un recordatorio guardado
+// para dentro de pocos minutos con la app YA abierta y logueada podía
+// vencer ANTES del próximo ciclo y jamás llegar a programarse en el reloj
+// del sistema (0 alarma, 0 notificación, sin ningún error visible).
+export function notifyNativeAlarmsChanged() {
+  bridgeNotify('SYNC_ALARMS', null);
+}
+
 // Registra la sesión (access + refresh) tras login/register.
 export function storeSession(session) {
   setAccessToken(session.access_token);
