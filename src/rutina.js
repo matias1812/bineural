@@ -1177,8 +1177,10 @@ function todayPractice() {
 // alarma real, solo que la maneja el backend vía Web Push, no el
 // AlarmManager local — nunca aparecía acá aunque estuviera guardado y
 // alineado correctamente en la grilla semanal.
-function nextItineraryOccurrence(its, fromMs = Date.now()) {
-  let best = null;
+// Todas las próximas ocurrencias de itinerario (no solo la más cercana):
+// "Próximas sesiones" necesita el horario completo, no un solo resumen.
+function allItineraryOccurrences(its, fromMs = Date.now()) {
+  const out = [];
   (its || []).forEach((it) => {
     if (it.day_of_week == null || it.is_active === false) return;
     (it.items || []).forEach((item) => {
@@ -1186,13 +1188,26 @@ function nextItineraryOccurrence(its, fromMs = Date.now()) {
       const [hh, mm] = item.time_of_day.split(':').map(Number);
       if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
       const at = nextOccurrenceAt(hh, mm, [it.day_of_week], fromMs);
-      if (at != null && (!best || at < best.at)) {
-        const s = stepLabel(item);
-        best = { at, time: item.time_of_day, name: `${it.name || 'Rutina'} · ${s.name}` };
-      }
+      if (at == null) return;
+      const s = stepLabel(item);
+      out.push({
+        at,
+        time: item.time_of_day,
+        name: `${it.name || 'Rutina'} · ${s.name}`,
+        freq: s.base,
+        beat: s.beat,
+        dur: Math.round((item.duration || 0) / 60),
+        days: [it.day_of_week],
+        kind: 'itinerary',
+        itId: it.id,
+      });
     });
   });
-  return best;
+  return out.sort((a, b) => a.at - b.at);
+}
+
+function nextItineraryOccurrence(its, fromMs = Date.now()) {
+  return allItineraryOccurrences(its, fromMs)[0] || null;
 }
 
 function renderDaily() {
@@ -1283,27 +1298,46 @@ async function loadItineraries() {
     renderItineraries([]);
   } finally {
     itinerariesLoaded = true;
-    // El resumen de hoy se pinta ANTES de que esto termine (refreshState()
-    // llama render() y recién después loadItineraries(), sin esperarlo) —
-    // sin este segundo pintado, "próximo recordatorio" quedaba SIEMPRE
-    // calculado con currentIts=[] y jamás se refrescaba con lo real.
-    renderDaily();
+    // "Próximas sesiones" (y el resumen que arma) se pinta ANTES de que
+    // esto termine (refreshState() llama render() y recién después
+    // loadItineraries(), sin esperarlo) — sin este segundo pintado, la
+    // lista quedaba SIEMPRE calculada con currentIts=[] y jamás se
+    // refrescaba con los itinerarios reales.
+    render();
   }
 }
 
+// "Próximas sesiones": horario unificado, no solo recordatorios locales —
+// une los recordatorios de este dispositivo con las próximas ocurrencias de
+// itinerario (que ya viven en la grilla semanal, pero acá se ven en orden
+// cronológico real con fecha/hora, todos juntos).
 function render() {
   renderDaily();
-  const alarms = getAlarms().slice().sort((a, b) => (a.nextAt || 0) - (b.nextAt || 0));
   if (!listEl || !emptyEl) return;
+  const localSessions = getAlarms().map((a) => ({
+    at: a.nextAt,
+    time: a.time,
+    name: a.name || 'Sesión personalizada',
+    freq: a.freq,
+    beat: a.beat,
+    dur: a.minutes,
+    days: a.days,
+    kind: 'local',
+    id: a.id,
+  }));
+  const sessions = [...localSessions, ...allItineraryOccurrences(currentIts)].sort(
+    (a, b) => (a.at || 0) - (b.at || 0),
+  );
+
   listEl.innerHTML = '';
-  const has = alarms.length > 0;
+  const has = sessions.length > 0;
   listEl.classList.toggle('hidden', !has);
   emptyEl.classList.toggle('hidden', has);
   if (countEl) {
-    countEl.textContent = String(alarms.length);
+    countEl.textContent = String(sessions.length);
   }
 
-  alarms.forEach((a) => {
+  sessions.forEach((a) => {
     const li = document.createElement('li');
     li.className = 'rutina-item';
 
@@ -1316,7 +1350,7 @@ function render() {
 
     const time = document.createElement('div');
     time.className = 'rutina-time';
-    time.textContent = a.time || '08:00';
+    time.textContent = `${a.time || '08:00'} · ${fmtWhen(a.at)}`;
 
     const name = document.createElement('div');
     name.className = 'rutina-name';
@@ -1324,9 +1358,9 @@ function render() {
 
     const meta = document.createElement('div');
     meta.className = 'rutina-meta';
-    const parts = [`${Math.round(a.freq)} Hz · ${Math.round(a.beat)} Hz de ritmo`];
-    if (a.minutes > 0) parts.push(`${a.minutes} min`);
-    parts.push(`próxima: ${fmtWhen(a.nextAt)}`);
+    const parts = [];
+    if (a.freq != null) parts.push(`${Math.round(a.freq)} Hz · ${Math.round(a.beat || 0)} Hz de ritmo`);
+    if (a.dur > 0) parts.push(`${a.dur} min`);
     meta.textContent = parts.join(' · ');
 
     const rep = document.createElement('div');
@@ -1335,19 +1369,32 @@ function render() {
 
     body.append(time, name, meta, rep);
 
-    const del = document.createElement('button');
-    del.className = 'rutina-del';
-    del.setAttribute('aria-label', 'Eliminar de la rutina');
-    del.textContent = '✕';
-    del.addEventListener('click', () => {
-      cancelNativeAlarm(a.id);
-      // Vía el AlarmManager (no un localStorage.setItem crudo): así también
-      // se borra del store durable (IndexedDB), no solo del espejo — si no,
-      // el generador podía seguir viéndola viva la próxima vez que abriera.
-      alarmManagerInstance.cancel(a.id).then(render);
-    });
+    const action = document.createElement('button');
+    if (a.kind === 'local') {
+      action.className = 'rutina-del';
+      action.setAttribute('aria-label', 'Eliminar de la rutina');
+      action.textContent = '✕';
+      action.addEventListener('click', () => {
+        cancelNativeAlarm(a.id);
+        // Vía el AlarmManager (no un localStorage.setItem crudo): así también
+        // se borra del store durable (IndexedDB), no solo del espejo — si no,
+        // el generador podía seguir viéndola viva la próxima vez que abriera.
+        alarmManagerInstance.cancel(a.id).then(render);
+      });
+    } else {
+      // Una sesión de itinerario se edita/borra desde su itinerario (mismo
+      // criterio que ya aplica en /cuenta: borrar solo el paso desde acá
+      // dejaría la grilla semanal desincronizada).
+      action.className = 'rutina-edit-btn';
+      action.setAttribute('aria-label', 'Editar itinerario');
+      action.textContent = '✎';
+      action.addEventListener('click', () => {
+        const it = currentIts.find((x) => x.id === a.itId);
+        if (it) startEditItinerary(it);
+      });
+    }
 
-    li.append(badge, body, del);
+    li.append(badge, body, action);
     listEl.appendChild(li);
   });
 }
