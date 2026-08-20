@@ -22,6 +22,7 @@ import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
 import { getAlarms, saveAlarms, fireAlarm, rruleFor, nextAlarmAt, requestPermission } from './notifications.js';
 import { createNativeBridgeAdapter } from './platform/native-bridge.js';
 import { PROFILES } from './models/profiles.js';
+import { carrierBaseFor } from './core/carrier.js';
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -498,25 +499,39 @@ const IT_CUSTOM_WAVES = [
 ];
 let itCustomWave = 'sine';
 
+// La portadora es ORTOGONAL a la portada: el paso (preset o guardada) define
+// su propia base ("portada"), y la portadora elegida ACÁ la afina — la
+// escala proporcionalmente a una familia (Solfeggio, Ancestral...) o la fija
+// a un valor literal (Schumann, 220 Hz) — igual que el generador principal
+// (carrierBaseFor, core/carrier.js: misma tabla, mismo escalado). Elegir
+// "Personalizado" es la única forma de tocar la portada a mano con el slider.
 const IT_CUSTOM_CARRIERS = [
-  { hz: 432, label: '432 Hz · Estándar' },
-  { hz: 220, label: '220 Hz · Estándar impuesto' },
-  { hz: 528, label: '528 Hz · Solfeggio' },
-  { hz: 963, label: '963 Hz · Solfeggio divino' },
-  { hz: 136.1, label: '136.1 Hz · Ancestral' },
-  { hz: 194.7, label: '194.7 Hz · Schumann' },
+  { mode: 'estandar', label: '432 Hz · Estándar' },
+  { mode: 'estandar220', label: '220 Hz · Estándar impuesto' },
+  { mode: 'solfeggio', label: '528 Hz · Solfeggio' },
+  { mode: 'solfeggio963', label: '963 Hz · Solfeggio divino' },
+  { mode: 'ancestral', label: '136.1 Hz · Ancestral' },
+  { mode: 'schumann', label: '194.7 Hz · Schumann' },
+  { mode: 'personalizado', label: 'Personalizado' },
 ];
+let itCustomCarrierMode = 'estandar';
+// La base propia del preset o de la frecuencia guardada elegida en el
+// select — el ancla sobre la que escalan las familias de portadora.
+let itCustomNominalBase = 220;
+// Resultado final (Hz reales) — lo que de verdad se guarda como
+// carrier_frequency. Se recalcula con recomputeItCustomCarrier(); en modo
+// 'personalizado' lo fija directamente el slider.
+let itCustomCarrierHz = 220;
 
-// La portada va de 20 a 19999 Hz (todo el rango audible, a pedido) — pero
-// un slider LINEAL en un rango así es inservible: cada pixel de arrastre
-// mueve cientos de Hz y es imposible afinar cerca de los valores que de
-// verdad se usan (100-1000 Hz). El <input type="range"> ahora es una
-// posición 0-1000 en escala LOGARÍTMICA; itCustomCarrierHz es el Hz real
-// (la fuente de verdad) y las funciones de abajo convierten entre ambos.
+// La portada (modo "Personalizado") va de 20 a 19999 Hz (todo el rango
+// audible) — pero un slider LINEAL en un rango así es inservible: cada
+// pixel de arrastre mueve cientos de Hz y es imposible afinar cerca de los
+// valores que de verdad se usan (100-1000 Hz). El <input type="range"> es
+// una posición 0-1000 en escala LOGARÍTMICA; las funciones de abajo
+// convierten entre esa posición y el Hz real.
 const IT_CUSTOM_CARRIER_MIN = 20;
 const IT_CUSTOM_CARRIER_MAX = 19999;
 const IT_CUSTOM_CARRIER_SLIDER_MAX = 1000;
-let itCustomCarrierHz = 220;
 
 function carrierHzToPos(hz) {
   const h = Math.min(IT_CUSTOM_CARRIER_MAX, Math.max(IT_CUSTOM_CARRIER_MIN, hz));
@@ -530,14 +545,49 @@ function carrierPosToHz(pos) {
   return Math.round(hz * 10) / 10;
 }
 
-// Fuente de verdad = itCustomCarrierHz; el slider solo se sincroniza a su
-// posición equivalente (nunca al revés, para no perder precisión en el
-// redondeo posición→Hz→posición).
-function setItCustomCarrierHz(hz) {
-  itCustomCarrierHz = Math.min(IT_CUSTOM_CARRIER_MAX, Math.max(IT_CUSTOM_CARRIER_MIN, hz));
+// Recalcula itCustomCarrierHz desde el modo de portadora + itCustomNominalBase
+// (carrierBaseFor hace el mismo escalado que el generador). En 'personalizado'
+// no toca nada: ese valor lo pone el slider directamente (setItCustomCarrierHzManual).
+function recomputeItCustomCarrier() {
+  if (itCustomCarrierMode === 'personalizado') return;
+  const hz = carrierBaseFor(itCustomCarrierMode, itCustomNominalBase);
+  itCustomCarrierHz = Math.round(hz * 10) / 10;
+  syncItCustomCarrierSlider();
+  updateItCustomLabels();
+}
+
+function syncItCustomCarrierSlider() {
   const baseEl = document.getElementById('it-custom-base');
   if (baseEl) baseEl.value = String(carrierHzToPos(itCustomCarrierHz));
+}
+
+// Solo se usa en modo 'personalizado': el slider fija la portada a mano.
+function setItCustomCarrierHzManual(hz) {
+  itCustomCarrierHz = Math.min(IT_CUSTOM_CARRIER_MAX, Math.max(IT_CUSTOM_CARRIER_MIN, hz));
+  syncItCustomCarrierSlider();
   updateItCustomLabels();
+}
+
+function syncItCustomCarrierButtons() {
+  document.querySelectorAll('#it-custom-carrier-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === itCustomCarrierMode);
+  });
+  const row = document.getElementById('it-custom-base-row');
+  if (row) row.classList.toggle('hidden', itCustomCarrierMode !== 'personalizado');
+}
+
+// Cambia de modo de portadora (botón de afinación o "Personalizado").
+function setItCustomCarrierMode(mode) {
+  itCustomCarrierMode = mode;
+  syncItCustomCarrierButtons();
+  if (mode === 'personalizado') {
+    // Arranca desde el valor actual (lo que ya se estaba escuchando/viendo),
+    // no desde un default distinto — afinar a mano continúa donde estabas.
+    syncItCustomCarrierSlider();
+    updateItCustomLabels();
+  } else {
+    recomputeItCustomCarrier();
+  }
 }
 
 const IT_CUSTOM_CONDITIONS = [
@@ -581,7 +631,7 @@ function populateItCustomCarrierOptions() {
   const wrap = document.getElementById('it-custom-carrier-options');
   if (!wrap) return;
   wrap.innerHTML = IT_CUSTOM_CARRIERS.map(
-    (c) => `<button type="button" class="wave-btn" data-hz="${c.hz}">${escapeHtml(c.label)}</button>`,
+    (c) => `<button type="button" class="wave-btn${c.mode === itCustomCarrierMode ? ' active' : ''}" data-mode="${c.mode}">${escapeHtml(c.label)}</button>`,
   ).join('');
 }
 
@@ -668,7 +718,15 @@ function prefillItCustomFromSelection() {
       name = freq.name;
     }
   }
-  if (carrier != null) setItCustomCarrierHz(carrier);
+  if (carrier != null) {
+    // Arranca siempre en modo 'estandar': muestra la base propia del preset
+    // o de la guardada, sin escalar — desde ahí se puede afinar con una
+    // portadora o pasar a "Personalizado" para tocarla a mano.
+    itCustomNominalBase = carrier;
+    itCustomCarrierMode = 'estandar';
+    syncItCustomCarrierButtons();
+    recomputeItCustomCarrier();
+  }
   if (beat != null && beatEl) beatEl.value = String(Math.round(beat * 10) / 10);
   if (wave) {
     itCustomWave = wave;
@@ -694,10 +752,10 @@ function wireItCustomPanel() {
   if (baseEl) {
     baseEl.value = String(carrierHzToPos(itCustomCarrierHz));
     baseEl.addEventListener('input', () => {
-      itCustomCarrierHz = carrierPosToHz(parseInt(baseEl.value, 10) || 0);
-      updateItCustomLabels();
+      setItCustomCarrierHzManual(carrierPosToHz(parseInt(baseEl.value, 10) || 0));
     });
   }
+  syncItCustomCarrierButtons();
   if (beatEl) beatEl.addEventListener('input', updateItCustomLabels);
   const waveWrap = document.getElementById('it-custom-wave-options');
   if (waveWrap) {
@@ -713,7 +771,7 @@ function wireItCustomPanel() {
     carrierWrap.addEventListener('click', (e) => {
       const btn = e.target.closest('.wave-btn');
       if (!btn) return;
-      setItCustomCarrierHz(parseFloat(btn.dataset.hz));
+      setItCustomCarrierMode(btn.dataset.mode);
     });
   }
   const condWrap = document.getElementById('it-custom-cond-options');

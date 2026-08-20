@@ -9,6 +9,7 @@ import { ExperimentRunner } from './core/experiments.js';
 import { createSilentAudio } from './core/media-anchor.js';
 import { SimulationConfig, experimentToJson } from './core/reproducibility.js';
 import { PROFILES, getProfileById } from './models/profiles.js';
+import { CARRIER_BASE, carrierBaseFor } from './core/carrier.js';
 import { initStarfield } from './starfield.js';
 import {
   getAlarms,
@@ -746,20 +747,10 @@ function lsSet(key, val) {
 // La portadora (f1) es ortogonal al estado: el estado define el Δf (latido)
 // y la portadora define la frecuencia base. Así cualquier combinación es
 // posible (p. ej. Beta + 136,1 Hz) sin multiplicar los presets fijos.
+// CARRIER_BASE/scaleCarrier viven en core/carrier.js — compartidos con el
+// panel "Personalizar" de itinerarios (rutina.js) para que ambos escalen
+// exactamente igual.
 const LS_CARRIER = 'ob-carrier-v1';
-const CARRIER_BASE = { estandar: null, estandar220: 220, solfeggio: 528, solfeggio963: 963, ancestral: 136.1, schumann: 194.7, personalizado: 'custom' };
-// Referencia estándar sobre la que se escala: la afinación de referencia es
-// A=432 Hz (Verdi) en lugar de la base canónica de 220 Hz.
-const STANDARD_BASE = 432;
-// Escalado proporcional (opción B): cada preset conserva su identidad relativa
-// al elegir una familia de portadora (528 Solfeggio, 136,1 Ancestral). En vez
-// de fijar la misma base para todos, se multiplica la base propia del estado
-// por la razón familia/estándar: un preset de 432 Hz → 528 Hz exacto en la
-// familia Solfeggio, y los presets más graves que el estándar siguen sonando
-// más graves que los agudos, todos "afinados" a la misma referencia.
-function scaleCarrier(originalF1, targetBase) {
-  return +(originalF1 * (targetBase / STANDARD_BASE)).toFixed(1);
-}
 let carrier = lsGet(LS_CARRIER, 'estandar');
 if (!(carrier in CARRIER_BASE)) carrier = 'estandar';
 const carrierOptions = document.getElementById('carrier-options');
@@ -961,27 +952,14 @@ function selectState(state) {
 
 // ---------------------------------------------------------------- Audio
 function currentParams() {
-  let base;
-  if (selected.custom) {
-    base = parseFloat(customBase.value);
-  } else if (carrier === 'solfeggio' || carrier === 'solfeggio963' || carrier === 'ancestral') {
-    // Escalado proporcional: el estado conserva su identidad relativa dentro
-    // de la familia elegida (p. ej. en 528: Paz → 528 Hz, Gateway → 480 Hz;
-    // en 963: Meditación → 468 Hz, Paz → 423 Hz).
-    base = scaleCarrier(selected.base, CARRIER_BASE[carrier]);
-  } else if (carrier === 'schumann') {
-    // La portadora Schumann usa 194,7 Hz literal como f1 (la base tonal);
-    // el latido lo sigue dando el estado. No es una familia escalada.
-    base = 194.7;
-  } else if (carrier === 'estandar220') {
-    // Estándar impuesto: 220 Hz fijo como f1 (la base tonal), para todos
-    // los estados; el latido lo sigue dando cada estado.
-    base = 220;
-  } else if (carrier === 'personalizado') {
-    base = parseFloat(customBase.value);
-  } else {
-    base = selected.base; // estándar: la base propia del estado
-  }
+  // El estado Personalizado usa su propio slider SIEMPRE, sin pasar por la
+  // portadora (misma prioridad que antes); el resto delega en carrierBaseFor
+  // (core/carrier.js), que hace el mismo escalado proporcional para las
+  // familias fijas (solfeggio/solfeggio963/ancestral) y los casos literales
+  // (schumann/estandar220/personalizado).
+  const base = selected.custom
+    ? parseFloat(customBase.value)
+    : carrierBaseFor(carrier, selected.base, parseFloat(customBase.value));
   const beat = selected.custom ? parseFloat(customBeat.value) : (selected.stimulus ? selected.stimulus.beat : 10);
   const wave = selectedWave;
   return { base, beat, wave, volume: volumeLevel };
