@@ -2733,6 +2733,15 @@ html:not(.in-app) .in-app-only {
   border-color: rgba(248, 113, 113, 0.4);
 }
 
+.cuenta-item-note {
+  flex: none;
+  max-width: 160px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  text-align: right;
+}
+
 .cuenta-item-edit {
   appearance: none;
   width: 30px;

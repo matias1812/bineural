@@ -192,8 +192,17 @@ function renderFrequencies(freqs) {
   );
 }
 
-function renderAlarms(alarms) {
+function renderAlarms(alarms, its) {
   currentAlarms = alarms || [];
+  // Las alarmas que genera un paso de itinerario (ItineraryItem.alarm_id) no
+  // se pueden borrar acá directo (el backend lo rechaza con 409, ver
+  // routers/alarms.py): borrarla dejaba el paso con su horario intacto en
+  // la grilla pero sin alarma real detrás. Se editan/borran desde su
+  // itinerario en /rutina, no desde esta lista.
+  const linkedIds = new Set();
+  (its || []).forEach((it) => (it.items || []).forEach((item) => {
+    if (item.alarm_id) linkedIds.add(item.alarm_id);
+  }));
   renderList(
     'cuenta-alarms',
     'cuenta-alarms-empty',
@@ -203,11 +212,15 @@ function renderAlarms(alarms) {
         ? fmtDate(a.scheduled_at)
         : 'sin horario fijo';
       const rep = a.repeat_rule ? ` · ${escapeHtml(a.repeat_rule)}` : '';
+      const linked = linkedIds.has(a.id);
+      const del = linked
+        ? `<small class="cuenta-item-note">🔗 Parte de un itinerario — editalo en /rutina</small>`
+        : `<button type="button" class="cuenta-item-del" data-act="delalarm" data-id="${escapeHtml(a.id)}" aria-label="Eliminar alarma">✕</button>`;
       return `<div class="cuenta-item-body">
           <b>${escapeHtml(a.name || 'Recordatorio')} ${a.enabled ? '' : '<em>(desactivada)</em>'}</b>
           <small>${escapeHtml(when)} · ${escapeHtml(a.timezone || 'UTC')}${rep}</small>
         </div>
-        <button type="button" class="cuenta-item-del" data-act="delalarm" data-id="${escapeHtml(a.id)}" aria-label="Eliminar alarma">✕</button>`;
+        ${del}`;
     },
   );
 }
@@ -568,7 +581,7 @@ async function loadAll() {
 
   renderFavorites(favs || []);
   renderFrequencies(freqs || []);
-  renderAlarms(alarms || []);
+  renderAlarms(alarms || [], its || []);
   renderItineraries(its || []);
   renderDevices(devices || []);
   if (push) pushState = push;
