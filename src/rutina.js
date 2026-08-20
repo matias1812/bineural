@@ -585,6 +585,11 @@ function setItCustomCarrierMode(mode) {
     // no desde un default distinto — afinar a mano continúa donde estabas.
     syncItCustomCarrierSlider();
     updateItCustomLabels();
+    // El panel es largo (7 botones + varias secciones abajo) — en celular el
+    // slider recién revelado puede quedar fuera de la pantalla sin que el
+    // usuario note que apareció. Lo llevamos a la vista.
+    const row = document.getElementById('it-custom-base-row');
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
   } else {
     recomputeItCustomCarrier();
   }

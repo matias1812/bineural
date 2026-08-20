@@ -1855,7 +1855,7 @@ ambientOptions.addEventListener('click', (e) => {
 
 // ---------------------------------------------------------------- Personalizado
 function updateCustomLabels() {
-  customBaseLabel.textContent = `Portadora: ${customBase.value} Hz`;
+  customBaseLabel.textContent = `Portada: ${customBase.value} Hz`;
   customBeatLabel.textContent = `Ritmo binaural: ${customBeat.value} Hz`;
 }
 
@@ -4614,7 +4614,7 @@ if (deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar') {
   // fijas (Solfeggio/Ancestral) derivan la base del estado al cargar.
   if (deepCarrier === 'personalizado' && isFinite(deepF1) && deepF1 > 0) {
     customBase.value = String(Math.round(deepF1));
-    customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
+    customBaseLabel.textContent = `Portada: ${Math.round(deepF1)} Hz`;
   }
 } else if (deepF1 === 528) carrier = 'solfeggio';
 else if (deepF1 === 963) carrier = 'solfeggio963';
@@ -4623,7 +4623,7 @@ else if (deepF1 === 194.7) carrier = 'schumann';
 else if (isFinite(deepF1) && deepF1 > 0) {
   carrier = 'personalizado';
   customBase.value = String(Math.round(deepF1));
-  customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
+  customBaseLabel.textContent = `Portada: ${Math.round(deepF1)} Hz`;
 }
 // P3 — la sesión se sanitiza ANTES de restaurar: un localStorage corrupto
 // (NaN, fuera de rango) nunca rompe la restauración ni deja la UI en un
