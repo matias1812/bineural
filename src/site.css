@@ -1199,6 +1199,12 @@ body.immersive .bug-fab {
   border: 1px solid rgba(250, 204, 21, 0.35);
 }
 
+.rs-bad {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
 .rs-dev {
   color: #93c5fd;
   background: rgba(96, 165, 250, 0.1);
@@ -2110,6 +2116,78 @@ html:not(.in-app) .in-app-only {
 
 .auth-menu-danger .ico {
   color: #f87171;
+}
+
+/* Modal genérico (formularios largos como "Crear itinerario"): mismo
+   tratamiento visual que .auth-modal, sin acoplarse a esa semántica. */
+.page-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(8, 10, 22, 0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: authFade 0.2s ease;
+}
+
+.page-modal-card {
+  width: 100%;
+  max-width: 520px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #14162b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.65);
+}
+
+.page-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.page-modal-head h3 {
+  font-size: 17px;
+  color: var(--text);
+  margin: 0;
+}
+
+.page-modal-close {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 17px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  flex: none;
+}
+
+.page-modal-close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 480px) {
+  .page-modal {
+    padding: 12px;
+  }
+
+  .page-modal-card {
+    max-height: 92vh;
+    padding: 18px;
+    border-radius: 16px;
+  }
 }
 
 /* Modal de autenticación (autocontenido: funciona en todas las páginas) */

@@ -196,99 +196,10 @@
           <div class="rutina-empty" id="rutina-it-empty">
             <p class="rm-emoji" aria-hidden="true">🗺️</p>
             <p><strong>Todavía no tenés itinerarios.</strong></p>
-            <p>Creá uno acá abajo: elegí un día, sumá pasos con su horario y guardalo.</p>
+            <p>Creá uno con el botón de abajo: elegí un día, sumá pasos con su horario y guardalo.</p>
           </div>
 
-          <details class="cuenta-create" id="itinerary-form-details">
-            <summary id="itinerary-form-summary">＋ Crear itinerario</summary>
-            <form id="itinerary-form" class="cuenta-form">
-              <input type="hidden" id="itinerary-edit-id" value="" />
-              <label>Nombre
-                <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
-              </label>
-              <label>Descripción <em>(opcional)</em>
-                <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
-              </label>
-              <label>Día de la semana <em>(opcional)</em>
-                <select id="itinerary-day">
-                  <option value="">Sin día fijo (secuencia suelta)</option>
-                  <option value="1">Lunes</option>
-                  <option value="2">Martes</option>
-                  <option value="3">Miércoles</option>
-                  <option value="4">Jueves</option>
-                  <option value="5">Viernes</option>
-                  <option value="6">Sábado</option>
-                  <option value="0">Domingo</option>
-                </select>
-              </label>
-              <p class="cuenta-empty" id="itinerary-day-hint">
-                Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
-                con su horario). No podés repetir el mismo día en dos itinerarios.
-              </p>
-              <fieldset class="cuenta-steps">
-                <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
-                <div class="cuenta-form-row">
-                  <label>Frecuencia
-                    <span class="it-step-freq-row">
-                      <select id="it-step-freq"></select>
-                      <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom" aria-expanded="false">🎨 Personalizar</button>
-                    </span>
-                  </label>
-                  <label>Duración (min)
-                    <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
-                  </label>
-                </div>
-
-                <div class="custom hidden" id="it-custom-panel">
-                  <span class="ctrl-label"><span>Portadora <em>(referencia rápida, después ajustá con el slider)</em></span></span>
-                  <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de referencia"></div>
-                  <label class="slider-row">
-                    <span class="ctrl-label"><span id="it-custom-base-label">Portadora: 220 Hz</span></span>
-                    <input id="it-custom-base" type="range" min="60" max="1000" step="1" value="220" />
-                  </label>
-                  <label class="slider-row">
-                    <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
-                    <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
-                  </label>
-                  <span class="ctrl-label"><span>Forma de onda</span></span>
-                  <div id="it-custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
-                  <span class="ctrl-label"><span>Condición experimental</span></span>
-                  <div id="it-custom-cond-options" class="wave-options" role="radiogroup" aria-label="Condición del estímulo"></div>
-                  <div class="custom-save-wrap">
-                    <label class="custom-save-name-label" for="it-custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
-                    <div class="custom-save-row">
-                      <input type="text" id="it-custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
-                      <button type="button" class="cuenta-btn" id="it-custom-save">Usar esta frecuencia</button>
-                    </div>
-                    <p class="custom-save-note hidden" id="it-custom-save-note" role="status"></p>
-                  </div>
-                </div>
-
-                <label>Horario <em>(opcional)</em>
-                  <input id="it-step-time" type="time" />
-                </label>
-                <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
-                  <input type="checkbox" id="it-step-notify" checked />
-                  🔔 Avisarme con notificación a esa hora
-                </label>
-                <p class="cuenta-empty" id="it-step-time-hint">
-                  Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
-                  arriba si preferís que quede solo agendado, sin notificación). Se repite cada
-                  semana en el día del itinerario; si el itinerario no tiene día, es de una sola vez.
-                </p>
-                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
-                <ul class="cuenta-list" id="it-steps"></ul>
-                <p class="cuenta-empty" id="it-steps-empty">
-                  Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
-                  al activarse te avisa de arrancar la sesión.
-                </p>
-              </fieldset>
-              <div class="cuenta-form-row">
-                <button type="submit" class="cuenta-btn" id="itinerary-submit">Crear itinerario</button>
-                <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="itinerary-cancel-edit">Cancelar edición</button>
-              </div>
-            </form>
-          </details>
+          <button type="button" class="hero-cta" id="itinerary-open-btn">＋ Crear itinerario</button>
         </div>
 
         <div class="page-card">
@@ -310,6 +221,102 @@
         </div>
       </div>
     </main>
+
+    <div id="itinerary-modal" class="page-modal hidden" role="dialog" aria-modal="true" aria-label="Crear itinerario">
+      <div class="page-modal-card">
+        <div class="page-modal-head">
+          <h3 id="itinerary-form-summary">＋ Crear itinerario</h3>
+          <button type="button" class="page-modal-close" id="itinerary-modal-close" aria-label="Cerrar">✕</button>
+        </div>
+        <form id="itinerary-form" class="cuenta-form">
+          <input type="hidden" id="itinerary-edit-id" value="" />
+          <label>Nombre
+            <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
+          </label>
+          <label>Descripción <em>(opcional)</em>
+            <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
+          </label>
+          <label>Día de la semana <em>(opcional)</em>
+            <select id="itinerary-day">
+              <option value="">Sin día fijo (secuencia suelta)</option>
+              <option value="1">Lunes</option>
+              <option value="2">Martes</option>
+              <option value="3">Miércoles</option>
+              <option value="4">Jueves</option>
+              <option value="5">Viernes</option>
+              <option value="6">Sábado</option>
+              <option value="0">Domingo</option>
+            </select>
+          </label>
+          <p class="cuenta-empty" id="itinerary-day-hint">
+            Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
+            con su horario). No podés repetir el mismo día en dos itinerarios.
+          </p>
+          <fieldset class="cuenta-steps">
+            <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
+            <div class="cuenta-form-row">
+              <label>Frecuencia
+                <span class="it-step-freq-row">
+                  <select id="it-step-freq"></select>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom" aria-expanded="false">🎨 Personalizar</button>
+                </span>
+              </label>
+              <label>Duración (min)
+                <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
+              </label>
+            </div>
+
+            <div class="custom hidden" id="it-custom-panel">
+              <span class="ctrl-label"><span>Portadora <em>(referencia rápida, después ajustá con el slider)</em></span></span>
+              <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de referencia"></div>
+              <label class="slider-row">
+                <span class="ctrl-label"><span id="it-custom-base-label">Portadora: 220 Hz</span></span>
+                <input id="it-custom-base" type="range" min="60" max="1000" step="1" value="220" />
+              </label>
+              <label class="slider-row">
+                <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
+                <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
+              </label>
+              <span class="ctrl-label"><span>Forma de onda</span></span>
+              <div id="it-custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
+              <span class="ctrl-label"><span>Condición experimental</span></span>
+              <div id="it-custom-cond-options" class="wave-options" role="radiogroup" aria-label="Condición del estímulo"></div>
+              <div class="custom-save-wrap">
+                <label class="custom-save-name-label" for="it-custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
+                <div class="custom-save-row">
+                  <input type="text" id="it-custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
+                  <button type="button" class="cuenta-btn" id="it-custom-save">Usar esta frecuencia</button>
+                </div>
+                <p class="custom-save-note hidden" id="it-custom-save-note" role="status"></p>
+              </div>
+            </div>
+
+            <label>Horario <em>(opcional)</em>
+              <input id="it-step-time" type="time" />
+            </label>
+            <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
+              <input type="checkbox" id="it-step-notify" checked />
+              🔔 Avisarme con notificación a esa hora
+            </label>
+            <p class="cuenta-empty" id="it-step-time-hint">
+              Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
+              arriba si preferís que quede solo agendado, sin notificación). Se repite cada
+              semana en el día del itinerario; si el itinerario no tiene día, es de una sola vez.
+            </p>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
+            <ul class="cuenta-list" id="it-steps"></ul>
+            <p class="cuenta-empty" id="it-steps-empty">
+              Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
+              al activarse te avisa de arrancar la sesión.
+            </p>
+          </fieldset>
+          <div class="cuenta-form-row">
+            <button type="submit" class="cuenta-btn" id="itinerary-submit">Crear itinerario</button>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="itinerary-cancel-edit">Cancelar edición</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <footer class="site-footer">
       <div class="footer-grid">

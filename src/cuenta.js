@@ -425,6 +425,18 @@ function secureContext() {
   return typeof window !== 'undefined' && window.isSecureContext;
 }
 
+// Antes el único indicador era una frase de texto gris perdida entre otras
+// (misma clase .rutina-hint que cualquier aclaración) — nunca quedaba claro
+// de un vistazo si estaba activo o no. Esta pastilla (mismo patrón visual de
+// .roadmap-status que ya usa el resto del sitio) es el estado real en una
+// palabra: Activo / Inactivo / Bloqueado, sin tener que leer el párrafo.
+function setPushStatus(label, cls) {
+  const badge = $('cuenta-push-status');
+  if (!badge) return;
+  badge.textContent = label;
+  badge.className = `roadmap-status ${cls}`;
+}
+
 function renderPush() {
   const text = $('cuenta-push-text');
   const sub = $('cuenta-push-subscribe');
@@ -436,24 +448,28 @@ function renderPush() {
   if (isApk()) {
     switch (nativeNotifState) {
       case 'GRANTED':
+        setPushStatus('Activo', 'rs-live');
         text.textContent =
           '✅ Notificaciones activadas: tus recordatorios avisan en el teléfono incluso con la app cerrada.';
         if (sub) sub.disabled = true;
         if (unsub) unsub.disabled = false;
         return;
       case 'DENIED_PERMANENTLY':
+        setPushStatus('Bloqueado', 'rs-bad');
         text.textContent =
           'Las notificaciones están apagadas en los Ajustes del sistema. Tocá "Desactivar" para abrirlas y habilitarlas.';
         if (sub) sub.disabled = true;
         if (unsub) unsub.disabled = false;
         return;
       case 'DENIED':
+        setPushStatus('Rechazado', 'rs-bad');
         text.textContent =
           'Notificaciones rechazadas. Tocá "Activar" para volver a pedir el permiso del sistema.';
         if (sub) sub.disabled = false;
         if (unsub) unsub.disabled = false;
         return;
       default: // NOT_REQUESTED / UNAVAILABLE
+        setPushStatus('Inactivo', 'rs-warn');
         text.textContent =
           'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
         if (sub) sub.disabled = false;
@@ -463,6 +479,7 @@ function renderPush() {
   }
 
   if (!secureContext()) {
+    setPushStatus('No disponible', 'rs-bad');
     text.textContent =
       'Este navegador no permite push sin HTTPS (solo localhost). En producción es automático.';
     if (sub) sub.disabled = true;
@@ -470,12 +487,14 @@ function renderPush() {
     return;
   }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    setPushStatus('No disponible', 'rs-bad');
     text.textContent = 'Este navegador no soporta notificaciones push.';
     if (sub) sub.disabled = true;
     if (unsub) unsub.disabled = true;
     return;
   }
   if (!pushState.configured) {
+    setPushStatus('No disponible', 'rs-bad');
     text.textContent = pushState.supported
       ? 'El servidor de notificaciones no está configurado todavía.'
       : 'El backend no está disponible: no se pueden activar las notificaciones ahora.';
@@ -484,6 +503,7 @@ function renderPush() {
     return;
   }
   if (deviceSubscribed === true) {
+    setPushStatus('Activo', 'rs-live');
     text.textContent =
       '✅ Este dispositivo ya está suscrito: las notificaciones llegan incluso con la pestaña cerrada (web/PWA).';
     if (sub) sub.disabled = true;
@@ -494,12 +514,14 @@ function renderPush() {
   // vuelve a mostrar el diálogo. Tocar "Activar" acá fallaría en silencio sin
   // esto — la única salida es reactivarlo a mano en los ajustes del sitio.
   if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+    setPushStatus('Bloqueado', 'rs-bad');
     text.textContent =
       'Bloqueaste las notificaciones en este navegador. Para activarlas: tocá el candado 🔒 (o ⓘ) junto a la dirección del sitio → Permisos → Notificaciones → Permitir, y recargá la página.';
     if (sub) sub.disabled = true;
     if (unsub) unsub.disabled = true;
     return;
   }
+  setPushStatus('Inactivo', 'rs-warn');
   text.textContent =
     'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
   if (sub) sub.disabled = false;

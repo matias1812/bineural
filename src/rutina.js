@@ -629,9 +629,18 @@ function wireItCustomPanel() {
   }
 }
 
+function openItineraryModal() {
+  const modal = document.getElementById('itinerary-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeItineraryModal() {
+  const modal = document.getElementById('itinerary-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
 function startEditItinerary(it) {
   editingItineraryId = it.id;
-  const details = document.getElementById('itinerary-form-details');
   const summary = document.getElementById('itinerary-form-summary');
   if (summary) summary.textContent = `✏️ Editando: ${it.name || 'itinerario'}`;
   document.getElementById('itinerary-name').value = it.name || '';
@@ -654,10 +663,7 @@ function startEditItinerary(it) {
   if (submitBtn) submitBtn.textContent = 'Guardar cambios';
   const cancelBtn = document.getElementById('itinerary-cancel-edit');
   if (cancelBtn) cancelBtn.classList.remove('hidden');
-  if (details) {
-    details.open = true;
-    details.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  openItineraryModal();
 }
 
 function cancelEditItinerary() {
@@ -676,6 +682,36 @@ function cancelEditItinerary() {
 }
 
 function wireItineraryForm() {
+  const openBtn = document.getElementById('itinerary-open-btn');
+  const modal = document.getElementById('itinerary-modal');
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      cancelEditItinerary();
+      openItineraryModal();
+    });
+  }
+  const modalClose = document.getElementById('itinerary-modal-close');
+  if (modalClose) {
+    modalClose.addEventListener('click', () => {
+      cancelEditItinerary();
+      closeItineraryModal();
+    });
+  }
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        cancelEditItinerary();
+        closeItineraryModal();
+      }
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+      cancelEditItinerary();
+      closeItineraryModal();
+    }
+  });
+
   const add = document.getElementById('it-step-add');
   const timeEl = document.getElementById('it-step-time');
   if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
@@ -760,8 +796,7 @@ function wireItineraryForm() {
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
       cancelEditItinerary();
-      const details = document.getElementById('itinerary-form-details');
-      if (details) details.open = false;
+      closeItineraryModal();
     });
   }
 
@@ -794,8 +829,7 @@ function wireItineraryForm() {
           await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, day_of_week, items });
         }
         cancelEditItinerary();
-        const details = document.getElementById('itinerary-form-details');
-        if (details) details.open = false;
+        closeItineraryModal();
         loadItineraries();
         // En la APK, sin esto el recordatorio recién guardado esperaba el
         // próximo ciclo de sync nativo (~5 min) para programarse en el
@@ -1013,13 +1047,9 @@ itListEl.addEventListener('click', async (e) => {
   const addDayBtn = e.target.closest('[data-add-day]');
   if (addDayBtn) {
     cancelEditItinerary();
-    const details = document.getElementById('itinerary-form-details');
     const dayEl = document.getElementById('itinerary-day');
     if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
-    if (details) {
-      details.open = true;
-      details.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    openItineraryModal();
     return;
   }
   const btn = e.target.closest('[data-reorder]');
