@@ -1030,16 +1030,44 @@ function todayPractice() {
   }
 }
 
+// Próxima sesión de itinerario (día fijo + horario de paso) — el mismo
+// cálculo que el horario semanal usa para ubicar cada paso, pero buscando
+// la ocurrencia más cercana entre TODOS los itinerarios con día asignado.
+// Sin esto, "próximo recordatorio" solo miraba getAlarms() (recordatorios
+// LOCALES de este dispositivo) y un itinerario recién creado — que sí tiene
+// alarma real, solo que la maneja el backend vía Web Push, no el
+// AlarmManager local — nunca aparecía acá aunque estuviera guardado y
+// alineado correctamente en la grilla semanal.
+function nextItineraryOccurrence(its, fromMs = Date.now()) {
+  let best = null;
+  (its || []).forEach((it) => {
+    if (it.day_of_week == null || it.is_active === false) return;
+    (it.items || []).forEach((item) => {
+      if (!item.time_of_day) return;
+      const [hh, mm] = item.time_of_day.split(':').map(Number);
+      if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+      const at = nextOccurrenceAt(hh, mm, [it.day_of_week], fromMs);
+      if (at != null && (!best || at < best.at)) {
+        const s = stepLabel(item);
+        best = { at, time: item.time_of_day, name: `${it.name || 'Rutina'} · ${s.name}` };
+      }
+    });
+  });
+  return best;
+}
+
 function renderDaily() {
   const el = document.getElementById('rutina-daily');
   if (!el) return;
   const { mins, sessions } = todayPractice();
   const alarms = getAlarms().slice().sort((a, b) => (a.nextAt || 0) - (b.nextAt || 0));
-  const next = alarms[0];
+  const localNext = alarms[0] ? { at: alarms[0].nextAt, time: alarms[0].time, name: alarms[0].name || 'Sesión' } : null;
+  const itNext = nextItineraryOccurrence(currentIts);
+  const next = [localNext, itNext].filter(Boolean).sort((a, b) => a.at - b.at)[0];
   const stat = (b, label) => `<div class="daily-stat"><b>${b}</b><span>${label}</span></div>`;
   const parts = [stat(String(mins), 'min de práctica hoy'), stat(String(sessions), `${sessions === 1 ? 'sesión' : 'sesiones'} hoy`)];
   if (next) {
-    const when = next.nextAt ? `${next.time || ''} · ${fmtWhen(next.nextAt)}` : next.time || '';
+    const when = next.at ? `${next.time || ''} · ${fmtWhen(next.at)}` : next.time || '';
     parts.push(stat(escapeHtml(when), `próximo recordatorio · ${escapeHtml(next.name || 'Sesión')}`));
   } else {
     parts.push(stat('—', 'sin recordatorios próximos'));
@@ -1116,6 +1144,11 @@ async function loadItineraries() {
     renderItineraries([]);
   } finally {
     itinerariesLoaded = true;
+    // El resumen de hoy se pinta ANTES de que esto termine (refreshState()
+    // llama render() y recién después loadItineraries(), sin esperarlo) —
+    // sin este segundo pintado, "próximo recordatorio" quedaba SIEMPRE
+    // calculado con currentIts=[] y jamás se refrescaba con lo real.
+    renderDaily();
   }
 }
 
