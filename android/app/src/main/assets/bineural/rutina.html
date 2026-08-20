@@ -49,11 +49,11 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/rutina-CwagSZUj.js"></script>
+    <script type="module" src="./assets/rutina-C678yMYX.js"></script>
     <link rel="modulepreload" href="./assets/site-DOeasVFt.js">
     <link rel="modulepreload" href="./assets/freq-cover-DOIGVMNY.js">
     <link rel="modulepreload" href="./assets/alarms-l-HP6X4c.js">
-    <link rel="modulepreload" href="./assets/alarm-manager-Bb-n1NcZ.js">
+    <link rel="modulepreload" href="./assets/alarm-manager-7cj_m7SA.js">
     <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
     <link rel="modulepreload" href="./assets/native-bridge-BVY3Ub9D.js">
     <link rel="stylesheet" href="./assets/site-BbMlO54w.css">
@@ -119,18 +119,18 @@
             <h2>Próximas sesiones</h2>
             <span class="roadmap-status rs-live" id="rutina-count">0</span>
           </div>
-          <p class="rutina-hint">Se muestran los recordatorios guardados en este dispositivo.</p>
+          <p class="rutina-hint">Tu horario completo: recordatorios de este dispositivo y las próximas sesiones de tus itinerarios, en orden.</p>
 
           <!-- Web/PWA: la repetición semanal con alarma real (AlarmManager) es
-               exclusiva de la APK; los itinerarios de abajo sí funcionan acá. -->
+               exclusiva de la APK; los itinerarios sí funcionan acá vía push. -->
           <div class="page-card hidden" id="rutina-apk-gate">
             <p class="rm-emoji" aria-hidden="true">📲</p>
             <h3>Repetición con alarma real: exclusiva de la APK</h3>
             <p>
-              Un recordatorio que se repita ciertos días con alarma real y vibración necesita el
-              reloj del sistema de Android. Esta lista es de recordatorios de este dispositivo;
-              tus <a href="#rutina-it-list">itinerarios</a> con horario sí te avisan acá con una
-              notificación push.
+              Un recordatorio de este dispositivo que se repita ciertos días con alarma real y
+              vibración necesita el reloj del sistema de Android. Tus
+              <a href="#rutina-it-list">itinerarios</a> con horario sí te avisan acá con una
+              notificación push, en cualquier plataforma.
             </p>
           </div>
 
@@ -275,11 +275,11 @@
             </div>
 
             <div class="custom hidden" id="it-custom-panel">
-              <span class="ctrl-label"><span>Portadora <em>(referencia rápida, después ajustá con el slider)</em></span></span>
-              <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de referencia"></div>
-              <label class="slider-row">
-                <span class="ctrl-label"><span id="it-custom-base-label">Portadora: 220 Hz</span></span>
-                <input id="it-custom-base" type="range" min="60" max="1000" step="1" value="220" />
+              <span class="ctrl-label"><span>Portadora <em>este paso se afina a esta familia</em></span></span>
+              <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de afinación"></div>
+              <span class="ctrl-label"><span id="it-custom-base-label">Portada: 220 Hz</span></span>
+              <label class="slider-row hidden" id="it-custom-base-row">
+                <input id="it-custom-base" type="range" min="0" max="1000" step="1" value="347" />
               </label>
               <label class="slider-row">
                 <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
