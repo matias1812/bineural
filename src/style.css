@@ -3749,6 +3749,7 @@ body.immersive .controls {
 
 .perm-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 16px;
 }
@@ -3792,11 +3793,11 @@ body.immersive .controls {
 }
 
 .perm-actions .quick-start {
-  flex: 1;
+  flex: 1 1 140px;
 }
 
 .perm-off {
-  flex: 1;
+  flex: 1 1 140px;
   appearance: none;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
@@ -3809,7 +3810,7 @@ body.immersive .controls {
 }
 
 .perm-test {
-  flex: 1;
+  flex: 1 1 140px;
   appearance: none;
   background: rgba(167, 139, 250, 0.1);
   border: 1px solid rgba(167, 139, 250, 0.2);
