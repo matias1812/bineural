@@ -504,6 +504,39 @@ const IT_CUSTOM_CARRIERS = [
   { hz: 194.7, label: '194.7 Hz · Schumann' },
 ];
 
+// La portadora va de 20 a 19999 Hz (todo el rango audible, a pedido) — pero
+// un slider LINEAL en un rango así es inservible: cada pixel de arrastre
+// mueve cientos de Hz y es imposible afinar cerca de los valores que de
+// verdad se usan (100-1000 Hz). El <input type="range"> ahora es una
+// posición 0-1000 en escala LOGARÍTMICA; itCustomCarrierHz es el Hz real
+// (la fuente de verdad) y las funciones de abajo convierten entre ambos.
+const IT_CUSTOM_CARRIER_MIN = 20;
+const IT_CUSTOM_CARRIER_MAX = 19999;
+const IT_CUSTOM_CARRIER_SLIDER_MAX = 1000;
+let itCustomCarrierHz = 220;
+
+function carrierHzToPos(hz) {
+  const h = Math.min(IT_CUSTOM_CARRIER_MAX, Math.max(IT_CUSTOM_CARRIER_MIN, hz));
+  const t = Math.log(h / IT_CUSTOM_CARRIER_MIN) / Math.log(IT_CUSTOM_CARRIER_MAX / IT_CUSTOM_CARRIER_MIN);
+  return Math.round(t * IT_CUSTOM_CARRIER_SLIDER_MAX);
+}
+
+function carrierPosToHz(pos) {
+  const t = Math.min(1, Math.max(0, pos / IT_CUSTOM_CARRIER_SLIDER_MAX));
+  const hz = IT_CUSTOM_CARRIER_MIN * (IT_CUSTOM_CARRIER_MAX / IT_CUSTOM_CARRIER_MIN) ** t;
+  return Math.round(hz * 10) / 10;
+}
+
+// Fuente de verdad = itCustomCarrierHz; el slider solo se sincroniza a su
+// posición equivalente (nunca al revés, para no perder precisión en el
+// redondeo posición→Hz→posición).
+function setItCustomCarrierHz(hz) {
+  itCustomCarrierHz = Math.min(IT_CUSTOM_CARRIER_MAX, Math.max(IT_CUSTOM_CARRIER_MIN, hz));
+  const baseEl = document.getElementById('it-custom-base');
+  if (baseEl) baseEl.value = String(carrierHzToPos(itCustomCarrierHz));
+  updateItCustomLabels();
+}
+
 const IT_CUSTOM_CONDITIONS = [
   { id: 'binaural', label: 'Binaural' },
   { id: 'pure-tone', label: 'Tono puro' },
@@ -578,11 +611,10 @@ function syncItCustomAmbientButtons() {
 }
 
 function updateItCustomLabels() {
-  const base = document.getElementById('it-custom-base');
   const beat = document.getElementById('it-custom-beat');
   const baseLabel = document.getElementById('it-custom-base-label');
   const beatLabel = document.getElementById('it-custom-beat-label');
-  if (base && baseLabel) baseLabel.textContent = `Portadora: ${base.value} Hz`;
+  if (baseLabel) baseLabel.textContent = `Portadora: ${formatHzShort(itCustomCarrierHz)}`;
   if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
 }
 
@@ -605,7 +637,6 @@ function setItCustomNote(msg, isError) {
 //    no perderlo y volver a empezar de cero.
 function prefillItCustomFromSelection() {
   const sel = document.getElementById('it-step-freq');
-  const baseEl = document.getElementById('it-custom-base');
   const beatEl = document.getElementById('it-custom-beat');
   const nameEl = document.getElementById('it-custom-save-name');
   if (!sel || !sel.value) return;
@@ -634,7 +665,7 @@ function prefillItCustomFromSelection() {
       name = freq.name;
     }
   }
-  if (carrier != null && baseEl) baseEl.value = String(Math.round(carrier * 10) / 10);
+  if (carrier != null) setItCustomCarrierHz(carrier);
   if (beat != null && beatEl) beatEl.value = String(Math.round(beat * 10) / 10);
   if (wave) {
     itCustomWave = wave;
@@ -657,7 +688,13 @@ function wireItCustomPanel() {
   populateItCustomAmbientOptions();
   const baseEl = document.getElementById('it-custom-base');
   const beatEl = document.getElementById('it-custom-beat');
-  if (baseEl) baseEl.addEventListener('input', updateItCustomLabels);
+  if (baseEl) {
+    baseEl.value = String(carrierHzToPos(itCustomCarrierHz));
+    baseEl.addEventListener('input', () => {
+      itCustomCarrierHz = carrierPosToHz(parseInt(baseEl.value, 10) || 0);
+      updateItCustomLabels();
+    });
+  }
   if (beatEl) beatEl.addEventListener('input', updateItCustomLabels);
   const waveWrap = document.getElementById('it-custom-wave-options');
   if (waveWrap) {
@@ -672,9 +709,8 @@ function wireItCustomPanel() {
   if (carrierWrap) {
     carrierWrap.addEventListener('click', (e) => {
       const btn = e.target.closest('.wave-btn');
-      if (!btn || !baseEl) return;
-      baseEl.value = btn.dataset.hz;
-      updateItCustomLabels();
+      if (!btn) return;
+      setItCustomCarrierHz(parseFloat(btn.dataset.hz));
     });
   }
   const condWrap = document.getElementById('it-custom-cond-options');
@@ -718,7 +754,7 @@ function wireItCustomPanel() {
       if (submitBtn) submitBtn.disabled = true;
       setItCustomNote('Guardando…');
       try {
-        const carrier = (baseEl && parseFloat(baseEl.value)) || 220;
+        const carrier = itCustomCarrierHz || 220;
         const beat = (beatEl && parseFloat(beatEl.value)) || 10;
         const name = (nameEl && nameEl.value.trim()) || 'Personalizada';
         const frequency = await createFrequency({
