@@ -94,6 +94,15 @@ const itSyncEl = document.getElementById('rutina-it-sync');
 
 // ── Itinerarios (la rutina de pasos, unificada) ─────────────────────────────
 
+// El ambiente (lluvia/río/etc.) que se haya elegido al personalizar la
+// frecuencia (ver wireItCustomPanel > it-custom-save) viaja en su config —
+// a diferencia de "condition", esto SÍ suena distinto, así que "Iniciar"
+// desde el itinerario tiene que reproducir el mismo paisaje sonoro.
+function freqAmbient(freq) {
+  const amb = freq && freq.config && Array.isArray(freq.config.ambient) ? freq.config.ambient : [];
+  return amb.filter((a) => typeof a === 'string' && a);
+}
+
 function freqUrlParams(freq) {
   const base = freq ? (freq.left_frequency != null ? freq.left_frequency : freq.carrier_frequency) : 220;
   const beat = freq ? freq.beat_frequency : 10;
@@ -102,6 +111,8 @@ function freqUrlParams(freq) {
   if (base != null) q.set('freq', String(base));
   if (beat != null) q.set('beat', String(beat));
   q.set('wave', wave || 'sine');
+  const ambient = freqAmbient(freq);
+  if (ambient.length) q.set('ambient', ambient.join(','));
   // Sin autostart: el usuario toca play (nunca audio espontáneo).
   return q.toString();
 }
@@ -497,6 +508,20 @@ const IT_CUSTOM_CONDITIONS = [
 ];
 let itCustomCondition = 'binaural';
 
+// La condición experimental NO se agrega acá a propósito: el generador
+// todavía no la usa para nada en la reproducción (ver audio-provider.js) —
+// guardarla sería un dato muerto. Ambiente y portadora SÍ se escuchan de
+// verdad, por eso se guardan y viajan con la frecuencia.
+const IT_CUSTOM_AMBIENTS = [
+  { id: 'lluvia', label: '🌧️ Lluvia' },
+  { id: 'rio', label: '🏞️ Río' },
+  { id: 'bosque', label: '🌲 Bosque' },
+  { id: 'pajaros', label: '🐦 Pájaros' },
+  { id: 'oceano', label: '🌊 Océano' },
+  { id: 'fuego', label: '🔥 Fuego' },
+];
+let itCustomAmbient = new Set();
+
 function populateItCustomWaveOptions() {
   const wrap = document.getElementById('it-custom-wave-options');
   if (!wrap) return;
@@ -533,6 +558,20 @@ function syncItCustomCondButtons() {
   });
 }
 
+function populateItCustomAmbientOptions() {
+  const wrap = document.getElementById('it-custom-ambient-options');
+  if (!wrap) return;
+  wrap.innerHTML = IT_CUSTOM_AMBIENTS.map(
+    (a) => `<button type="button" class="wave-btn${itCustomAmbient.has(a.id) ? ' active' : ''}" data-ambient="${a.id}">${escapeHtml(a.label)}</button>`,
+  ).join('');
+}
+
+function syncItCustomAmbientButtons() {
+  document.querySelectorAll('#it-custom-ambient-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', itCustomAmbient.has(btn.dataset.ambient));
+  });
+}
+
 function updateItCustomLabels() {
   const base = document.getElementById('it-custom-base');
   const beat = document.getElementById('it-custom-beat');
@@ -557,6 +596,7 @@ function wireItCustomPanel() {
   populateItCustomWaveOptions();
   populateItCustomCarrierOptions();
   populateItCustomCondOptions();
+  populateItCustomAmbientOptions();
   const baseEl = document.getElementById('it-custom-base');
   const beatEl = document.getElementById('it-custom-beat');
   if (baseEl) baseEl.addEventListener('input', updateItCustomLabels);
@@ -588,6 +628,17 @@ function wireItCustomPanel() {
       syncItCustomCondButtons();
     });
   }
+  const ambientWrap = document.getElementById('it-custom-ambient-options');
+  if (ambientWrap) {
+    ambientWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.wave-btn');
+      if (!btn) return;
+      const id = btn.dataset.ambient;
+      if (itCustomAmbient.has(id)) itCustomAmbient.delete(id);
+      else itCustomAmbient.add(id);
+      syncItCustomAmbientButtons();
+    });
+  }
   toggle.addEventListener('click', () => {
     const willOpen = panel.classList.contains('hidden');
     panel.classList.toggle('hidden', !willOpen);
@@ -610,7 +661,11 @@ function wireItCustomPanel() {
           beat_frequency: Math.round(beat * 10) / 10,
           waveform: itCustomWave,
           condition: itCustomCondition,
-          config: { source: 'itinerary' },
+          // Ambiente SÍ viaja con la frecuencia (a diferencia de condition,
+          // que hoy no afecta nada de lo que suena): así "Iniciar" desde el
+          // itinerario reproduce el mismo paisaje sonoro que el usuario
+          // eligió al personalizarla, no solo freq/ritmo/onda.
+          config: { source: 'itinerary', ambient: [...itCustomAmbient] },
         });
         savedFreqsMap.set(frequency.id, frequency);
         populateStepFreqs();

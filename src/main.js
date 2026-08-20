@@ -4657,6 +4657,13 @@ const deepFreq = parseFloat(deepParams.get('freq'));
 const deepBeat = parseFloat(deepParams.get('beat'));
 const deepWave = deepParams.get('wave');
 const deepAutostart = deepParams.get('autostart') === 'true';
+// Ambiente elegido al personalizar la frecuencia en /rutina (ver
+// freqAmbient en rutina.js) — mismos ids que el mezclador de acá.
+const AMBIENT_IDS = ['lluvia', 'rio', 'bosque', 'pajaros', 'oceano', 'fuego'];
+const deepAmbient = (deepParams.get('ambient') || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => AMBIENT_IDS.includes(s));
 // Deep link de itinerario (rutina unificada): ?seq={json} — {name, steps}.
 // Cada paso trae base/beat/wave/dur. Se sanitiza TODO (viene de la URL);
 // nunca autoplay: la secuencia queda en pausa esperando el play del usuario.
@@ -4695,6 +4702,14 @@ if (isFinite(deepFreq) && deepFreq > 0) {
 }
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
 restoreSession(savedSession);
+// Ambiente del deep link: DESPUÉS de restoreSession (que si no, lo pisa con
+// lo guardado localmente — un array vacío en la sesión guardada es igual de
+// válido que uno con datos para Array.isArray, así que el orden importa).
+// Solo pisa el ambiente local si el enlace trae uno propio: una frecuencia
+// personalizada SIN ambiente no debe silenciar el que ya tenías puesto acá.
+if (isFinite(deepFreq) && deepFreq > 0 && deepAmbient.length) {
+  ambientTypes = new Set(deepAmbient);
+}
 selectState(initial);
 // El filtro arranca en la vista curada 'Destacados' (los más populares), o en
 // el filtro que el usuario dejó guardado. Si el enlace profundo o la sesión

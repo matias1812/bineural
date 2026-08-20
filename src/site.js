@@ -109,13 +109,11 @@ setTimeout(updatePlatformBadge, 1000);
 setTimeout(updatePlatformBadge, 3000);
 
 // ---------------------------------------------------------------- Navegación compartida
-// “Preguntas frecuentes” y “Mi cuenta” se agregan a la nav y al footer de
-// todas las páginas desde acá, para no duplicarlos en cada HTML. La cuenta
-// (opcional) y la ayuda deben estar a un toque desde cualquier lado.
+// "Preguntas frecuentes" y "Mi cuenta" se agregan al footer de todas las
+// páginas desde acá, para no duplicarlos en cada HTML. Ya NO se agregan al
+// nav (.site-links): "Preguntas frecuentes"/FAQ vive solo en el menú de
+// cuenta (⋯ junto al avatar, ver src/ui/auth.js) — repetirlo acá era ruido.
 const sharedFaq = '<a href="/preguntas-frecuentes">Preguntas frecuentes</a>';
-document.querySelectorAll('.site-links').forEach((nav) => {
-  nav.insertAdjacentHTML('beforeend', sharedFaq);
-});
 document.querySelectorAll('.footer-col h3').forEach((h3) => {
   const title = (h3.textContent || '').trim().toLowerCase();
   const col = h3.parentElement;
