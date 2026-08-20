@@ -441,6 +441,7 @@ function renderItSteps() {
         <b>${i + 1}. ${escapeHtml(step.name)}</b>
         <small>${step.duration} min${schedule ? ` · ${escapeHtml(schedule)}` : ''}</small>
       </div>
+      <button type="button" class="cuenta-item-edit" data-step-edit="${i}" aria-label="Editar paso">✎</button>
       <button type="button" class="cuenta-item-del" data-step="${i}" aria-label="Quitar paso">✕</button>`;
     ul.appendChild(li);
   });
@@ -720,6 +721,39 @@ function wireItineraryForm() {
       itSteps.splice(i, 1);
       renderItSteps();
     }
+  });
+
+  // Editar un paso YA guardado: no hay forma de tocar su horario in situ —
+  // el paso vuelve al formulario de arriba (mismo patrón que editar el
+  // itinerario entero) y se saca de la lista; "＋ Añadir paso" lo repone
+  // con los valores nuevos. Sin esto, la única forma de cambiar SOLO la
+  // hora de un paso era borrarlo y recrearlo a mano — nada en la UI lo
+  // explicaba, así que "actualizar la hora" en el mismo paso simplemente
+  // no hacía nada (se reenviaba el itinerario con el horario viejo, que si
+  // ya pasó, el backend lo reprograma en silencio para la semana próxima).
+  document.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('#it-steps [data-step-edit]');
+    if (!editBtn) return;
+    const i = parseInt(editBtn.dataset.stepEdit, 10);
+    const step = itSteps[i];
+    if (!Number.isFinite(i) || !step) return;
+    const sel = document.getElementById('it-step-freq');
+    const dur = document.getElementById('it-step-duration');
+    const timeEl = document.getElementById('it-step-time');
+    const notifyEl = document.getElementById('it-step-notify');
+    // El <select> solo se puebla con "Mis frecuencias" una vez, al abrir el
+    // formulario — si este paso usa una frecuencia creada DESPUÉS de eso
+    // (ej. un preset recién guardado en este mismo formulario), su opción
+    // todavía no existe y el sel.value de abajo quedaría sin efecto.
+    populateStepFreqs();
+    if (sel) sel.value = `f:${step.frequency_id}`;
+    if (dur) dur.value = String(step.duration);
+    if (timeEl) timeEl.value = step.time_of_day || '';
+    if (notifyEl) notifyEl.checked = step.notification_enabled !== false;
+    toggleStepNotifyWrap();
+    itSteps.splice(i, 1);
+    renderItSteps();
+    if (timeEl) timeEl.focus();
   });
 
   const cancelBtn = document.getElementById('itinerary-cancel-edit');

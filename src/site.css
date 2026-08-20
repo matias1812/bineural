@@ -2733,6 +2733,25 @@ html:not(.in-app) .in-app-only {
   border-color: rgba(248, 113, 113, 0.4);
 }
 
+.cuenta-item-edit {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.cuenta-item-edit:hover {
+  color: var(--accent);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
 .cuenta-item-btn-ghost {
   background: transparent;
   color: #a5b4fc;
