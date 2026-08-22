@@ -14,7 +14,7 @@
 // nace solo con un gesto explícito del usuario (P5.1/P5.6).
 
 import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
-import { listItineraries, createItinerary, updateItinerary, reorderItineraryItems } from './api/itineraries.js';
+import { listItineraries, createItinerary, updateItinerary, deleteItinerary, reorderItineraryItems } from './api/itineraries.js';
 import { listFrequencies, createFrequency } from './api/frequencies.js';
 import { createAlarm } from './api/alarms.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
@@ -234,6 +234,7 @@ function itineraryCardHTML(it, { compact } = {}) {
       <span class="rutina-card-name">${escapeHtml(it.name || 'Itinerario')}${paused}</span>
       <span class="rutina-card-actions">
         <button type="button" class="rutina-edit-btn" data-edit="${escapeHtml(it.id)}" aria-label="Editar ${escapeHtml(it.name || 'itinerario')}">✎</button>
+        <button type="button" class="rutina-edit-btn" data-del-it="${escapeHtml(it.id)}" aria-label="Eliminar ${escapeHtml(it.name || 'itinerario')}">✕</button>
         <a class="rutina-start${compact ? ' rutina-start-sm' : ''}" href="${escapeHtml(startHref)}">Iniciar</a>
       </span>
     </div>
@@ -241,13 +242,14 @@ function itineraryCardHTML(it, { compact } = {}) {
     <div class="rutina-timeline" data-it="${escapeHtml(it.id)}">${itineraryStepsHTML(items, it.id)}</div>`;
 }
 
-// Rango de horas a mostrar: de la primera a la última hora con algún paso
-// agendado (con un margen de 1 h a cada lado), o un rango por defecto
-// razonable (6→22) si todavía no hay nada — así la grilla sirve de guía
-// vacía en vez de no mostrar nada.
+// Rango de horas a mostrar: siempre cubre 6→23 (toda la tarde/noche) como
+// guía mínima, y se extiende si hay pasos agendados fuera de esa ventana
+// (p. ej. algo de madrugada). Antes el margen era de solo 1 h sobre el
+// último paso agendado, así que un paso a las 21 h cortaba la grilla en
+// las 22:00 y escondía el resto de la noche.
 function computeHourRange(byDay) {
-  let minH = 24;
-  let maxH = -1;
+  let minH = 6;
+  let maxH = 23;
   byDay.forEach((it) => {
     (it.items || []).forEach((item) => {
       if (!item.time_of_day) return;
@@ -258,8 +260,7 @@ function computeHourRange(byDay) {
       }
     });
   });
-  if (maxH < 0) return { start: 6, end: 22 };
-  return { start: Math.max(0, minH - 1), end: Math.min(23, maxH + 1) };
+  return { start: Math.max(0, minH), end: Math.min(23, maxH) };
 }
 
 // Horario real: columnas = días (L→D), filas = horas, cada sesión ubicada en
@@ -289,6 +290,7 @@ function weekGridHTML(byDay) {
         <span class="wg-day-title" title="${escapeHtml(it.name || '')}">${escapeHtml(it.name || '')}</span>
         <span class="wg-day-actions">
           <button type="button" class="wg-icon-btn" data-edit="${escapeHtml(it.id)}" aria-label="Editar ${escapeHtml(it.name || '')}">✎</button>
+          <button type="button" class="wg-icon-btn" data-del-it="${escapeHtml(it.id)}" aria-label="Eliminar ${escapeHtml(it.name || '')}">✕</button>
           ${startHref ? `<a class="wg-icon-btn" href="${escapeHtml(startHref)}" aria-label="Iniciar ${escapeHtml(it.name || '')}">▶</a>` : ''}
         </span>
         ${noTimeCount ? `<small class="wg-day-note">+${noTimeCount} sin horario</small>` : ''}
@@ -379,6 +381,12 @@ let currentIts = [];
 // /cuenta, sin mandar a otra página) ────────────────────────────────────────
 let itSteps = []; // pasos del itinerario en construcción (crear o editar)
 let editingItineraryId = null;
+// true mientras el sub-formulario de paso tiene datos de un paso YA
+// existente que se sacó de itSteps para editarlo (ver el handler de ✎ más
+// abajo) y todavía no se repuso con "＋ Añadir paso". Si el submit del
+// itinerario encuentra esto en true, repone ese paso él mismo — si no, un
+// simple "Guardar cambios" sin tocar nada más lo borraba en silencio.
+let pendingStepEdit = false;
 
 function formatHzShort(hz) {
   if (hz == null) return '';
@@ -805,6 +813,7 @@ function closeItineraryModal() {
 
 function startEditItinerary(it) {
   editingItineraryId = it.id;
+  pendingStepEdit = false;
   const summary = document.getElementById('itinerary-form-summary');
   if (summary) summary.textContent = `✏️ Editando: ${it.name || 'itinerario'}`;
   document.getElementById('itinerary-name').value = it.name || '';
@@ -832,6 +841,7 @@ function startEditItinerary(it) {
 
 function cancelEditItinerary() {
   editingItineraryId = null;
+  pendingStepEdit = false;
   itSteps = [];
   renderItSteps();
   const summary = document.getElementById('itinerary-form-summary');
@@ -882,44 +892,59 @@ function wireItineraryForm() {
   wireItCustomPanel();
   populateStepFreqs();
 
+  // Empuja el paso configurado en el sub-formulario (frecuencia/duración/
+  // horario) a itSteps. Usada tanto por "＋ Añadir paso" como, si quedó un
+  // horario cargado sin tocar ese botón, por el submit del itinerario (ver
+  // más abajo) — así un horario tipeado no se pierde en silencio solo por
+  // olvidarse del click intermedio.
+  async function addPendingStep() {
+    const sel = document.getElementById('it-step-freq');
+    const dur = document.getElementById('it-step-duration');
+    const notifyEl = document.getElementById('it-step-notify');
+    if (!sel.value) return false;
+    if (!timeEl || !timeEl.value) {
+      alert('Elegí un horario para este paso.');
+      if (timeEl) timeEl.focus();
+      return false;
+    }
+    add.disabled = true;
+    // resolveStepFrequency() puede pegarle a la red (createFrequency para
+    // un preset/personalizado sin resolver todavía) — sin bloquear Guardar
+    // acá, un click rápido en "Crear itinerario" mandaba el itinerario con
+    // ESTE paso todavía sin empujar a itSteps: el paso desaparecía en
+    // silencio, sin error, exactamente el bug reportado en vivo (2 pasos
+    // agregados, 1 solo guardado).
+    const submitBtn = document.getElementById('itinerary-submit');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const freq = await resolveStepFrequency(sel.value);
+      if (!freq) return false;
+      const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
+      const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
+      itSteps.push({
+        frequency_id: freq.id,
+        name: freq.name || 'Frecuencia',
+        duration,
+        time_of_day,
+        notification_enabled: notifyEl ? notifyEl.checked : true,
+      });
+      renderItSteps();
+      if (timeEl) timeEl.value = '';
+      if (notifyEl) notifyEl.checked = true;
+      toggleStepNotifyWrap();
+      pendingStepEdit = false;
+      return true;
+    } catch (err) {
+      alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
+      return false;
+    } finally {
+      add.disabled = false;
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
   if (add) {
-    add.addEventListener('click', async () => {
-      const sel = document.getElementById('it-step-freq');
-      const dur = document.getElementById('it-step-duration');
-      const notifyEl = document.getElementById('it-step-notify');
-      if (!sel.value) return;
-      add.disabled = true;
-      // resolveStepFrequency() puede pegarle a la red (createFrequency para
-      // un preset/personalizado sin resolver todavía) — sin bloquear Guardar
-      // acá, un click rápido en "Crear itinerario" mandaba el itinerario con
-      // ESTE paso todavía sin empujar a itSteps: el paso desaparecía en
-      // silencio, sin error, exactamente el bug reportado en vivo (2 pasos
-      // agregados, 1 solo guardado).
-      const submitBtn = document.getElementById('itinerary-submit');
-      if (submitBtn) submitBtn.disabled = true;
-      try {
-        const freq = await resolveStepFrequency(sel.value);
-        if (!freq) return;
-        const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
-        const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
-        itSteps.push({
-          frequency_id: freq.id,
-          name: freq.name || 'Frecuencia',
-          duration,
-          time_of_day,
-          notification_enabled: notifyEl ? notifyEl.checked : true,
-        });
-        renderItSteps();
-        if (timeEl) timeEl.value = '';
-        if (notifyEl) notifyEl.checked = true;
-        toggleStepNotifyWrap();
-      } catch (err) {
-        alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
-      } finally {
-        add.disabled = false;
-        if (submitBtn) submitBtn.disabled = false;
-      }
-    });
+    add.addEventListener('click', addPendingStep);
   }
 
   document.addEventListener('click', (e) => {
@@ -961,6 +986,7 @@ function wireItineraryForm() {
     if (notifyEl) notifyEl.checked = step.notification_enabled !== false;
     toggleStepNotifyWrap();
     itSteps.splice(i, 1);
+    pendingStepEdit = true;
     renderItSteps();
     if (timeEl) timeEl.focus();
   });
@@ -977,15 +1003,28 @@ function wireItineraryForm() {
   if (itForm) {
     itForm.addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      const name = document.getElementById('itinerary-name').value.trim();
+      const dayEl = document.getElementById('itinerary-day');
+      const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
+      // El nombre es opcional: lo importante es el día. Sin nombre propio,
+      // usamos el nombre del día ("Lunes") — o "Itinerario" para una
+      // secuencia suelta sin día — en vez de bloquear el guardado.
+      const typedName = document.getElementById('itinerary-name').value.trim();
+      const dayName = day_of_week != null ? DAY_NAMES[day_of_week] : null;
+      const name = typedName || (dayName ? dayName[0].toUpperCase() + dayName.slice(1) : 'Itinerario');
       const desc = document.getElementById('itinerary-desc').value.trim() || undefined;
-      if (!name) return;
       let tz = 'UTC';
       try {
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       } catch (_) { /* default */ }
-      const dayEl = document.getElementById('itinerary-day');
-      const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
+      // Si queda un paso sin agregar (uno editado con ✎ que no se repuso, o
+      // uno nuevo con horario cargado pero sin tocar "＋ Añadir paso"), lo
+      // sumamos acá antes de guardar — si no, se pierde en silencio. Si no
+      // se puede resolver (p. ej. le falta el horario ahora obligatorio),
+      // no seguimos con el guardado: mejor eso que perder el paso.
+      if (pendingStepEdit || timeEl.value) {
+        const added = await addPendingStep();
+        if (!added) return;
+      }
       const items = itSteps.map((s, i) => ({
         frequency_id: s.frequency_id,
         position: i,
@@ -1215,6 +1254,22 @@ itListEl.addEventListener('click', async (e) => {
   if (editBtn) {
     const it = currentIts.find((x) => x.id === editBtn.dataset.edit);
     if (it) startEditItinerary(it);
+    return;
+  }
+  const delBtn = e.target.closest('[data-del-it]');
+  if (delBtn) {
+    const it = currentIts.find((x) => x.id === delBtn.dataset.delIt);
+    const label = it && it.name ? `"${it.name}"` : 'este itinerario';
+    if (!confirm(`¿Eliminar ${label}? Esta acción no se puede deshacer.`)) return;
+    delBtn.disabled = true;
+    try {
+      await deleteItinerary(delBtn.dataset.delIt);
+      notifyNativeAlarmsChanged();
+      loadItineraries();
+    } catch (err) {
+      alert(`No se pudo eliminar: ${(err && err.detail) || 'error'}`);
+      delBtn.disabled = false;
+    }
     return;
   }
   const addDayBtn = e.target.closest('[data-add-day]');

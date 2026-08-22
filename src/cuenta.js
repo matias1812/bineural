@@ -717,16 +717,27 @@ function wireForms() {
   if (itForm) {
     itForm.addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      const name = $('itinerary-name').value.trim();
+      const dayEl = $('itinerary-day');
+      const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
+      // El nombre es opcional: lo importante es el día. Sin nombre propio,
+      // usamos el nombre del día ("Lunes") — o "Itinerario" para una
+      // secuencia suelta sin día — en vez de bloquear el guardado.
+      const typedName = $('itinerary-name').value.trim();
+      const dayName = day_of_week != null ? DAY_NAMES[day_of_week] : null;
+      const name = typedName || (dayName ? dayName[0].toUpperCase() + dayName.slice(1) : 'Itinerario');
       const desc = $('itinerary-desc').value.trim() || undefined;
-      if (!name) return;
       let tz = 'UTC';
       try {
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       } catch (_) { /* default */ }
       try {
-        const dayEl = $('itinerary-day');
-        const day_of_week = dayEl && dayEl.value !== '' ? Number(dayEl.value) : undefined;
+        // Un horario cargado en el sub-formulario sin tocar "＋ Añadir paso"
+        // no debe perderse en silencio al guardar.
+        const timeEl = $('it-step-time');
+        if (timeEl && timeEl.value) {
+          const added = await addPendingStep();
+          if (!added) return;
+        }
         const items = itSteps.map((s, i) => ({
           frequency_id: s.frequency_id,
           position: i,
@@ -1069,43 +1080,58 @@ function wireItCustomPanel() {
   }
 }
 
+// Empuja el paso configurado en el sub-formulario a itSteps. Usada por
+// "＋ Añadir paso" y, si quedó un horario cargado sin tocar ese botón, por
+// el submit del itinerario (ver wireForms) — así un horario tipeado no se
+// pierde en silencio solo por olvidarse del click intermedio.
+async function addPendingStep() {
+  const add = $('it-step-add');
+  const sel = $('it-step-freq');
+  const dur = $('it-step-duration');
+  const timeEl = $('it-step-time');
+  const notifyEl = $('it-step-notify');
+  if (!sel || !sel.value) return false;
+  if (!timeEl || !timeEl.value) {
+    alert('Elegí un horario para este paso.');
+    if (timeEl) timeEl.focus();
+    return false;
+  }
+  if (add) add.disabled = true;
+  try {
+    const freq = await resolveStepFrequency(sel.value);
+    if (!freq) return false;
+    const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
+    const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
+    itSteps.push({
+      frequency_id: freq.id,
+      name: freq.name || 'Frecuencia',
+      duration,
+      time_of_day,
+      notification_enabled: notifyEl ? notifyEl.checked : true,
+    });
+    renderItSteps();
+    // Limpiar el sub-formulario de horario para el próximo paso (la
+    // frecuencia/duración se dejan como estaban: es común encadenar pasos
+    // parecidos, pero el horario es específico de cada uno).
+    if (timeEl) timeEl.value = '';
+    if (notifyEl) notifyEl.checked = true;
+    toggleStepNotifyWrap();
+    return true;
+  } catch (err) {
+    alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
+    return false;
+  } finally {
+    if (add) add.disabled = false;
+  }
+}
+
 function wireItinerarySteps() {
   const add = $('it-step-add');
   const timeEl = $('it-step-time');
   if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
   wireItCustomPanel();
   if (!add) return;
-  add.addEventListener('click', async () => {
-    const sel = $('it-step-freq');
-    const dur = $('it-step-duration');
-    const notifyEl = $('it-step-notify');
-    if (!sel.value) return;
-    add.disabled = true;
-    try {
-      const freq = await resolveStepFrequency(sel.value);
-      if (!freq) return;
-      const duration = Math.max(1, Math.min(1440, parseInt(dur.value, 10) || 10));
-      const time_of_day = timeEl && timeEl.value ? timeEl.value : null;
-      itSteps.push({
-        frequency_id: freq.id,
-        name: freq.name || 'Frecuencia',
-        duration,
-        time_of_day,
-        notification_enabled: notifyEl ? notifyEl.checked : true,
-      });
-      renderItSteps();
-      // Limpiar el sub-formulario de horario para el próximo paso (la
-      // frecuencia/duración se dejan como estaban: es común encadenar pasos
-      // parecidos, pero el horario es específico de cada uno).
-      if (timeEl) timeEl.value = '';
-      if (notifyEl) notifyEl.checked = true;
-      toggleStepNotifyWrap();
-    } catch (err) {
-      alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
-    } finally {
-      add.disabled = false;
-    }
-  });
+  add.addEventListener('click', addPendingStep);
 }
 
 // ── Cambio de contraseña ───────────────────────────────────────────────────
