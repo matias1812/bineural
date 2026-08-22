@@ -960,7 +960,7 @@ function updateItCustomLabels() {
   const beat = $('it-custom-beat');
   const baseLabel = $('it-custom-base-label');
   const beatLabel = $('it-custom-beat-label');
-  if (base && baseLabel) baseLabel.textContent = `Portadora: ${base.value} Hz`;
+  if (base && baseLabel) baseLabel.textContent = `Portada: ${base.value} Hz`;
   if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
 }
 
