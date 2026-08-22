@@ -49,10 +49,10 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/rutina-C678yMYX.js"></script>
-    <link rel="modulepreload" href="./assets/site-DOeasVFt.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DOIGVMNY.js">
-    <link rel="modulepreload" href="./assets/alarms-l-HP6X4c.js">
+    <script type="module" src="./assets/rutina-DZbQQbh-.js"></script>
+    <link rel="modulepreload" href="./assets/site-Bet9NHpA.js">
+    <link rel="modulepreload" href="./assets/freq-cover-BKR2wuH3.js">
+    <link rel="modulepreload" href="./assets/alarms-Dhg6HRJJ.js">
     <link rel="modulepreload" href="./assets/alarm-manager-7cj_m7SA.js">
     <link rel="modulepreload" href="./assets/notifications-BQ-VXTgV.js">
     <link rel="modulepreload" href="./assets/native-bridge-BVY3Ub9D.js">
@@ -238,13 +238,7 @@
         </div>
         <form id="itinerary-form" class="cuenta-form">
           <input type="hidden" id="itinerary-edit-id" value="" />
-          <label>Nombre
-            <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día" required />
-          </label>
-          <label>Descripción <em>(opcional)</em>
-            <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
-          </label>
-          <label>Día de la semana <em>(opcional)</em>
+          <label>Día de la semana
             <select id="itinerary-day">
               <option value="">Sin día fijo (secuencia suelta)</option>
               <option value="1">Lunes</option>
@@ -260,6 +254,12 @@
             Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
             con su horario). No podés repetir el mismo día en dos itinerarios.
           </p>
+          <label>Nombre <em>(opcional)</em>
+            <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día — si lo dejás vacío, usamos el día" />
+          </label>
+          <label>Descripción <em>(opcional)</em>
+            <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
+          </label>
           <fieldset class="cuenta-steps">
             <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
             <div class="cuenta-form-row">
@@ -278,9 +278,6 @@
               <span class="ctrl-label"><span>Portadora <em>este paso se afina a esta familia</em></span></span>
               <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora de afinación"></div>
               <span class="ctrl-label"><span id="it-custom-base-label">Portada: 220 Hz</span></span>
-              <label class="slider-row hidden" id="it-custom-base-row">
-                <input id="it-custom-base" type="range" min="0" max="1000" step="1" value="347" />
-              </label>
               <label class="slider-row">
                 <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
                 <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
@@ -301,7 +298,7 @@
               </div>
             </div>
 
-            <label>Horario <em>(opcional)</em>
+            <label>Horario
               <input id="it-step-time" type="time" />
             </label>
             <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
@@ -309,9 +306,9 @@
               🔔 Avisarme con notificación a esa hora
             </label>
             <p class="cuenta-empty" id="it-step-time-hint">
-              Con horario, este paso te manda un recordatorio a esa hora (desmarcá el aviso de
-              arriba si preferís que quede solo agendado, sin notificación). Se repite cada
-              semana en el día del itinerario; si el itinerario no tiene día, es de una sola vez.
+              Todo paso necesita un horario (desmarcá el aviso de arriba si preferís que quede
+              solo agendado, sin notificación). Se repite cada semana en el día del itinerario;
+              si el itinerario no tiene día, es de una sola vez.
             </p>
             <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
             <ul class="cuenta-list" id="it-steps"></ul>
@@ -377,6 +374,6 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
   </body>
 </html>
