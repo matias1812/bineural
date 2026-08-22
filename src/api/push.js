@@ -80,7 +80,14 @@ export async function subscribeToPush() {
     setCachedPushStatus({ ...status, subscription_count: 1 });
     return { configured: true, subscribed: true };
   } catch (err) {
-    return { configured: true, subscribed: false, reason: String(err && err.message || err) };
+    const message = String((err && err.message) || err);
+    // Chromium tira este mensaje genérico cuando el registro contra el
+    // servicio push de Google (FCM) es rechazado por el propio navegador —
+    // el caso típico es Brave, que por privacidad desactiva "servicios de
+    // Google para mensajería push" salvo que el usuario lo habilite a mano.
+    // Es un bloqueo del navegador, no un error nuestro ni del backend.
+    const reason = /push service error/i.test(message) ? 'browser-blocked-push-service' : message;
+    return { configured: true, subscribed: false, reason };
   }
 }
 

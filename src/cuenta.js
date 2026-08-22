@@ -30,6 +30,9 @@ import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 const $ = (id) => document.getElementById(id);
 
 let pushState = { supported: false, configured: false, public_key: null };
+// Motivo del último intento fallido de suscripción, para que renderPush()
+// lo muestre en vez del mensaje genérico de "Inactivo" (ver wirePushButtons).
+let lastPushError = null;
 let savedFreqs = []; // frecuencias guardadas, para armar pasos de itinerario
 let currentAlarms = []; // alarmas, para la vista de horario del itinerario
 let itSteps = []; // pasos del itinerario en construcción
@@ -522,8 +525,18 @@ function renderPush() {
     return;
   }
   setPushStatus('Inactivo', 'rs-warn');
-  text.textContent =
-    'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
+  if (lastPushError === 'browser-blocked-push-service') {
+    // Brave (y otros navegadores centrados en privacidad) rechazan el
+    // registro de push contra los servidores de Google salvo que el usuario
+    // lo habilite a mano — no hay forma de detectarlo de antemano ni de
+    // abrir esa pantalla de ajustes desde la web, solo explicarlo.
+    text.textContent =
+      'Tu navegador bloqueó el registro de notificaciones push (común en Brave y otros navegadores de privacidad). En Brave: Configuración → Privacidad y seguridad → activá "Usar servicios de Google para mensajería push", reiniciá el navegador y volvé a intentar.';
+  } else {
+    text.textContent = lastPushError
+      ? `No se pudieron activar: ${lastPushError}.`
+      : 'El servidor está listo (VAPID). Activá las notificaciones para recibir avisos de tus recordatorios.';
+  }
   if (sub) sub.disabled = false;
   if (unsub) unsub.disabled = true;
 }
@@ -754,11 +767,11 @@ function wirePushButtons() {
         return;
       }
       const r = await subscribeToPush();
-      const text = $('cuenta-push-text');
       if (r.subscribed) {
         deviceSubscribed = true;
-      } else if (text) {
-        text.textContent = `No se pudieron activar: ${r.reason || 'desconocido'}.`;
+        lastPushError = null;
+      } else {
+        lastPushError = r.reason || 'desconocido';
       }
       renderPush();
     });
@@ -885,7 +898,7 @@ function toggleStepNotifyWrap() {
 }
 
 // ── Panel "Personalizar" de un paso: mismos ajustes que el generador ───────
-// (portadora/ritmo con sliders + forma de onda), en vez del modal simple.
+// (portadora fija + ritmo con slider + forma de onda), en vez del modal simple.
 // Guarda una Frequency nueva (igual que el modal) y la deja seleccionada.
 const IT_CUSTOM_WAVES = [
   { id: 'sine', label: 'Senoidal' },
@@ -907,6 +920,8 @@ const IT_CUSTOM_CARRIERS = [
   { hz: 136.1, label: '136.1 Hz · Ancestral' },
   { hz: 194.7, label: '194.7 Hz · Schumann' },
 ];
+// Ya no hay slider: la portada se elige entre estas familias fijas.
+let itCustomCarrierHz = 220;
 
 // Mismas 5 condiciones que "Condición experimental" en el generador — el
 // modelo Frequency.condition ya soporta esto, solo faltaba elegirlo acá.
@@ -937,8 +952,14 @@ function populateItCustomCarrierOptions() {
   const wrap = $('it-custom-carrier-options');
   if (!wrap) return;
   wrap.innerHTML = IT_CUSTOM_CARRIERS.map(
-    (c) => `<button type="button" class="wave-btn" data-hz="${c.hz}">${escapeHtml(c.label)}</button>`,
+    (c) => `<button type="button" class="wave-btn${c.hz === itCustomCarrierHz ? ' active' : ''}" data-hz="${c.hz}">${escapeHtml(c.label)}</button>`,
   ).join('');
+}
+
+function syncItCustomCarrierButtons() {
+  document.querySelectorAll('#it-custom-carrier-options .wave-btn').forEach((btn) => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.hz) === itCustomCarrierHz);
+  });
 }
 
 function populateItCustomCondOptions() {
@@ -956,11 +977,10 @@ function syncItCustomCondButtons() {
 }
 
 function updateItCustomLabels() {
-  const base = $('it-custom-base');
   const beat = $('it-custom-beat');
   const baseLabel = $('it-custom-base-label');
   const beatLabel = $('it-custom-beat-label');
-  if (base && baseLabel) baseLabel.textContent = `Portada: ${base.value} Hz`;
+  if (baseLabel) baseLabel.textContent = `Portada: ${itCustomCarrierHz} Hz`;
   if (beat && beatLabel) beatLabel.textContent = `Ritmo binaural: ${beat.value} Hz`;
 }
 
@@ -979,9 +999,7 @@ function wireItCustomPanel() {
   populateItCustomWaveOptions();
   populateItCustomCarrierOptions();
   populateItCustomCondOptions();
-  const baseEl = $('it-custom-base');
   const beatEl = $('it-custom-beat');
-  if (baseEl) baseEl.addEventListener('input', updateItCustomLabels);
   if (beatEl) beatEl.addEventListener('input', updateItCustomLabels);
   const waveWrap = $('it-custom-wave-options');
   if (waveWrap) {
@@ -994,12 +1012,11 @@ function wireItCustomPanel() {
   }
   const carrierWrap = $('it-custom-carrier-options');
   if (carrierWrap) {
-    // Atajo, no un toggle: pone el slider en ese valor y lo dejás ajustar
-    // desde ahí (por eso no queda "active" ninguno de estos botones).
     carrierWrap.addEventListener('click', (e) => {
       const btn = e.target.closest('.wave-btn');
-      if (!btn || !baseEl) return;
-      baseEl.value = btn.dataset.hz;
+      if (!btn) return;
+      itCustomCarrierHz = parseFloat(btn.dataset.hz);
+      syncItCustomCarrierButtons();
       updateItCustomLabels();
     });
   }
@@ -1025,7 +1042,7 @@ function wireItCustomPanel() {
       saveBtn.disabled = true;
       setItCustomNote('Guardando…');
       try {
-        const carrier = (baseEl && parseFloat(baseEl.value)) || 220;
+        const carrier = itCustomCarrierHz || 220;
         const beat = (beatEl && parseFloat(beatEl.value)) || 10;
         const name = (nameEl && nameEl.value.trim()) || 'Personalizada';
         const frequency = await createFrequency({
